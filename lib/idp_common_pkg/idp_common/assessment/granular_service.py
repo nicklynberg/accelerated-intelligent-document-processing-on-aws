@@ -2,27 +2,26 @@
 # SPDX-License-Identifier: MIT-0
 
 """
-Granular assessment service for evaluating document extraction confidence using LLMs.
+Granular assessment service for evaluating document extraction confidence using Strands agents.
 
-This module provides a more scalable approach to assessment by:
-1. Breaking down assessments into smaller, focused inferences
-2. Leveraging prompt caching to reduce costs
-3. Using multi-threading for parallel processing
-4. Adapting batch sizes based on attribute complexity
+This module provides a scalable approach to assessment by:
+1. Breaking down assessments into single-field focused tasks
+2. Leveraging Strands agents with tool-based interaction
+3. Using parallel async execution for performance
+4. Maintaining assessment structure that mirrors extraction results
 """
 
 import json
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-from idp_common import bedrock, image, metrics, s3, utils
+from idp_common import image, metrics, s3, utils
+from idp_common.assessment.strands_executor import execute_assessment_tasks_parallel
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
-    SCHEMA_DESCRIPTION,
     SCHEMA_ITEMS,
     SCHEMA_PROPERTIES,
     SCHEMA_TYPE,
@@ -30,24 +29,35 @@ from idp_common.config.schema_constants import (
     TYPE_OBJECT,
     X_AWS_IDP_CONFIDENCE_THRESHOLD,
     X_AWS_IDP_DOCUMENT_TYPE,
-    X_AWS_IDP_LIST_ITEM_DESCRIPTION,
 )
 from idp_common.models import Document, Status
-from idp_common.utils import check_token_limit, extract_json_from_text
+from idp_common.utils import check_token_limit, grid_overlay
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class AssessmentTask:
-    """Represents a single assessment task to be processed."""
+    """Single-field assessment task for Strands executor."""
 
     task_id: str
-    task_type: str  # 'simple_batch', 'group', 'list_item'
-    attributes: List[str]  # Attribute names to assess
-    extraction_data: Dict[str, Any]  # Relevant extraction data
-    confidence_thresholds: Dict[str, float]  # Attribute -> threshold mapping
-    list_item_index: Optional[int] = None  # For list items
+    task_type: str  # Always "attribute" - single field assessment
+
+    # Path to field as tuple: ("address", "street") or ("items", 0, "price")
+    field_path: Tuple[Union[str, int], ...]
+
+    # The field name being assessed (last element of path)
+    field_name: str
+
+    # Schema for this specific field only
+    field_schema: Dict[str, Any]
+
+    # Confidence threshold for this field
+    confidence_threshold: float
+
+    # Direct reference to parent container in assessment structure (for O(1) insertion)
+    # Can be Dict for regular fields or List for array items
+    parent_assessment_dict: Union[Dict[str, Any], List[Any]]
 
 
 @dataclass
@@ -102,6 +112,42 @@ def _safe_float_conversion(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _get_value_at_path(data: Dict[str, Any], path: Tuple[Union[str, int], ...]) -> Any:
+    """
+    Navigate nested data structure using tuple path.
+
+    Args:
+        data: Nested dictionary/list structure
+        path: Tuple of keys/indices like ("address", "street") or ("items", 0, "price")
+
+    Returns:
+        Value at the specified path, or None if path doesn't exist
+
+    Examples:
+        >>> data = {"address": {"street": "123 Main St"}}
+        >>> _get_value_at_path(data, ("address", "street"))
+        "123 Main St"
+
+        >>> data = {"items": [{"price": 10.99}, {"price": 20.99}]}
+        >>> _get_value_at_path(data, ("items", 0, "price"))
+        10.99
+    """
+    current = data
+    for key in path:
+        if current is None:
+            return None
+        if isinstance(current, dict):
+            current = current.get(key)
+        elif isinstance(current, list):
+            if isinstance(key, int) and 0 <= key < len(current):
+                current = current[key]
+            else:
+                return None
+        else:
+            return None
+    return current
+
+
 class GranularAssessmentService:
     """Enhanced assessment service with granular, cached, and parallel processing."""
 
@@ -130,18 +176,13 @@ class GranularAssessmentService:
         self.config = config_model
         self.region = region or os.environ.get("AWS_REGION")
 
-        # Granular processing configuration (type-safe access, Pydantic handles conversions)
-        self.max_workers = self.config.assessment.granular.max_workers
-        self.simple_batch_size = self.config.assessment.granular.simple_batch_size
-        self.list_batch_size = self.config.assessment.granular.list_batch_size
+        # Assessment configuration (granular is now always enabled)
+        self.max_workers = self.config.assessment.max_workers
 
-        # Ensure safe minimum values
+        # Ensure safe minimum value
         self.max_workers = max(1, self.max_workers)
-        self.simple_batch_size = max(1, self.simple_batch_size)
-        self.list_batch_size = max(1, self.list_batch_size)
 
-        # Auto-determine caching and parallel processing
-        # Caching is automatically handled by the bedrock client based on model support
+        # Auto-determine parallel processing
         # Parallel processing is enabled when max_workers > 1
         self.enable_parallel = self.max_workers > 1
 
@@ -172,9 +213,7 @@ class GranularAssessmentService:
         model_id = self.config.assessment.model
         logger.info(f"Initialized granular assessment service with model {model_id}")
         logger.info(
-            f"Granular config: max_workers={self.max_workers}, "
-            f"simple_batch_size={self.simple_batch_size}, "
-            f"list_batch_size={self.list_batch_size}, "
+            f"Assessment config: max_workers={self.max_workers}, "
             f"parallel={self.enable_parallel}, "
             f"caching={'enabled' if self.cache_table else 'disabled'}"
         )
@@ -195,81 +234,6 @@ class GranularAssessmentService:
             if schema.get(X_AWS_IDP_DOCUMENT_TYPE, "").lower() == class_label.lower():
                 return schema
         return {}
-
-    def _walk_properties_for_assessment(
-        self, properties: Dict[str, Any], parent_path: str = ""
-    ) -> Generator[Dict[str, Any], None, None]:
-        """
-        Walk JSON Schema properties and yield assessment property information.
-        Generator pattern for efficient schema traversal.
-
-        Args:
-            properties: JSON Schema properties dict
-            parent_path: Parent path for nested properties (e.g., "CompanyAddress")
-
-        Yields:
-            Dict containing property information:
-            {
-                'path': 'CompanyAddress.Street',  # Full path
-                'name': 'Street',  # Property name
-                'parent_path': 'CompanyAddress',  # Parent path (empty string for top-level)
-                'type': 'string',  # JSON Schema type
-                'description': 'Street address',
-                'confidence_threshold': 0.9,  # From x-aws-idp-confidence-threshold
-                'prop_schema': {...}  # Full property schema for reference
-            }
-        """
-        for prop_name, prop_schema in properties.items():
-            prop_type = prop_schema.get(SCHEMA_TYPE)
-            full_path = f"{parent_path}.{prop_name}" if parent_path else prop_name
-
-            # Get confidence threshold for this property
-            threshold = prop_schema.get(X_AWS_IDP_CONFIDENCE_THRESHOLD)
-
-            if prop_type == TYPE_OBJECT:
-                # Yield info for the group itself
-                yield {
-                    "path": full_path,
-                    "name": prop_name,
-                    "parent_path": parent_path,
-                    "type": TYPE_OBJECT,
-                    "description": prop_schema.get(SCHEMA_DESCRIPTION, ""),
-                    "confidence_threshold": threshold,
-                    "prop_schema": prop_schema,
-                }
-                # Recurse into nested object properties
-                yield from self._walk_properties_for_assessment(
-                    prop_schema.get(SCHEMA_PROPERTIES, {}), full_path
-                )
-
-            elif prop_type == TYPE_ARRAY:
-                # Yield info for the list itself
-                yield {
-                    "path": full_path,
-                    "name": prop_name,
-                    "parent_path": parent_path,
-                    "type": TYPE_ARRAY,
-                    "description": prop_schema.get(SCHEMA_DESCRIPTION, ""),
-                    "confidence_threshold": threshold,
-                    "list_item_description": prop_schema.get(
-                        X_AWS_IDP_LIST_ITEM_DESCRIPTION, ""
-                    ),
-                    "prop_schema": prop_schema,
-                }
-                # Note: We don't recurse into array items here because list items
-                # are handled specially in task creation (one task per item)
-
-            else:
-                # Leaf property (simple type: string, number, boolean, etc.)
-                yield {
-                    "path": full_path,
-                    "name": prop_name,
-                    "parent_path": parent_path,
-                    "type": prop_type or "string",
-                    "description": prop_schema.get(SCHEMA_DESCRIPTION, ""),
-                    "confidence_threshold": threshold,
-                    "prop_schema": prop_schema,
-                }
 
     def _get_confidence_threshold_by_path(
         self, properties: Dict[str, Any], path: str, default: float = 0.9
@@ -315,294 +279,19 @@ class GranularAssessmentService:
 
         return default
 
-    def _format_property_descriptions(
-        self, properties: Dict[str, Any], filter_names: Optional[List[str]] = None
-    ) -> str:
-        """
-        Format property descriptions from JSON Schema properties for the prompt.
-        Can optionally filter to specific property names.
-
-        Args:
-            properties: JSON Schema properties dict
-            filter_names: Optional list of property names to include (None = all)
-
-        Returns:
-            Formatted property descriptions as a string
-        """
-        formatted_lines = []
-
-        for prop_name, prop_schema in properties.items():
-            # Skip if filtering and this property is not in the filter list
-            if filter_names is not None and prop_name not in filter_names:
-                continue
-
-            prop_type = prop_schema.get(SCHEMA_TYPE)
-            description = prop_schema.get(SCHEMA_DESCRIPTION, "")
-
-            if prop_type == TYPE_OBJECT:
-                formatted_lines.append(f"{prop_name}  \t[ {description} ]")
-                nested_props = prop_schema.get(SCHEMA_PROPERTIES, {})
-                for nested_name, nested_schema in nested_props.items():
-                    nested_desc = nested_schema.get(SCHEMA_DESCRIPTION, "")
-                    formatted_lines.append(f"  - {nested_name}  \t[ {nested_desc} ]")
-
-            elif prop_type == TYPE_ARRAY:
-                formatted_lines.append(f"{prop_name}  \t[ {description} ]")
-                items_schema = prop_schema.get(SCHEMA_ITEMS, {})
-
-                item_desc = prop_schema.get(X_AWS_IDP_LIST_ITEM_DESCRIPTION, "")
-                if item_desc:
-                    formatted_lines.append(f"  Each item: {item_desc}")
-
-                if items_schema.get(SCHEMA_TYPE) == TYPE_OBJECT:
-                    item_props = items_schema.get(SCHEMA_PROPERTIES, {})
-                    for item_name, item_schema in item_props.items():
-                        item_prop_desc = item_schema.get(SCHEMA_DESCRIPTION, "")
-                        formatted_lines.append(
-                            f"  - {item_name}  \t[ {item_prop_desc} ]"
-                        )
-            else:
-                formatted_lines.append(f"{prop_name}  \t[ {description} ]")
-
-        return "\n".join(formatted_lines)
-
-    def _get_attribute_confidence_threshold(
-        self, attr_name: str, attributes: List[Dict[str, Any]], default_threshold: float
-    ) -> float:
-        """
-        Get confidence threshold (legacy format, for internal granular service use).
-
-        Args:
-            attr_name: Name of the attribute
-            attributes: List of attribute dicts in legacy format
-            default_threshold: Default threshold if not found
-
-        Returns:
-            Confidence threshold for the attribute
-        """
-        for attr in attributes:
-            if attr.get("name") == attr_name:
-                return _safe_float_conversion(
-                    attr.get("confidence_threshold", default_threshold),
-                    default_threshold,
-                )
-
-            if attr.get("attributeType") == "group":
-                group_attributes = attr.get("groupAttributes", [])
-                for group_attr in group_attributes:
-                    if group_attr.get("name") == attr_name:
-                        return _safe_float_conversion(
-                            group_attr.get("confidence_threshold", default_threshold),
-                            default_threshold,
-                        )
-
-            if attr.get("attributeType") == "list":
-                list_template = attr.get("listItemTemplate", {})
-                item_attributes = list_template.get("itemAttributes", [])
-                for item_attr in item_attributes:
-                    if item_attr.get("name") == attr_name:
-                        return _safe_float_conversion(
-                            item_attr.get("confidence_threshold", default_threshold),
-                            default_threshold,
-                        )
-
-        return default_threshold
-
-    def _build_cached_prompt_base(
-        self,
-        document_text: str,
-        class_label: str,
-        attribute_descriptions: str,
-        ocr_text_confidence: str,
-        page_images: List[Any],
-    ) -> List[Dict[str, Any]]:
-        """
-        Build the cacheable base portion of the assessment prompt using the configured task_prompt template.
-        This will be the same for all tasks and can be cached.
-
-        Args:
-            document_text: The document text content
-            class_label: The document class label
-            attribute_descriptions: Formatted attribute names and descriptions (will be replaced per task)
-            ocr_text_confidence: Raw OCR results with confidence scores
-            page_images: List of page images
-
-        Returns:
-            List of content items for the cacheable portion
-        """
-        # Get the base task prompt template (type-safe access)
-        task_prompt_template = self.config.assessment.task_prompt
-
-        if not task_prompt_template:
-            raise ValueError(
-                "Assessment task_prompt is required in configuration but not found"
-            )
-
-        # For granular assessment, we need to build the base content that will be cached
-        # and leave placeholders for task-specific content
-
-        # Replace common placeholders but leave task-specific ones
-        base_substitutions = {
-            "DOCUMENT_TEXT": document_text,
-            "DOCUMENT_CLASS": class_label,
-            "OCR_TEXT_CONFIDENCE": ocr_text_confidence,
-        }
-
-        # Replace placeholders in the template
-        base_prompt = task_prompt_template
-        for placeholder, value in base_substitutions.items():
-            base_prompt = base_prompt.replace(f"{{{placeholder}}}", value)
-
-        # Handle {DOCUMENT_IMAGE} placeholder if present
-        if "{DOCUMENT_IMAGE}" in base_prompt:
-            # Split the prompt at the DOCUMENT_IMAGE placeholder
-            parts = base_prompt.split("{DOCUMENT_IMAGE}")
-            if len(parts) != 2:
-                raise ValueError(
-                    f"Invalid DOCUMENT_IMAGE placeholder usage: found {len(parts) - 1} occurrences, "
-                    f"but exactly 1 is required."
-                )
-
-            content = []
-
-            # Add the part before the image
-            if parts[0].strip():
-                content.append({"text": parts[0]})
-
-            # Add the images if available
-            if page_images:
-                if isinstance(page_images, list):
-                    # Multiple images - no limit with latest Bedrock API
-                    logger.info(
-                        f"Attaching {len(page_images)} images to granular assessment prompt"
-                    )
-                    for img in page_images:
-                        content.append(image.prepare_bedrock_image_attachment(img))
-                else:
-                    # Single image
-                    content.append(image.prepare_bedrock_image_attachment(page_images))
-
-            # Add the part after the image
-            if parts[1].strip():
-                content.append({"text": parts[1]})
-
-        else:
-            # No DOCUMENT_IMAGE placeholder - just add the base prompt
-            content = []
-            if base_prompt.strip():
-                content.append({"text": base_prompt})
-
-        return content
-
-    def _get_task_specific_attribute_descriptions(
-        self, task: AssessmentTask, properties: Dict[str, Any]
-    ) -> str:
-        """
-        Get attribute descriptions specific to this task using JSON Schema properties.
-
-        Args:
-            task: The assessment task
-            properties: JSON Schema properties dict
-
-        Returns:
-            Formatted attribute descriptions for this specific task
-        """
-        if task.task_type == "simple_batch":
-            # For simple batches, filter to only the attributes in this batch
-            return self._format_property_descriptions(
-                properties, filter_names=task.attributes
-            )
-
-        elif task.task_type == "group":
-            # For groups, filter to just the group attribute (which includes nested props)
-            group_attr_name = task.attributes[0]
-            return self._format_property_descriptions(
-                properties, filter_names=[group_attr_name]
-            )
-
-        elif task.task_type == "list_item":
-            # For list items, show the item schema properties
-            list_attr_name = task.attributes[0]
-            if list_attr_name in properties:
-                list_prop_schema = properties[list_attr_name]
-                items_schema = list_prop_schema.get(SCHEMA_ITEMS, {})
-                if items_schema.get(SCHEMA_TYPE) == TYPE_OBJECT:
-                    item_properties = items_schema.get(SCHEMA_PROPERTIES, {})
-                    return self._format_property_descriptions(item_properties)
-            return ""
-
-        return ""
-
-    def _build_specific_assessment_prompt(
-        self,
-        task: AssessmentTask,
-        base_content: List[Dict[str, Any]],
-        properties: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
-        """
-        Build the specific assessment prompt for a task by replacing the {EXTRACTION_RESULTS} placeholder
-        in the base content with task-specific extraction data.
-
-        Args:
-            task: The assessment task
-            base_content: The cached base content (which has empty {EXTRACTION_RESULTS})
-            properties: JSON Schema properties dict for task-specific filtering
-
-        Returns:
-            Complete content list for the assessment
-        """
-        # Build extraction results for this specific task
-        task_extraction_data = {}
-        for attr_name in task.attributes:
-            if attr_name in task.extraction_data:
-                task_extraction_data[attr_name] = task.extraction_data[attr_name]
-
-        # For list items, we need to handle the data differently
-        if task.task_type == "list_item":
-            extraction_results_str = json.dumps(task.extraction_data, indent=2)
-            item_index = task.list_item_index if task.list_item_index is not None else 0
-            extraction_results_str = f"Item #{item_index + 1}: {extraction_results_str}"
-        else:
-            extraction_results_str = json.dumps(task_extraction_data, indent=2)
-
-        # Get task-specific attribute descriptions
-        task_specific_attributes = self._get_task_specific_attribute_descriptions(
-            task, properties
-        )
-
-        # Create a new content list by replacing placeholders in the base content
-        content = []
-        for item in base_content:
-            if "text" in item:
-                # Replace any remaining placeholders in the text
-                text = item["text"]
-
-                # Replace EXTRACTION_RESULTS placeholder with task-specific data
-                text = text.replace("{EXTRACTION_RESULTS}", extraction_results_str)
-
-                # Replace ATTRIBUTE_NAMES_AND_DESCRIPTIONS with task-specific attributes if needed
-                if "{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}" in text:
-                    text = text.replace(
-                        "{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}", task_specific_attributes
-                    )
-
-                # Only add non-empty text content (must have actual content, not just whitespace)
-                if text.strip():
-                    content.append({"text": text})
-            else:
-                # Non-text content (like images, cache points) - pass through unchanged
-                content.append(item)
-
-        return content
-
     def _create_assessment_tasks(
         self,
         extraction_results: Dict[str, Any],
         properties: Dict[str, Any],
         default_confidence_threshold: float,
-    ) -> List[AssessmentTask]:
+    ) -> Tuple[List[AssessmentTask], Dict[str, Any]]:
         """
-        Create assessment tasks based on JSON Schema property types and extraction results.
+        Create assessment tasks and pre-build assessment structure.
+
+        This function recursively traverses the schema and extraction results to:
+        1. Build an assessment structure that mirrors the extraction results
+        2. Create one task per leaf field (no batching - one field at a time)
+        3. Store direct parent dict references in tasks for O(1) insertion
 
         Args:
             extraction_results: The extraction results to assess
@@ -610,349 +299,119 @@ class GranularAssessmentService:
             default_confidence_threshold: Default confidence threshold
 
         Returns:
-            List of assessment tasks
+            Tuple of (tasks, assessment_structure)
+            - tasks: List of AssessmentTask objects
+            - assessment_structure: Dict mirroring extraction_results shape
         """
-        tasks = []
-        task_counter = 0
+        tasks: List[AssessmentTask] = []
+        assessment_structure: Dict[str, Any] = {}
+        task_counter = [0]  # Use list for mutable counter in nested function
 
-        # Group properties by type for efficient processing
-        simple_props = []
-        group_props = []
-        list_props = []
+        def _traverse(
+            schema_props: Dict[str, Any],
+            extraction_data: Dict[str, Any],
+            current_path: Tuple[Union[str, int], ...],
+            parent_dict: Dict[str, Any],
+        ) -> None:
+            """
+            Recursively traverse schema and extraction data to build tasks and structure.
 
-        for prop_name, prop_schema in properties.items():
-            if prop_name not in extraction_results:
-                continue  # Skip properties not in extraction results
+            Args:
+                schema_props: Current level schema properties
+                extraction_data: Current level extraction data
+                current_path: Tuple path to current location
+                parent_dict: Parent dict in assessment structure for insertion
+            """
+            for prop_name, prop_schema in schema_props.items():
+                if prop_name not in extraction_data:
+                    continue  # Skip properties not in extraction results
 
-            prop_type = prop_schema.get(SCHEMA_TYPE)
+                prop_type = prop_schema.get(SCHEMA_TYPE)
+                prop_value = extraction_data[prop_name]
+                field_path = current_path + (prop_name,)
 
-            if prop_type == TYPE_OBJECT:
-                group_props.append((prop_name, prop_schema))
-            elif prop_type == TYPE_ARRAY:
-                list_props.append((prop_name, prop_schema))
-            else:
-                # Simple types: string, number, boolean, etc.
-                simple_props.append((prop_name, prop_schema))
+                if prop_type == TYPE_OBJECT and isinstance(prop_value, dict):
+                    # Create nested dict in assessment structure
+                    nested_dict: Dict[str, Any] = {}
+                    parent_dict[prop_name] = nested_dict
 
-        # Create tasks for simple properties (batch them)
-        for i in range(0, len(simple_props), self.simple_batch_size):
-            batch = simple_props[i : i + self.simple_batch_size]
-            prop_names = [name for name, _ in batch]
+                    # Recurse into nested object
+                    nested_props = prop_schema.get(SCHEMA_PROPERTIES, {})
+                    _traverse(nested_props, prop_value, field_path, nested_dict)
 
-            # Build confidence thresholds for this batch
-            confidence_thresholds = {}
-            for prop_name, prop_schema in batch:
-                threshold = self._get_confidence_threshold_by_path(
-                    properties, prop_name, default_confidence_threshold
-                )
-                confidence_thresholds[prop_name] = threshold
+                elif prop_type == TYPE_ARRAY and isinstance(prop_value, list):
+                    # Create list in assessment structure
+                    assessment_list: List[Any] = []
+                    parent_dict[prop_name] = assessment_list
 
-            # Extract relevant data for this batch
-            batch_extraction_data = {
-                name: extraction_results[name]
-                for name in prop_names
-                if name in extraction_results
-            }
+                    # Process each array item
+                    items_schema = prop_schema.get(SCHEMA_ITEMS, {})
+                    item_type = items_schema.get(SCHEMA_TYPE)
 
-            task = AssessmentTask(
-                task_id=f"simple_batch_{task_counter}",
-                task_type="simple_batch",
-                attributes=prop_names,
-                extraction_data=batch_extraction_data,
-                confidence_thresholds=confidence_thresholds,
-            )
-            tasks.append(task)
-            task_counter += 1
+                    for idx, item_value in enumerate(prop_value):
+                        item_path = field_path + (idx,)
 
-        # Create tasks for group properties (one per group)
-        for prop_name, prop_schema in group_props:
-            # Build confidence thresholds for nested properties
-            confidence_thresholds = {}
-            nested_props = prop_schema.get(SCHEMA_PROPERTIES, {})
-            for nested_name in nested_props.keys():
-                nested_path = f"{prop_name}.{nested_name}"
-                threshold = self._get_confidence_threshold_by_path(
-                    properties, nested_path, default_confidence_threshold
-                )
-                confidence_thresholds[nested_name] = threshold
+                        if item_type == TYPE_OBJECT and isinstance(item_value, dict):
+                            # Create dict for this array item
+                            item_dict: Dict[str, Any] = {}
+                            assessment_list.append(item_dict)
 
-            task = AssessmentTask(
-                task_id=f"group_{task_counter}",
-                task_type="group",
-                attributes=[prop_name],
-                extraction_data={prop_name: extraction_results[prop_name]},
-                confidence_thresholds=confidence_thresholds,
-            )
-            tasks.append(task)
-            task_counter += 1
+                            # Recurse into array item properties
+                            item_props = items_schema.get(SCHEMA_PROPERTIES, {})
+                            _traverse(item_props, item_value, item_path, item_dict)
 
-        # Create tasks for list properties (one per list item)
-        for prop_name, prop_schema in list_props:
-            list_data = extraction_results.get(prop_name, [])
-
-            if not isinstance(list_data, list):
-                logger.warning(f"List property {prop_name} is not a list, skipping")
-                continue
-
-            # Build confidence thresholds for list item properties
-            confidence_thresholds = {}
-            items_schema = prop_schema.get(SCHEMA_ITEMS, {})
-            if items_schema.get(SCHEMA_TYPE) == TYPE_OBJECT:
-                item_props = items_schema.get(SCHEMA_PROPERTIES, {})
-                for item_prop_name in item_props.keys():
-                    # For list items, the path includes the list name
-                    item_path = f"{prop_name}.{item_prop_name}"
-                    threshold = self._get_confidence_threshold_by_path(
-                        properties, item_path, default_confidence_threshold
-                    )
-                    confidence_thresholds[item_prop_name] = threshold
-
-            # Create tasks for list items (batch them if configured)
-            for i in range(0, len(list_data), self.list_batch_size):
-                batch_end = min(i + self.list_batch_size, len(list_data))
-
-                for j in range(i, batch_end):
-                    item_data = list_data[j]
-
-                    task = AssessmentTask(
-                        task_id=f"list_{prop_name}_item_{j}",
-                        task_type="list_item",
-                        attributes=[prop_name],
-                        extraction_data=item_data,
-                        confidence_thresholds=confidence_thresholds,
-                        list_item_index=j,
-                    )
-                    tasks.append(task)
-                    task_counter += 1
-
-        logger.info(
-            f"Created {len(tasks)} assessment tasks: "
-            f"{len([t for t in tasks if t.task_type == 'simple_batch'])} simple batches, "
-            f"{len([t for t in tasks if t.task_type == 'group'])} groups, "
-            f"{len([t for t in tasks if t.task_type == 'list_item'])} list items"
-        )
-
-        return tasks
-
-    def _process_assessment_task(
-        self,
-        task: AssessmentTask,
-        base_content: List[Dict[str, Any]],
-        properties: Dict[str, Any],
-        model_id: str,
-        system_prompt: str,
-        temperature: float,
-        top_k: float,
-        top_p: float,
-        max_tokens: Optional[int],
-    ) -> AssessmentResult:
-        """
-        Process a single assessment task.
-
-        Args:
-            task: The assessment task to process
-            base_content: The cached base content
-            properties: JSON Schema properties dict
-            model_id: Bedrock model ID
-            system_prompt: System prompt
-            temperature: Temperature parameter
-            top_k: Top-k parameter
-            top_p: Top-p parameter
-            max_tokens: Max tokens parameter
-
-        Returns:
-            Assessment result
-        """
-        start_time = time.time()
-
-        try:
-            # Build the complete prompt
-            content = self._build_specific_assessment_prompt(
-                task, base_content, properties
-            )
-
-            logger.debug(
-                f"Processing assessment task {task.task_id} with {len(task.attributes)} attributes"
-            )
-
-            # Invoke Bedrock
-            response_with_metering = bedrock.invoke_model(
-                model_id=model_id,
-                system_prompt=system_prompt,
-                content=content,
-                temperature=temperature,
-                top_k=top_k,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                context="GranularAssessment",
-            )
-
-            # Extract text from response
-            assessment_text = bedrock.extract_text_from_response(response_with_metering)
-            metering = response_with_metering.get("metering", {})
-
-            # Parse response into JSON
-            assessment_data = {}
-            task_failed = False
-            error_messages = []
-            try:
-                assessment_data = json.loads(extract_json_from_text(assessment_text))
-            except Exception as e:
-                logger.error(
-                    f"Error parsing assessment LLM output for task {task.task_id}: {e}"
-                )
-                task_failed = True
-                error_messages.append(
-                    f"Error parsing assessment LLM output for task {task.task_id}"
-                )
-                # Create default assessments
-                for attr_name in task.attributes:
-                    if task.task_type == "list_item":
-                        # For list items, create assessments for each sub-attribute
-                        assessment_data = {}
-                        for (
-                            sub_attr_name,
-                            threshold,
-                        ) in task.confidence_thresholds.items():
-                            assessment_data[sub_attr_name] = {
-                                "confidence": 0.5,
-                                "confidence_reason": f"Unable to parse assessment response for {sub_attr_name} - default score assigned",
-                            }
-                    else:
-                        assessment_data[attr_name] = {
-                            "confidence": 0.5,
-                            "confidence_reason": f"Unable to parse assessment response for {attr_name} - default score assigned",
-                        }
-
-            # Process bounding boxes automatically if bbox data is present
-            try:
-                logger.debug(
-                    f"Checking for bounding box data in granular assessment task {task.task_id}"
-                )
-                assessment_data = self._extract_geometry_from_assessment(
-                    assessment_data
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to extract geometry data for task {task.task_id}: {str(e)}"
-                )
-                # Continue with assessment even if geometry extraction fails
-
-            # Check for confidence threshold alerts
-            confidence_alerts = []
-            self._check_confidence_alerts_for_task(
-                task, assessment_data, confidence_alerts
-            )
-
-            processing_time = time.time() - start_time
-            if task_failed:
-                return AssessmentResult(
-                    task_id=task.task_id,
-                    success=False,
-                    assessment_data=assessment_data,
-                    confidence_alerts=confidence_alerts,
-                    error_message=self._convert_error_list_to_string(error_messages),
-                    processing_time=processing_time,
-                )
-            else:
-                return AssessmentResult(
-                    task_id=task.task_id,
-                    success=True,
-                    assessment_data=assessment_data,
-                    confidence_alerts=confidence_alerts,
-                    processing_time=processing_time,
-                    metering=metering,
-                )
-
-        except Exception as e:
-            processing_time = time.time() - start_time
-            logger.error(f"Error processing assessment task {task.task_id}: {str(e)}")
-
-            return AssessmentResult(
-                task_id=task.task_id,
-                success=False,
-                assessment_data={},
-                confidence_alerts=[],
-                error_message=str(e),
-                processing_time=processing_time,
-            )
-
-    def _check_confidence_alerts_for_task(
-        self,
-        task: AssessmentTask,
-        assessment_data: Dict[str, Any],
-        alerts_list: List[Dict[str, Any]],
-    ) -> None:
-        """
-        Check assessment data for confidence threshold violations for a specific task.
-
-        Args:
-            task: The assessment task
-            assessment_data: Dictionary containing assessment data
-            alerts_list: List to append alerts to (modified in place)
-        """
-        if task.task_type == "simple_batch":
-            for attr_name in task.attributes:
-                if attr_name in assessment_data and isinstance(
-                    assessment_data[attr_name], dict
-                ):
-                    confidence = _safe_float_conversion(
-                        assessment_data[attr_name].get("confidence", 0.0), 0.0
-                    )
-                    threshold = task.confidence_thresholds.get(attr_name, 0.9)
-                    if confidence < threshold:
-                        alerts_list.append(
-                            {
-                                "attribute_name": attr_name,
-                                "confidence": confidence,
-                                "confidence_threshold": threshold,
-                            }
-                        )
-
-        elif task.task_type == "group":
-            attr_name = task.attributes[0]  # Group tasks have one attribute
-            if attr_name in assessment_data and isinstance(
-                assessment_data[attr_name], dict
-            ):
-                for sub_attr_name, sub_assessment in assessment_data[attr_name].items():
-                    if (
-                        isinstance(sub_assessment, dict)
-                        and "confidence" in sub_assessment
-                    ):
-                        confidence = _safe_float_conversion(
-                            sub_assessment.get("confidence", 0.0), 0.0
-                        )
-                        threshold = task.confidence_thresholds.get(sub_attr_name, 0.9)
-                        if confidence < threshold:
-                            alerts_list.append(
-                                {
-                                    "attribute_name": f"{attr_name}.{sub_attr_name}",
-                                    "confidence": confidence,
-                                    "confidence_threshold": threshold,
-                                }
+                        else:
+                            # Leaf field in array - create task
+                            threshold = self._get_confidence_threshold_by_path(
+                                properties,
+                                ".".join(str(p) for p in field_path),
+                                default_confidence_threshold,
                             )
 
-        elif task.task_type == "list_item":
-            attr_name = task.attributes[0]  # List item tasks have one attribute
-            item_index = task.list_item_index if task.list_item_index is not None else 0
+                            task = AssessmentTask(
+                                task_id=f"task_{task_counter[0]}",
+                                task_type="attribute",
+                                field_path=item_path,
+                                field_name=prop_name,
+                                field_schema=items_schema,
+                                confidence_threshold=threshold,
+                                parent_assessment_dict=assessment_list,  # type: ignore
+                            )
+                            tasks.append(task)
+                            task_counter[0] += 1
 
-            for item_attr_name, item_assessment in assessment_data.items():
-                if (
-                    isinstance(item_assessment, dict)
-                    and "confidence" in item_assessment
-                ):
-                    confidence = _safe_float_conversion(
-                        item_assessment.get("confidence", 0.0), 0.0
+                            # Pre-allocate slot in list (will be replaced by assessment obj)
+                            assessment_list.append(None)
+
+                else:
+                    # Leaf field - create task
+                    threshold = self._get_confidence_threshold_by_path(
+                        properties,
+                        ".".join(str(p) for p in field_path),
+                        default_confidence_threshold,
                     )
-                    threshold = task.confidence_thresholds.get(item_attr_name, 0.9)
-                    if confidence < threshold:
-                        alerts_list.append(
-                            {
-                                "attribute_name": f"{attr_name}[{item_index}].{item_attr_name}",
-                                "confidence": confidence,
-                                "confidence_threshold": threshold,
-                            }
-                        )
+
+                    task = AssessmentTask(
+                        task_id=f"task_{task_counter[0]}",
+                        task_type="attribute",
+                        field_path=field_path,
+                        field_name=prop_name,
+                        field_schema=prop_schema,
+                        confidence_threshold=threshold,
+                        parent_assessment_dict=parent_dict,
+                    )
+                    tasks.append(task)
+                    task_counter[0] += 1
+
+                    # Pre-allocate placeholder in dict (will be replaced by assessment obj)
+                    parent_dict[prop_name] = None
+
+        # Start recursive traversal from root
+        _traverse(properties, extraction_results, (), assessment_structure)
+
+        logger.info(f"Created {len(tasks)} assessment tasks (one per leaf field)")
+
+        return tasks, assessment_structure
 
     def _get_cache_key(
         self, document_id: str, workflow_execution_arn: str, section_id: str
@@ -1132,8 +591,8 @@ class GranularAssessmentService:
         Returns:
             True if exception indicates throttling, False otherwise
         """
-        if hasattr(exception, "response") and "Error" in exception.response:  # type: ignore[attr-defined]
-            error_code = exception.response["Error"]["Code"]  # type: ignore[attr-defined]
+        if hasattr(exception, "response") and "Error" in exception.response:  # pyright: ignore[reportAttributeAccessIssue]
+            error_code = exception.response["Error"]["Code"]  # pyright: ignore[reportAttributeAccessIssue]
             return error_code in self.throttling_exceptions
 
         # Check exception class name and message for throttling indicators
@@ -1149,34 +608,33 @@ class GranularAssessmentService:
         self,
         tasks: List[AssessmentTask],
         results: List[AssessmentResult],
-        extraction_results: Dict[str, Any],
+        assessment_structure: Dict[str, Any],
     ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Aggregate individual task results into the final assessment structure.
+        Aggregate individual task results into assessment structure using direct parent insertion.
 
         Args:
             tasks: List of assessment tasks
             results: List of assessment results
-            extraction_results: Original extraction results
+            assessment_structure: Pre-built assessment structure from _create_assessment_tasks
 
         Returns:
-            Tuple of (enhanced_assessment_data, confidence_alerts, aggregated_metering)
+            Tuple of (assessment_structure, confidence_alerts, aggregated_metering)
         """
-        enhanced_assessment_data = {}
         all_confidence_alerts = []
         aggregated_metering = {}
 
         # Create a mapping from task_id to result
         result_map = {result.task_id: result for result in results}
 
-        # Process results by task type
+        # Process each task result - direct O(1) insertion using parent reference
         for task in tasks:
             result = result_map.get(task.task_id)
             if not result or not result.success:
                 logger.warning(f"Task {task.task_id} failed or missing result")
                 continue
 
-            # Aggregate metering data using the same pattern as classification service
+            # Aggregate metering data
             if result.metering:
                 aggregated_metering = utils.merge_metering_data(
                     aggregated_metering, result.metering
@@ -1185,85 +643,48 @@ class GranularAssessmentService:
             # Add confidence alerts
             all_confidence_alerts.extend(result.confidence_alerts)
 
-            # Process assessment data based on task type
-            if task.task_type == "simple_batch":
-                for attr_name in task.attributes:
-                    if attr_name in result.assessment_data:
-                        # Add confidence threshold to the assessment
-                        assessment_value = result.assessment_data[attr_name]
-                        if isinstance(assessment_value, dict):
-                            assessment = assessment_value.copy()
-                            threshold = task.confidence_thresholds.get(attr_name, 0.9)
-                            assessment["confidence_threshold"] = threshold
-                            enhanced_assessment_data[attr_name] = assessment
-                        else:
-                            logger.warning(
-                                f"Unexpected assessment data type for {attr_name}: {type(assessment_value)}"
-                            )
+            # Get assessment data from result - should be a single assessment object
+            # The Strands agent returns the assessment in result.assessment_data
+            assessment_obj = result.assessment_data
 
-            elif task.task_type == "group":
-                attr_name = task.attributes[0]
-                if attr_name in result.assessment_data:
-                    assessment_value = result.assessment_data[attr_name]
-                    if isinstance(assessment_value, dict):
-                        group_assessment = {}
-                        for sub_attr_name, sub_assessment in assessment_value.items():
-                            if isinstance(sub_assessment, dict):
-                                enhanced_sub_assessment = sub_assessment.copy()
-                                threshold = task.confidence_thresholds.get(
-                                    sub_attr_name, 0.9
-                                )
-                                enhanced_sub_assessment["confidence_threshold"] = (
-                                    threshold
-                                )
-                                group_assessment[sub_attr_name] = (
-                                    enhanced_sub_assessment
-                                )
-                            else:
-                                logger.warning(
-                                    f"Unexpected sub-assessment data type for {attr_name}.{sub_attr_name}: {type(sub_assessment)}"
-                                )
-                                group_assessment[sub_attr_name] = sub_assessment
-                        enhanced_assessment_data[attr_name] = group_assessment
+            if not isinstance(assessment_obj, dict):
+                logger.warning(
+                    f"Task {task.task_id}: expected dict assessment, got {type(assessment_obj)}"
+                )
+                continue
+
+            # Add confidence_threshold to the assessment object
+            assessment_obj["confidence_threshold"] = task.confidence_threshold
+
+            # Direct insertion using parent reference - O(1) operation!
+            parent = task.parent_assessment_dict
+            field_name = task.field_name
+
+            if isinstance(parent, dict):
+                # Regular field - insert into parent dict
+                parent[field_name] = assessment_obj
+            elif isinstance(parent, list):
+                # Array item - get index from field_path
+                # field_path is like ("items", 0, "price") - second-to-last is the index
+                if len(task.field_path) >= 2 and isinstance(task.field_path[-2], int):
+                    idx = task.field_path[-2]
+                    # Replace the None placeholder we created during structure building
+                    if idx < len(parent):
+                        parent[idx] = assessment_obj
                     else:
                         logger.warning(
-                            f"Unexpected group assessment data type for {attr_name}: {type(assessment_value)}"
+                            f"Task {task.task_id}: index {idx} out of range for list of length {len(parent)}"
                         )
-
-            elif task.task_type == "list_item":
-                attr_name = task.attributes[0]
-                item_index = (
-                    task.list_item_index if task.list_item_index is not None else 0
+                else:
+                    logger.warning(
+                        f"Task {task.task_id}: cannot determine array index from path {task.field_path}"
+                    )
+            else:
+                logger.warning(
+                    f"Task {task.task_id}: unexpected parent type {type(parent)}"
                 )
 
-                # Initialize list structure if not exists
-                if attr_name not in enhanced_assessment_data:
-                    enhanced_assessment_data[attr_name] = []
-
-                # Ensure the list is long enough for this item
-                while len(enhanced_assessment_data[attr_name]) <= item_index:
-                    enhanced_assessment_data[attr_name].append({})
-
-                # Add assessments for this list item
-                item_assessment = {}
-                for (
-                    item_attr_name,
-                    item_assessment_data,
-                ) in result.assessment_data.items():
-                    if isinstance(item_assessment_data, dict):
-                        enhanced_item_assessment = item_assessment_data.copy()
-                        threshold = task.confidence_thresholds.get(item_attr_name, 0.9)
-                        enhanced_item_assessment["confidence_threshold"] = threshold
-                        item_assessment[item_attr_name] = enhanced_item_assessment
-                    else:
-                        logger.warning(
-                            f"Unexpected list item assessment data type for {attr_name}[{item_index}].{item_attr_name}: {type(item_assessment_data)}"
-                        )
-                        item_assessment[item_attr_name] = item_assessment_data
-
-                enhanced_assessment_data[attr_name][item_index] = item_assessment
-
-        return enhanced_assessment_data, all_confidence_alerts, aggregated_metering
+        return assessment_structure, all_confidence_alerts, aggregated_metering
 
     def _get_text_confidence_data(self, page) -> str:
         """
@@ -1579,8 +1000,6 @@ class GranularAssessmentService:
             # Get assessment configuration (type-safe, Pydantic handles conversions)
             model_id = self.config.assessment.model
             temperature = self.config.assessment.temperature
-            top_k = self.config.assessment.top_k
-            top_p = self.config.assessment.top_p
             max_tokens = self.config.assessment.max_tokens
             system_prompt = self.config.assessment.system_prompt
 
@@ -1597,17 +1016,8 @@ class GranularAssessmentService:
                 self.config.assessment.default_confidence_threshold
             )
 
-            # Build the cached base prompt (without attribute descriptions - those are task-specific)
-            base_content = self._build_cached_prompt_base(
-                document_text,
-                class_label,
-                "",  # Empty attribute descriptions - will be replaced per task
-                ocr_text_confidence,
-                page_images,
-            )
-
-            # Create assessment tasks
-            tasks = self._create_assessment_tasks(
+            # Create assessment tasks and pre-built assessment structure
+            tasks, assessment_structure = self._create_assessment_tasks(
                 extraction_results, properties, default_confidence_threshold
             )
 
@@ -1621,12 +1031,6 @@ class GranularAssessmentService:
             )
             all_task_results = list(cached_task_results.values())
             combined_metering = {}
-
-            # Use thread-safe error collection (similar to classification service)
-            import threading
-
-            errors_lock = threading.Lock()
-            failed_task_exceptions = {}  # Store original exceptions for failed tasks
 
             # Determine which tasks need processing
             tasks_to_process = []
@@ -1646,106 +1050,52 @@ class GranularAssessmentService:
                     f"Found {len(cached_task_results)} cached assessment task results, processing {len(tasks_to_process)} remaining tasks"
                 )
 
-                # Time the model invocations
+                # Apply grid overlay to page images for assessment
+                grid_page_images = []
+                for page_img in page_images:
+                    grid_img = grid_overlay.add_grid_overlay(page_img)
+                    grid_page_images.append(grid_img)
+
+                # Execute tasks using Strands-based parallel executor
+                logger.info(
+                    f"Processing {len(tasks_to_process)} assessment tasks with Strands executor (max_concurrent={self.max_workers})"
+                )
+
                 request_start_time = time.time()
 
-                # Process tasks (parallel or sequential based on configuration)
-                if self.enable_parallel and len(tasks_to_process) > 1:
-                    logger.info(
-                        f"Processing {len(tasks_to_process)} assessment tasks in parallel with {self.max_workers} workers"
+                # Call Strands executor - handles both parallel and sequential based on max_concurrent
+                task_results, task_metering, processing_time = (
+                    execute_assessment_tasks_parallel(
+                        tasks=tasks_to_process,
+                        extraction_results=extraction_results,
+                        page_images=grid_page_images,
+                        sorted_page_ids=sorted_page_ids,
+                        model_id=model_id,
+                        system_prompt=system_prompt,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        max_concurrent=self.max_workers,
                     )
+                )
 
-                    with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-                        # Submit all uncached tasks
-                        future_to_task = {
-                            executor.submit(
-                                self._process_assessment_task,
-                                task,
-                                base_content,
-                                properties,
-                                model_id,
-                                system_prompt,
-                                temperature,
-                                top_k,
-                                top_p,
-                                max_tokens,
-                            ): task
-                            for task in tasks_to_process
-                        }
+                # Merge results and metering
+                all_task_results.extend(task_results)
+                combined_metering = utils.merge_metering_data(
+                    combined_metering, task_metering
+                )
 
-                        # Collect results with enhanced error handling
-                        for future in as_completed(future_to_task):
-                            task = future_to_task[future]
-                            try:
-                                result = future.result()
-                                all_task_results.append(result)
+                logger.info(
+                    f"Strands executor completed {len(task_results)} tasks in {processing_time:.2f}s"
+                )
 
-                                # Merge metering data
-                                if result.metering:
-                                    combined_metering = utils.merge_metering_data(
-                                        combined_metering, result.metering
-                                    )
-                            except Exception as e:
-                                # Capture exception details for later use
-                                error_msg = f"Error processing assessment task {task.task_id}: {str(e)}"
-                                logger.error(error_msg)
-                                with errors_lock:
-                                    document.errors.append(error_msg)
-                                    # Store the original exception for later analysis
-                                    failed_task_exceptions[task.task_id] = e
-
-                                # Create failed result
-                                failed_result = AssessmentResult(
-                                    task_id=task.task_id,
-                                    success=False,
-                                    assessment_data={},
-                                    confidence_alerts=[],
-                                    error_message=str(e),
-                                )
-                                all_task_results.append(failed_result)
-                else:
-                    logger.info(
-                        f"Processing {len(tasks_to_process)} assessment tasks sequentially"
-                    )
-                    request_start_time = time.time()
-
-                    for task in tasks_to_process:
-                        try:
-                            result = self._process_assessment_task(
-                                task,
-                                base_content,
-                                properties,
-                                model_id,
-                                system_prompt,
-                                temperature,
-                                top_k,
-                                top_p,
-                                max_tokens,
-                            )
-                            all_task_results.append(result)
-
-                            # Merge metering data
-                            if result.metering:
-                                combined_metering = utils.merge_metering_data(
-                                    combined_metering, result.metering
-                                )
-                        except Exception as e:
-                            # Capture exception details for later use
-                            error_msg = f"Error processing assessment task {task.task_id}: {str(e)}"
-                            logger.error(error_msg)
-                            document.errors.append(error_msg)
-                            # Store the original exception for later analysis
-                            failed_task_exceptions[task.task_id] = e
-
-                            # Create failed result
-                            failed_result = AssessmentResult(
-                                task_id=task.task_id,
-                                success=False,
-                                assessment_data={},
-                                confidence_alerts=[],
-                                error_message=str(e),
-                            )
-                            all_task_results.append(failed_result)
+                # Track failed tasks for metadata
+                failed_task_exceptions = {}
+                for result in task_results:
+                    if not result.success and result.error_message:
+                        # Create a simple exception object for compatibility
+                        failed_task_exceptions[result.task_id] = Exception(
+                            result.error_message
+                        )
 
                 # Store failed task exceptions in document metadata for caller to access
                 if failed_task_exceptions:
@@ -1824,12 +1174,12 @@ class GranularAssessmentService:
                 f"Time taken for granular assessment: {total_duration:.2f} seconds"
             )
 
-            # Aggregate results
+            # Aggregate results into pre-built assessment structure
             (
                 enhanced_assessment_data,
                 confidence_threshold_alerts,
                 aggregated_metering,
-            ) = self._aggregate_assessment_results(tasks, results, extraction_results)
+            ) = self._aggregate_assessment_results(tasks, results, assessment_structure)
 
             # Calculate success metrics
             successful_tasks = [r for r in results if r.success]

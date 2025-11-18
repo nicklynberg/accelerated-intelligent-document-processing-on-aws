@@ -14,11 +14,8 @@ import pytest
 # Mock external dependencies that may not be available in test environments
 # These mocks need to be set up before any imports that might use these packages
 
-# Mock strands modules for agent functionality
-sys.modules["strands"] = MagicMock()
-sys.modules["strands.models"] = MagicMock()
-sys.modules["strands.hooks"] = MagicMock()
-sys.modules["strands.hooks.events"] = MagicMock()
+# NOTE: strands mocking has been moved to individual test files that need it
+# to avoid conflicts with tests that use the real strands package
 
 # Mock bedrock_agentcore modules for secure code execution
 sys.modules["bedrock_agentcore"] = MagicMock()

@@ -1,0 +1,76 @@
+"""
+Pydantic models for Strands-based assessment structured output.
+
+These models define the structured data format that Strands agents return
+when assessing document extraction confidence with bounding boxes.
+"""
+
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class BoundingBox(BaseModel):
+    """Bounding box coordinates in normalized 0-1000 scale."""
+
+    x1: int = Field(..., ge=0, le=1000, description="Top-left X coordinate")
+    y1: int = Field(..., ge=0, le=1000, description="Top-left Y coordinate")
+    x2: int = Field(..., ge=0, le=1000, description="Bottom-right X coordinate")
+    y2: int = Field(..., ge=0, le=1000, description="Bottom-right Y coordinate")
+    page: int = Field(..., ge=1, description="Page number (1-indexed)")
+
+    def to_geometry(self) -> dict[str, Any]:
+        """
+        Convert to IDP geometry format.
+
+        Returns:
+            Dictionary with BoundingBox and Page in IDP format
+        """
+        return {
+            "BoundingBox": {
+                "Width": (self.x2 - self.x1) / 1000.0,
+                "Height": (self.y2 - self.y1) / 1000.0,
+                "Left": self.x1 / 1000.0,
+                "Top": self.y1 / 1000.0,
+            },
+            "Page": self.page,
+        }
+
+
+class ConfidenceAssessment(BaseModel):
+    """Confidence assessment for an attribute value."""
+
+    value: Any = Field(..., description="The extracted value")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score 0-1")
+    reasoning: str = Field(..., description="Explanation for the confidence score")
+    threshold: float = Field(
+        ..., ge=0.0, le=1.0, description="Required confidence threshold"
+    )
+    bounding_box: BoundingBox | None = Field(
+        None, description="Location of value in document"
+    )
+
+    @property
+    def meets_threshold(self) -> bool:
+        """Computed field: whether confidence meets threshold."""
+        return self.confidence >= self.threshold
+
+
+class AssessmentOutput(BaseModel):
+    """
+    Structured output for confidence assessment of a single field.
+
+    Each task assesses exactly ONE field (e.g., "name" or "address.street").
+    The assessment is directly the ConfidenceAssessment for that field.
+    """
+
+    field_name: str = Field(
+        ...,
+        description="The name/path of the field being assessed (e.g., 'name' or 'address.street')",
+    )
+    assessment: ConfidenceAssessment = Field(
+        ..., description="Confidence assessment for this specific field"
+    )
+    alerts: list[str] = Field(
+        default_factory=list, description="Any confidence threshold alerts or issues"
+    )

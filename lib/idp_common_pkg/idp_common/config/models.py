@@ -233,25 +233,6 @@ class ClassificationConfig(BaseModel):
         return v
 
 
-class GranularAssessmentConfig(BaseModel):
-    """Granular assessment configuration"""
-
-    enabled: bool = Field(default=False, description="Enable granular assessment")
-    list_batch_size: int = Field(default=1, gt=0)
-    simple_batch_size: int = Field(default=3, gt=0)
-    max_workers: int = Field(default=20, gt=0)
-
-    @field_validator(
-        "list_batch_size", "simple_batch_size", "max_workers", mode="before"
-    )
-    @classmethod
-    def parse_int(cls, v: Any) -> int:
-        """Parse int from string or number"""
-        if isinstance(v, str):
-            return int(v) if v else 0
-        return int(v)
-
-
 class AssessmentConfig(BaseModel):
     """Document assessment configuration"""
 
@@ -334,7 +315,10 @@ Provide your assessment as a JSON object with this exact structure:
     default_confidence_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     validation_enabled: bool = Field(default=False, description="Enable validation")
     image: ImageConfig = Field(default_factory=ImageConfig)
-    granular: GranularAssessmentConfig = Field(default_factory=GranularAssessmentConfig)
+    # Granular assessment settings (always enabled, no longer nested)
+    max_workers: int = Field(
+        default=20, gt=0, description="Max concurrent workers for parallel assessment"
+    )
 
     @field_validator(
         "temperature", "top_p", "top_k", "default_confidence_threshold", mode="before"
@@ -346,7 +330,7 @@ Provide your assessment as a JSON object with this exact structure:
             return float(v) if v else 0.0
         return float(v)
 
-    @field_validator("max_tokens", mode="before")
+    @field_validator("max_tokens", "max_workers", mode="before")
     @classmethod
     def parse_int(cls, v: Any) -> int:
         """Parse int from string or number"""

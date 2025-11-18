@@ -5,8 +5,6 @@
 Unit tests for the granular assessment service.
 """
 
-from unittest.mock import patch
-
 import pytest
 from idp_common.assessment.granular_service import (
     AssessmentResult,
@@ -46,18 +44,13 @@ class TestGranularAssessmentService:
         """Sample configuration for testing."""
         return {
             "assessment": {
-                "granular": {
-                    "max_workers": 4,
-                    "simple_batch_size": 3,
-                    "list_batch_size": 1,
-                },
+                "max_workers": 4,
                 "model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
                 "temperature": 0.0,
                 "top_k": 5,
                 "top_p": 0.1,
                 "max_tokens": 4096,
                 "system_prompt": "You are an assessment expert.",
-                "task_prompt": "Assess {DOCUMENT_CLASS} with {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}. Results: {EXTRACTION_RESULTS}",
                 "default_confidence_threshold": 0.9,
             },
             "classes": [
@@ -110,13 +103,11 @@ class TestGranularAssessmentService:
         service = GranularAssessmentService(config=idp_config)
 
         assert service.max_workers == 4
-        assert service.simple_batch_size == 3
-        assert service.list_batch_size == 1
         assert service.enable_parallel  # max_workers > 1
 
     def test_initialization_single_worker(self, sample_config):
         """Test service initialization with single worker."""
-        sample_config["assessment"]["granular"]["max_workers"] = 1
+        sample_config["assessment"]["max_workers"] = 1
         idp_config = IDPConfig.model_validate(sample_config)
         service = GranularAssessmentService(config=idp_config)
 
@@ -143,43 +134,37 @@ class TestGranularAssessmentService:
 
         assert schema == {}
 
-    def test_format_property_descriptions(self, sample_config):
-        """Test formatting property descriptions from JSON Schema."""
-        idp_config = IDPConfig.model_validate(sample_config)
-        service = GranularAssessmentService(config=idp_config)
-        properties = service._get_class_schema("letter").get("properties", {})
-        descriptions = service._format_property_descriptions(properties)
-
-        assert "sender_name" in descriptions
-        assert "Name of the sender" in descriptions
-        assert "recipient_name" in descriptions
-
-    def test_create_assessment_tasks_simple_batching(
+    def test_create_assessment_tasks_simple_attributes(
         self, sample_config, sample_extraction_results
     ):
-        """Test creating assessment tasks with simple attribute batching."""
+        """Test creating assessment tasks with simple attributes - new Strands approach."""
         idp_config = IDPConfig.model_validate(sample_config)
         service = GranularAssessmentService(config=idp_config)
         properties = service._get_class_schema("letter").get("properties", {})
 
-        tasks = service._create_assessment_tasks(
+        tasks, assessment_structure = service._create_assessment_tasks(
             sample_extraction_results, properties, 0.9
         )
 
-        # With 5 simple attributes and batch_size=3, we should get 2 batches
-        assert len(tasks) == 2
-        assert tasks[0].task_type == "simple_batch"
-        assert tasks[0].task_id == "simple_batch_0"
-        assert len(tasks[0].attributes) == 3  # First batch: 3 attributes
-        assert len(tasks[1].attributes) == 2  # Second batch: 2 attributes
+        # With new approach: one task per leaf field = 5 tasks
+        assert len(tasks) == 5
 
-        # Check that extraction data is properly included
-        assert "sender_name" in tasks[0].extraction_data
-        assert "recipient_name" in tasks[0].extraction_data
+        # All tasks should be "attribute" type (single field assessment)
+        assert all(t.task_type == "attribute" for t in tasks)
 
-    def test_create_assessment_tasks_with_group_attributes(self, sample_config):
-        """Test creating assessment tasks with group attributes."""
-        # Add a group property to the config
+        # All tasks should have field_path as tuple
+        assert all(isinstance(t.field_path, tuple) for t in tasks)
+
+        # All tasks should have parent_assessment_dict reference
+        assert all(t.parent_assessment_dict is not None for t in tasks)
+
+        # Check that assessment_structure mirrors extraction_results
+        assert isinstance(assessment_structure, dict)
+        assert set(assessment_structure.keys()) == set(sample_extraction_results.keys())
+
+    def test_create_assessment_tasks_with_nested_object(self, sample_config):
+        """Test creating assessment tasks with nested object attributes."""
+        # Add a nested object property to the config
         sample_config["classes"][0]["properties"]["address_info"] = {
             "type": "object",
             "description": "Address information",
@@ -198,21 +183,31 @@ class TestGranularAssessmentService:
         service = GranularAssessmentService(config=idp_config)
         properties = service._get_class_schema("letter").get("properties", {})
 
-        tasks = service._create_assessment_tasks(extraction_results, properties, 0.9)
+        tasks, assessment_structure = service._create_assessment_tasks(
+            extraction_results, properties, 0.9
+        )
 
-        # Should have simple batches + 1 group task
-        group_tasks = [t for t in tasks if t.task_type == "group"]
-        assert len(group_tasks) == 1
-        assert group_tasks[0].attributes == ["address_info"]
-        assert "address_info" in group_tasks[0].extraction_data
+        # Should have 3 tasks: sender_name, address_info.street, address_info.city
+        assert len(tasks) == 3
 
-    def test_create_assessment_tasks_with_list_attributes(self, sample_config):
-        """Test creating assessment tasks with list attributes."""
-        # Add a list property to the config
+        # Find nested tasks
+        nested_tasks = [t for t in tasks if len(t.field_path) > 1]
+        assert len(nested_tasks) == 2
+
+        # Check nested paths are tuples
+        assert any(t.field_path == ("address_info", "street") for t in nested_tasks)
+        assert any(t.field_path == ("address_info", "city") for t in nested_tasks)
+
+        # Check assessment structure has nested dict
+        assert "address_info" in assessment_structure
+        assert isinstance(assessment_structure["address_info"], dict)
+
+    def test_create_assessment_tasks_with_array(self, sample_config):
+        """Test creating assessment tasks with array attributes."""
+        # Add an array property to the config
         sample_config["classes"][0]["properties"]["transactions"] = {
             "type": "array",
             "description": "List of transactions",
-            "x-aws-idp-list-item-description": "A single transaction",
             "items": {
                 "type": "object",
                 "properties": {
@@ -237,284 +232,112 @@ class TestGranularAssessmentService:
         service = GranularAssessmentService(config=idp_config)
         properties = service._get_class_schema("letter").get("properties", {})
 
-        tasks = service._create_assessment_tasks(extraction_results, properties, 0.9)
-
-        # Should have simple batches + 2 list item tasks
-        list_tasks = [t for t in tasks if t.task_type == "list_item"]
-        assert len(list_tasks) == 2
-        assert list_tasks[0].task_id == "list_transactions_item_0"
-        assert list_tasks[1].task_id == "list_transactions_item_1"
-        assert list_tasks[0].list_item_index == 0
-        assert list_tasks[1].list_item_index == 1
-
-    def test_get_task_specific_attribute_descriptions(self, sample_config):
-        """Test getting task-specific attribute descriptions."""
-        idp_config = IDPConfig.model_validate(sample_config)
-        service = GranularAssessmentService(config=idp_config)
-        properties = service._get_class_schema("letter").get("properties", {})
-
-        # Create a simple batch task
-        task = AssessmentTask(
-            task_id="test_batch",
-            task_type="simple_batch",
-            attributes=["sender_name", "recipient_name"],
-            extraction_data={"sender_name": "John", "recipient_name": "Jane"},
-            confidence_thresholds={"sender_name": 0.9, "recipient_name": 0.9},
+        tasks, assessment_structure = service._create_assessment_tasks(
+            extraction_results, properties, 0.9
         )
 
-        descriptions = service._get_task_specific_attribute_descriptions(
-            task, properties
-        )
+        # Should have 5 tasks: sender_name + 2 items * 2 fields each = 1 + 4 = 5
+        assert len(tasks) == 5
 
-        assert "sender_name" in descriptions
-        assert "recipient_name" in descriptions
-        assert "date" not in descriptions  # Should only include task attributes
+        # Find array item tasks
+        array_tasks = [
+            t for t in tasks if len(t.field_path) == 3
+        ]  # ("transactions", 0, "amount")
+        assert len(array_tasks) == 4
 
-    def test_build_specific_assessment_prompt(self, sample_config):
-        """Test building specific assessment prompt."""
-        idp_config = IDPConfig.model_validate(sample_config)
-        service = GranularAssessmentService(config=idp_config)
-        properties = service._get_class_schema("letter").get("properties", {})
-
-        # Mock base content with placeholders (like what would come from the real base content)
-        base_content = [
-            {"text": "Base prompt content with {EXTRACTION_RESULTS} placeholder"},
-            {"text": "<<CACHEPOINT>>"},
-        ]
-
-        # Create a simple batch task
-        task = AssessmentTask(
-            task_id="test_batch",
-            task_type="simple_batch",
-            attributes=["sender_name", "recipient_name"],
-            extraction_data={"sender_name": "John", "recipient_name": "Jane"},
-            confidence_thresholds={"sender_name": 0.9, "recipient_name": 0.9},
-        )
-
-        content = service._build_specific_assessment_prompt(
-            task, base_content, properties
-        )
-
-        # Should have same number of content items as base content
-        assert len(content) == 2
-
-        # First item should have placeholder replaced with extraction results
-        first_content = content[0]["text"]
-        assert "Base prompt content with" in first_content
-        assert (
-            "{EXTRACTION_RESULTS}" not in first_content
-        )  # Placeholder should be replaced
-        assert "sender_name" in first_content
-        assert "recipient_name" in first_content
-        assert "John" in first_content
-        assert "Jane" in first_content
-
-        # Cache point should be preserved
-        assert content[1]["text"] == "<<CACHEPOINT>>"
-
-    def test_build_cached_prompt_base(self, sample_config):
-        """Test building cached prompt base."""
-        idp_config = IDPConfig.model_validate(sample_config)
-        service = GranularAssessmentService(config=idp_config)
-
-        content = service._build_cached_prompt_base(
-            document_text="Sample document text",
-            class_label="letter",
-            attribute_descriptions="",  # Empty for base content - will be task-specific
-            ocr_text_confidence="OCR confidence data",
-            page_images=[],
-        )
-
-        # Should have at least one text content item
-        assert len(content) >= 1
-        # Check that the task prompt template is used and placeholders are replaced
+        # Check array paths include indices
+        assert any(t.field_path == ("transactions", 0, "amount") for t in array_tasks)
         assert any(
-            "letter" in item.get("text", "") for item in content
-        )  # DOCUMENT_CLASS
-        # Attribute descriptions should NOT be in base content (they're task-specific)
-        assert not any(
-            "sender_name: Name of sender" in item.get("text", "") for item in content
-        )  # ATTRIBUTE_NAMES_AND_DESCRIPTIONS should be placeholder
-        # Should contain placeholders for task-specific content
-        assert any(
-            "{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}" in item.get("text", "")
-            or "{EXTRACTION_RESULTS}" in item.get("text", "")
-            for item in content
+            t.field_path == ("transactions", 1, "description") for t in array_tasks
         )
 
-    @patch("idp_common.bedrock.invoke_model")
-    def test_process_assessment_task_success(self, mock_bedrock, sample_config):
-        """Test successful processing of an assessment task."""
-        # Mock Bedrock response
-        mock_response = {
-            "metering": {
-                "us.anthropic.claude-3-7-sonnet-20250219-v1:0": {
-                    "input_tokens": 100,
-                    "output_tokens": 50,
-                }
-            },
-            "response": {
-                "output": {
-                    "message": {
-                        "content": [
-                            {
-                                "text": '{"sender_name": {"confidence": 0.95, "confidence_reason": "Clear evidence"}}'
-                            }
-                        ]
-                    }
-                }
-            },
-        }
-        mock_bedrock.return_value = mock_response
+        # Check assessment structure has array
+        assert "transactions" in assessment_structure
+        assert isinstance(assessment_structure["transactions"], list)
+        assert len(assessment_structure["transactions"]) == 2
 
-        idp_config = IDPConfig.model_validate(sample_config)
-        service = GranularAssessmentService(config=idp_config)
-        properties = service._get_class_schema("letter").get("properties", {})
-
-        # Create a task
-        task = AssessmentTask(
-            task_id="test_batch",
-            task_type="simple_batch",
-            attributes=["sender_name"],
-            extraction_data={"sender_name": "John"},
-            confidence_thresholds={"sender_name": 0.9},
-        )
-
-        base_content = [{"text": "Base prompt"}]
-
-        result = service._process_assessment_task(
-            task,
-            base_content,
-            properties,
-            "test-model",
-            "system prompt",
-            0.0,
-            5,
-            0.1,
-            4096,
-        )
-
-        assert result.success
-        assert result.task_id == "test_batch"
-        assert "sender_name" in result.assessment_data
-        assert result.assessment_data["sender_name"]["confidence"] == 0.95
-
-    @patch("idp_common.bedrock.invoke_model")
-    def test_process_assessment_task_bedrock_error(self, mock_bedrock, sample_config):
-        """Test processing assessment task with Bedrock error."""
-        # Mock Bedrock to raise an exception
-        mock_bedrock.side_effect = Exception("Bedrock error")
-
-        idp_config = IDPConfig.model_validate(sample_config)
-        service = GranularAssessmentService(config=idp_config)
-        properties = service._get_class_schema("letter").get("properties", {})
-
-        task = AssessmentTask(
-            task_id="test_batch",
-            task_type="simple_batch",
-            attributes=["sender_name"],
-            extraction_data={"sender_name": "John"},
-            confidence_thresholds={"sender_name": 0.9},
-        )
-
-        base_content = [{"text": "Base prompt"}]
-
-        result = service._process_assessment_task(
-            task,
-            base_content,
-            properties,
-            "test-model",
-            "system prompt",
-            0.0,
-            5,
-            0.1,
-            4096,
-        )
-
-        assert not result.success
-        assert result.error_message == "Bedrock error"
-
-    def test_check_confidence_alerts_simple_batch(self, sample_config):
-        """Test confidence alert checking for simple batch tasks."""
+    def test_aggregate_assessment_results_new_approach(self, sample_config):
+        """Test aggregating assessment results with new Strands approach."""
         idp_config = IDPConfig.model_validate(sample_config)
         service = GranularAssessmentService(config=idp_config)
 
-        task = AssessmentTask(
-            task_id="test_batch",
-            task_type="simple_batch",
-            attributes=["sender_name", "recipient_name"],
-            extraction_data={},
-            confidence_thresholds={"sender_name": 0.9, "recipient_name": 0.8},
-        )
-
-        assessment_data = {
-            "sender_name": {"confidence": 0.95},  # Above threshold
-            "recipient_name": {"confidence": 0.7},  # Below threshold
+        # Create pre-built assessment structure
+        assessment_structure = {
+            "sender_name": None,
+            "recipient_name": None,
+            "date": None,
         }
 
-        alerts = []
-        service._check_confidence_alerts_for_task(task, assessment_data, alerts)
-
-        assert len(alerts) == 1
-        assert alerts[0]["attribute_name"] == "recipient_name"
-        assert alerts[0]["confidence"] == 0.7
-        assert alerts[0]["confidence_threshold"] == 0.8
-
-    def test_aggregate_assessment_results(self, sample_config):
-        """Test aggregating assessment results."""
-        idp_config = IDPConfig.model_validate(sample_config)
-        service = GranularAssessmentService(config=idp_config)
-
-        # Create tasks and results
+        # Create tasks with new structure
         task1 = AssessmentTask(
-            task_id="batch_0",
-            task_type="simple_batch",
-            attributes=["sender_name", "recipient_name"],
-            extraction_data={},
-            confidence_thresholds={"sender_name": 0.9, "recipient_name": 0.9},
+            task_id="task_0",
+            task_type="attribute",
+            field_path=("sender_name",),
+            field_name="sender_name",
+            field_schema={"type": "string"},
+            confidence_threshold=0.9,
+            parent_assessment_dict=assessment_structure,
         )
 
         task2 = AssessmentTask(
-            task_id="batch_1",
-            task_type="simple_batch",
-            attributes=["date"],
-            extraction_data={},
-            confidence_thresholds={"date": 0.9},
+            task_id="task_1",
+            task_type="attribute",
+            field_path=("recipient_name",),
+            field_name="recipient_name",
+            field_schema={"type": "string"},
+            confidence_threshold=0.9,
+            parent_assessment_dict=assessment_structure,
         )
 
+        task3 = AssessmentTask(
+            task_id="task_2",
+            task_type="attribute",
+            field_path=("date",),
+            field_name="date",
+            field_schema={"type": "string"},
+            confidence_threshold=0.9,
+            parent_assessment_dict=assessment_structure,
+        )
+
+        # Create results
         result1 = AssessmentResult(
-            task_id="batch_0",
+            task_id="task_0",
             success=True,
-            assessment_data={
-                "sender_name": {"confidence": 0.95, "confidence_reason": "Clear"},
-                "recipient_name": {"confidence": 0.85, "confidence_reason": "Good"},
-            },
+            assessment_data={"confidence": 0.95, "confidence_reason": "Clear"},
             confidence_alerts=[],
             metering={"model": {"input_tokens": 100}},
         )
 
         result2 = AssessmentResult(
-            task_id="batch_1",
+            task_id="task_1",
             success=True,
-            assessment_data={
-                "date": {"confidence": 0.90, "confidence_reason": "Clear date"}
-            },
+            assessment_data={"confidence": 0.85, "confidence_reason": "Good"},
             confidence_alerts=[],
             metering={"model": {"input_tokens": 50}},
         )
 
-        enhanced_data, alerts, metering = service._aggregate_assessment_results(
-            [task1, task2], [result1, result2], {}
+        result3 = AssessmentResult(
+            task_id="task_2",
+            success=True,
+            assessment_data={"confidence": 0.90, "confidence_reason": "Clear date"},
+            confidence_alerts=[],
+            metering={"model": {"input_tokens": 25}},
         )
 
-        # Check enhanced data
+        # Aggregate results using new signature
+        enhanced_data, alerts, metering = service._aggregate_assessment_results(
+            [task1, task2, task3], [result1, result2, result3], assessment_structure
+        )
+
+        # Check enhanced data (should be the assessment_structure with values filled in)
         assert "sender_name" in enhanced_data
         assert "recipient_name" in enhanced_data
         assert "date" in enhanced_data
         assert enhanced_data["sender_name"]["confidence_threshold"] == 0.9
+        assert enhanced_data["sender_name"]["confidence"] == 0.95
 
-        # Check metering aggregation (using utils.merge_metering_data)
-        assert metering["model"]["input_tokens"] == 150
+        # Check metering aggregation
+        assert metering["model"]["input_tokens"] == 175  # 100 + 50 + 25
 
     def test_empty_extraction_results_handling(self, sample_config):
         """Test handling of empty extraction results."""
@@ -523,23 +346,11 @@ class TestGranularAssessmentService:
         properties = service._get_class_schema("letter").get("properties", {})
 
         # Empty extraction results should create no tasks
-        tasks = service._create_assessment_tasks({}, properties, 0.9)
+        tasks, assessment_structure = service._create_assessment_tasks(
+            {}, properties, 0.9
+        )
         assert len(tasks) == 0
-
-    def test_missing_task_prompt_uses_default(self, sample_config):
-        """Test that default task_prompt is used when not in config."""
-        # Remove task_prompt from config
-        del sample_config["assessment"]["task_prompt"]
-
-        idp_config = IDPConfig.model_validate(sample_config)
-        service = GranularAssessmentService(config=idp_config)
-
-        # Should not raise an error, should use default task_prompt from IDPConfig
-        prompt = service._build_cached_prompt_base("text", "letter", "attrs", "ocr", [])
-
-        # Verify a prompt was generated (not empty)
-        assert prompt is not None
-        assert len(prompt) > 0
+        assert assessment_structure == {}
 
     def test_confidence_threshold_inheritance(self, sample_config):
         """Test that confidence thresholds are properly inherited."""

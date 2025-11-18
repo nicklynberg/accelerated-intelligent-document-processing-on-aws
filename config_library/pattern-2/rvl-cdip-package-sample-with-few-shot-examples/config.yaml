@@ -11,6 +11,7 @@ ocr:
     - name: LAYOUT
     - name: TABLES
     - name: SIGNATURES
+  max_workers: "20"
   image:
     dpi: "150"
     target_width: ""
@@ -809,6 +810,7 @@ classes:
 
 classification:
   maxPagesForClassification: "ALL"
+  max_workers: "20"
   image:
     target_height: ""
     target_width: ""
@@ -868,6 +870,7 @@ classification:
     5. Outputting in the exact JSON format specified in <output-format>
     </final-instructions>
 extraction:
+  max_workers: "20"
   image:
     target_height: ""
     target_width: ""
@@ -973,14 +976,10 @@ extraction:
 assessment:
   enabled: true
   validation_enabled: false
+  max_workers: "20"
   image:
     target_height: ""
     target_width: ""
-  granular:
-    enabled: true
-    max_workers: "20"
-    simple_batch_size: "3"
-    list_batch_size: "1"
   default_confidence_threshold: "0.8"
   top_p: "0.0"
   max_tokens: "10000"
@@ -1033,12 +1032,15 @@ assessment:
     - page: Page number where the field appears (starting from 1)
 
     Coordinate system:
+    - The document images have ruler markings along all edges showing the 0-1000 coordinate scale
+    - Use these ruler markings to determine precise coordinates for bounding boxes
     - Use normalized scale 0-1000 for both x and y axes
     - x1, y1 = top-left corner of bounding box  
     - x2, y2 = bottom-right corner of bounding box
     - Ensure x2 > x1 and y2 > y1
     - Make bounding boxes tight around the actual text content
     - If a field spans multiple lines, create a bounding box that encompasses all relevant text
+    - Reference the ruler markings on the image edges to provide accurate coordinates
     </spatial-localization-guidelines>
 
     <final-instructions>
@@ -1100,6 +1102,9 @@ assessment:
     }
 
     IMPORTANT:  
+    - The <task-schema> contains raw JSON schema for the attributes you should assess
+    - The <extraction-results> contains the FULL extraction data (you have complete context for cross-referencing)
+    - The <task-instruction> specifies which attributes to focus on
     - For LIST attributes like "Transactions", assess EACH individual item in the list separately with individual bounding boxes
     - Each transaction should be assessed as a separate object in the array with its own spatial coordinates
     - Do NOT provide aggregate assessments for list items - assess each one individually with precise locations
@@ -1120,9 +1125,13 @@ assessment:
 
     <<CACHEPOINT>>
 
-    <attributes-definitions>
-    {ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-    </attributes-definitions>
+    <task-schema>
+    {TASK_SCHEMA}
+    </task-schema>
+
+    <task-instruction>
+    {TASK_INSTRUCTION}
+    </task-instruction>
 
     <extraction-results>
     {EXTRACTION_RESULTS}

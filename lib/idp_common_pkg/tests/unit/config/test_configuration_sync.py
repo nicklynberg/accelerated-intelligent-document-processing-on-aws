@@ -16,7 +16,6 @@ from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.models import (
     AssessmentConfig,
     ExtractionConfig,
-    GranularAssessmentConfig,
     IDPConfig,
     ImageConfig,
 )
@@ -185,9 +184,7 @@ class TestSyncCustomWithNewDefault:
                 top_p=0.1,
                 max_tokens=10000,
             ),
-            assessment=AssessmentConfig(
-                enabled=True, temperature=0.0, granular={"enabled": False}
-            ),
+            assessment=AssessmentConfig(enabled=True, temperature=0.0, max_workers=10),
             classes=[],
         )
 
@@ -205,7 +202,7 @@ class TestSyncCustomWithNewDefault:
             assessment=AssessmentConfig(
                 enabled=False,  # CUSTOM
                 temperature=0.0,
-                granular=GranularAssessmentConfig(enabled=False),
+                max_workers=10,
             ),
             classes=[{"$id": "Invoice", "properties": {}}],  # CUSTOM
         )
@@ -225,7 +222,7 @@ class TestSyncCustomWithNewDefault:
             assessment=AssessmentConfig(
                 enabled=True,
                 temperature=0.5,  # NEW
-                granular=GranularAssessmentConfig(enabled=True),  # NEW
+                max_workers=20,  # NEW
             ),
             classes=[],
         )
@@ -246,7 +243,7 @@ class TestSyncCustomWithNewDefault:
         assert new_custom.extraction.top_p == 0.2
         assert new_custom.extraction.max_tokens == 15000
         assert new_custom.assessment.temperature == 0.5
-        assert new_custom.assessment.granular.enabled
+        assert new_custom.assessment.max_workers == 20
 
 
 @pytest.mark.unit

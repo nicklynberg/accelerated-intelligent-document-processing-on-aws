@@ -11,6 +11,7 @@ ocr:
     - name: LAYOUT
     - name: TABLES
     - name: SIGNATURES
+  max_workers: "20"
   image:
     dpi: "150"
     target_width: ""
@@ -766,6 +767,7 @@ classes:
 classification:
   model: Custom fine tuned UDOP model
 extraction:
+  max_workers: "20"
   image:
     target_width: ""
     target_height: ""
@@ -926,6 +928,7 @@ summarization:
     You are a document summarization expert who can analyze and summarize documents from various domains including medical, financial, legal, and general business documents. Your task is to create a summary that captures the key information, main points, and important details from the document. Your output must be in valid JSON format. \nSummarization Style: Balanced\\nCreate a balanced summary that provides a moderate level of detail. Include the main points and key supporting information, while maintaining the document's overall structure. Aim for a comprehensive yet concise summary.\n Your output MUST be in valid JSON format with markdown content. You MUST strictly adhere to the output format specified in the instructions.
 assessment:
   enabled: true
+  max_workers: "20"
   image:
     target_height: ""
     target_width: ""

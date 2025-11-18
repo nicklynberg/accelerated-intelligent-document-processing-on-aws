@@ -19,7 +19,7 @@ name = "idp_common"
 version = "0.4.6"
 description = "Common utilities for GenAI IDP Accelerator patterns"
 authors = [{ name = "AWS", email = "noreply@amazon.com" }]
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.12,<3.14"
 dependencies = [
   "boto3==1.42.0",      # Core dependency for AWS services
   "jsonschema>=4.25.1",
@@ -66,7 +66,7 @@ classification = [
 
 # Extraction module dependencies
 extraction = [
-  "Pillow==11.2.1",  # For image handling
+  "Pillow==11.2.1", # For image handling
 ]
 
 # Assessment module dependencies
@@ -100,24 +100,24 @@ appsync = ["requests==2.32.4"]
 agents = [
   "strands-agents==1.14.0; python_version>='3.10'",
   "strands-agents-tools==0.2.13; python_version>='3.10'",
-  "bedrock-agentcore>=0.1.1; python_version>='3.10'",    # Specifically for the code interpreter tool
+  "bedrock-agentcore>=0.1.1; python_version>='3.10'",     # Specifically for the code interpreter tool
 ]
 
 # Code intelligence module dependencies
 code_intel = [
-    "requests==2.32.4",
-    "strands-agents==1.14.0",
-    "strands-agents-tools==0.2.13",
-    "bedrock-agentcore>=0.1.1",
-    "PyYAML>=6.0.0",
-    "pathspec>=0.11.0",
-    "chardet>=5.0.0"
+  "requests==2.32.4",
+  "strands-agents==1.14.0",
+  "strands-agents-tools==0.2.13",
+  "bedrock-agentcore>=0.1.1",
+  "PyYAML>=6.0.0",
+  "pathspec>=0.11.0",
+  "chardet>=5.0.0",
 ]
 
 # Document service factory dependencies (includes both appsync and dynamodb support)
 # This includes all dependencies needed for both backends
 docs_service = [
-  "requests==2.32.4", # Required for appsync module (dynamodb only needs boto3 which is core)
+  "requests==2.32.4",     # Required for appsync module (dynamodb only needs boto3 which is core)
   "aws-xray-sdk>=2.14.0", # Required for X-Ray tracing
 ]
 
@@ -173,7 +173,7 @@ agentic-extraction = [
   "jsonpatch==1.33",
   "strands-agents==1.14.0 ; python_full_version >= '3.10'",
   "pandas>=2.2.3",
-  "pymupdf==1.25.5",  # Pinned to 1.25.5 - has pre-built ARM64 wheels, 1.26.x requires compilation
+  "pymupdf==1.25.5",                                        # Pinned to 1.25.5 - has pre-built ARM64 wheels, 1.26.x requires compilation
   "email-validator>=2.3.0",
   "tabulate>=0.9.0",
   "aws-lambda-powertools>=3.2.0",                          # Structured logging and observability
