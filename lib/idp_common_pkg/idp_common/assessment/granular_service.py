@@ -30,8 +30,10 @@ from idp_common.config.schema_constants import (
     X_AWS_IDP_CONFIDENCE_THRESHOLD,
     X_AWS_IDP_DOCUMENT_TYPE,
 )
+from idp_common.extraction.models import ExtractionData, ExtractionMetadata
 from idp_common.models import Document, Status
-from idp_common.utils import check_token_limit, grid_overlay
+from idp_common.utils import check_token_limit
+from idp_common.utils.grid_overlay import add_ruler_edges
 
 logger = logging.getLogger(__name__)
 
@@ -869,14 +871,8 @@ class GranularAssessmentService:
             Document: Updated Document object with assessment results appended to extraction results
         """
         # Check if assessment is enabled in typed configuration
-        enabled = self.config.assessment.enabled
-        if not enabled:
+        if not self.config.assessment.enabled:
             logger.info("Assessment is disabled via configuration")
-            return document
-
-        # Validate input document
-        if not document:
-            logger.error("No document provided")
             return document
 
         if not document.sections:
@@ -931,8 +927,9 @@ class GranularAssessmentService:
         try:
             # Read existing extraction results
             t0 = time.time()
-            extraction_data = s3.get_json_content(section.extraction_result_uri)
-            extraction_results = extraction_data.get("inference_result", {})
+            extraction_data_dict = s3.get_json_content(section.extraction_result_uri)
+            extraction_data = ExtractionData.model_validate(extraction_data_dict)
+            extraction_results = extraction_data.inference_result
 
             # Skip assessment if no extraction results found
             if not extraction_results:
@@ -997,12 +994,6 @@ class GranularAssessmentService:
             t4 = time.time()
             logger.info(f"Time taken to read raw OCR results: {t4 - t3:.2f} seconds")
 
-            # Get assessment configuration (type-safe, Pydantic handles conversions)
-            model_id = self.config.assessment.model
-            temperature = self.config.assessment.temperature
-            max_tokens = self.config.assessment.max_tokens
-            system_prompt = self.config.assessment.system_prompt
-
             # Get schema for this document class
             class_schema = self._get_class_schema(class_label)
             if not class_schema:
@@ -1053,7 +1044,7 @@ class GranularAssessmentService:
                 # Apply grid overlay to page images for assessment
                 grid_page_images = []
                 for page_img in page_images:
-                    grid_img = grid_overlay.add_grid_overlay(page_img)
+                    grid_img = add_ruler_edges(page_img)
                     grid_page_images.append(grid_img)
 
                 # Execute tasks using Strands-based parallel executor
@@ -1070,10 +1061,10 @@ class GranularAssessmentService:
                         extraction_results=extraction_results,
                         page_images=grid_page_images,
                         sorted_page_ids=sorted_page_ids,
-                        model_id=model_id,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
+                        model_id=self.config.assessment.model,
+                        system_prompt=self.config.assessment.system_prompt,
+                        temperature=self.config.assessment.temperature,
+                        max_tokens=self.config.assessment.max_tokens,
                         max_concurrent=self.max_workers,
                     )
                 )
@@ -1232,21 +1223,21 @@ class GranularAssessmentService:
                             f"Document will be marked as failed without retry."
                         )
 
-            # Update the existing extraction result with enhanced assessment data
-            extraction_data["explainability_info"] = [enhanced_assessment_data]
-            extraction_data["metadata"] = extraction_data.get("metadata", {})
-            extraction_data["metadata"]["assessment_time_seconds"] = total_duration
-            extraction_data["metadata"]["granular_assessment_used"] = True
-            extraction_data["metadata"]["assessment_tasks_total"] = len(tasks)
-            extraction_data["metadata"]["assessment_tasks_successful"] = len(
-                successful_tasks
-            )
-            extraction_data["metadata"]["assessment_tasks_failed"] = len(failed_tasks)
+            # Update the existing extraction result with enhanced assessment data (typed)
+            extraction_data.explainability_info = [enhanced_assessment_data]
+            extraction_data.metadata.assessment_time_seconds = total_duration
+            extraction_data.metadata.granular_assessment_used = True
+            extraction_data.metadata.assessment_tasks_total = len(tasks)
+            extraction_data.metadata.assessment_tasks_successful = len(successful_tasks)
+            extraction_data.metadata.assessment_tasks_failed = len(failed_tasks)
 
             # Write the updated result back to S3
             bucket, key = utils.parse_s3_uri(section.extraction_result_uri)
             s3.write_content(
-                extraction_data, bucket, key, content_type="application/json"
+                extraction_data.model_dump(mode="json"),
+                bucket,
+                key,
+                content_type="application/json",
             )
 
             # Update the section in the document with confidence threshold alerts
