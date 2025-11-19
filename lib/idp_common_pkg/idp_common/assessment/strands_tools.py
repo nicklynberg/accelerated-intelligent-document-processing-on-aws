@@ -12,6 +12,7 @@ from aws_lambda_powertools import Logger
 from pydantic import BaseModel, Field
 from strands import Agent, tool
 from strands.types.content import ContentBlock, ImageContent
+from strands.types.tools import ToolResult, ToolResultContent, ToolResultStatus
 
 from idp_common.assessment.strands_models import BoundingBox
 from idp_common.utils.grid_overlay import draw_bounding_boxes
@@ -49,7 +50,7 @@ def create_view_image_tool(page_images: list[bytes], sorted_page_ids: list[str])
     """
 
     @tool
-    def view_image(input_data: dict[str, Any], agent: Agent) -> ImageContent:
+    def view_image(input_data: dict[str, Any], agent: Agent) -> dict:
         """
         View a specific page image, optionally highlighting a bounding box area.
 
@@ -127,19 +128,19 @@ def create_view_image_tool(page_images: list[bytes], sorted_page_ids: list[str])
             },
         )
 
-        # Return the image as ImageContent so the LLM can actually see it
-        import base64
-
-        image_b64 = base64.b64encode(img_bytes).decode("utf-8")
-
-        return ImageContent(
-            type="image",
-            source={
-                "type": "base64",
-                "media_type": "image/png",
-                "data": image_b64,
-            },
-        )
+        return {
+            "status": "success",
+            "content": [
+                {
+                    "image": {
+                        "format": "png",
+                        "source": {
+                            "bytes": img_bytes,
+                        },
+                    }
+                }
+            ],
+        }
 
     return view_image
 
