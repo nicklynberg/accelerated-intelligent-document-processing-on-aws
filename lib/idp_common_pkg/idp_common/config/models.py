@@ -35,10 +35,10 @@ class ImageConfig(BaseModel):
     """Image processing configuration"""
 
     target_width: Optional[int] = Field(
-        default=None, description="Target width for images"
+        default=1200, description="Target width for images (default: 1200px for ~1MP)"
     )
     target_height: Optional[int] = Field(
-        default=None, description="Target height for images"
+        default=1200, description="Target height for images (default: 1200px for ~1MP)"
     )
     dpi: Optional[int] = Field(default=None, description="DPI for image rendering")
     preprocessing: Optional[bool] = Field(

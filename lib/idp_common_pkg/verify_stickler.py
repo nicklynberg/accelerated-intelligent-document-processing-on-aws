@@ -10,7 +10,7 @@ features are available for the IDP evaluation system.
 """
 
 import sys
-from typing import Any, Dict
+from typing import Any, dict
 
 
 def verify_stickler_import():
@@ -65,7 +65,7 @@ def verify_dynamic_model_creation():
         from stickler import StructuredModel
 
         # Test configuration
-        config: Dict[str, Any] = {
+        config: dict[str, Any] = {
             "model_name": "TestModel",
             "match_threshold": 0.8,
             "fields": {
@@ -105,7 +105,7 @@ def verify_list_matching():
     try:
         from stickler import StructuredModel
 
-        config: Dict[str, Any] = {
+        config: dict[str, Any] = {
             "model_name": "ListTestModel",
             "fields": {
                 "items": {

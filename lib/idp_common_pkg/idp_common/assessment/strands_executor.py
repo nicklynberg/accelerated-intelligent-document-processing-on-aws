@@ -12,11 +12,8 @@ from typing import Any, cast
 
 from aws_lambda_powertools import Logger
 
-from idp_common.assessment.strands_service import (
-    AssessmentResult,
-    AssessmentTask,
-    assess_attribute_with_strands,
-)
+from idp_common.assessment.models import AssessmentResult, AssessmentTask
+from idp_common.assessment.strands_service import assess_attribute_with_strands
 from idp_common.utils import merge_metering_data
 
 logger = Logger(service="assessment", level=os.getenv("LOG_LEVEL", "INFO"))
@@ -31,6 +28,7 @@ async def execute_tasks_async(
     system_prompt: str,
     temperature: float,
     max_tokens: int,
+    document_schema: dict[str, Any],
     max_concurrent: int = 5,
     max_retries: int = 7,
     connect_timeout: float = 10.0,
@@ -49,6 +47,7 @@ async def execute_tasks_async(
         system_prompt: System prompt
         temperature: Model temperature
         max_tokens: Max tokens
+        document_schema: Full document JSON schema
         max_concurrent: Maximum concurrent tasks (default 5)
         max_retries: Maximum retry attempts
         connect_timeout: Connection timeout in seconds
@@ -80,6 +79,7 @@ async def execute_tasks_async(
                 system_prompt=system_prompt,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                document_schema=document_schema,
                 max_retries=max_retries,
                 connect_timeout=connect_timeout,
                 read_timeout=read_timeout,
@@ -152,6 +152,7 @@ def execute_assessment_tasks_parallel(
     system_prompt: str,
     temperature: float,
     max_tokens: int,
+    document_schema: dict[str, Any],
     max_concurrent: int = 5,
     max_retries: int = 7,
     connect_timeout: float = 10.0,
@@ -173,6 +174,7 @@ def execute_assessment_tasks_parallel(
         system_prompt: System prompt
         temperature: Temperature
         max_tokens: Max tokens
+        document_schema: Full document JSON schema
         max_concurrent: Max concurrent tasks (default 5)
         max_retries: Maximum retry attempts
         connect_timeout: Connection timeout in seconds
@@ -201,6 +203,7 @@ def execute_assessment_tasks_parallel(
                 system_prompt=system_prompt,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                document_schema=document_schema,
                 max_concurrent=max_concurrent,
                 max_retries=max_retries,
                 connect_timeout=connect_timeout,
@@ -225,6 +228,7 @@ def execute_assessment_tasks_parallel(
                     system_prompt=system_prompt,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    document_schema=document_schema,
                     max_concurrent=max_concurrent,
                     max_retries=max_retries,
                     connect_timeout=connect_timeout,

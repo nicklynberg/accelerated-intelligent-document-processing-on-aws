@@ -137,7 +137,8 @@ def add_ruler_edges(
 
     canvas = canvas.convert("RGB")
     img_byte_array = io.BytesIO()
-    canvas.save(img_byte_array, format="JPEG", quality=95)
+    # Use PNG with optimization for better compression while preserving quality
+    canvas.save(img_byte_array, format="PNG", optimize=True)
 
     logger.info(f"Ruler edges added. New size: {new_width}x{new_height}")
     return img_byte_array.getvalue()
@@ -291,7 +292,8 @@ def draw_bounding_boxes(
     result = result.convert("RGB")
 
     img_byte_array = io.BytesIO()
-    result.save(img_byte_array, format="JPEG", quality=95)
+    # Use PNG with optimization for better compression while preserving quality
+    result.save(img_byte_array, format="PNG", optimize=True)
 
     logger.info(f"Drew {len(bboxes)} bounding boxes on image")
     return img_byte_array.getvalue()

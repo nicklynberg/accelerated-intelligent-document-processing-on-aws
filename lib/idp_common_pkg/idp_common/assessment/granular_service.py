@@ -12,13 +12,14 @@ This module provides a scalable approach to assessment by:
 """
 
 import json
-import logging
 import os
 import time
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from aws_lambda_powertools import Logger
+
 from idp_common import image, metrics, s3, utils
+from idp_common.assessment.models import AssessmentResult, AssessmentTask
 from idp_common.assessment.strands_executor import execute_assessment_tasks_parallel
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
@@ -35,44 +36,7 @@ from idp_common.models import Document, Status
 from idp_common.utils import check_token_limit
 from idp_common.utils.grid_overlay import add_ruler_edges
 
-logger = logging.getLogger(__name__)
-
-
-@dataclass
-class AssessmentTask:
-    """Single-field assessment task for Strands executor."""
-
-    task_id: str
-    task_type: str  # Always "attribute" - single field assessment
-
-    # Path to field as tuple: ("address", "street") or ("items", 0, "price")
-    field_path: Tuple[Union[str, int], ...]
-
-    # The field name being assessed (last element of path)
-    field_name: str
-
-    # Schema for this specific field only
-    field_schema: Dict[str, Any]
-
-    # Confidence threshold for this field
-    confidence_threshold: float
-
-    # Direct reference to parent container in assessment structure (for O(1) insertion)
-    # Can be Dict for regular fields or List for array items
-    parent_assessment_dict: Union[Dict[str, Any], List[Any]]
-
-
-@dataclass
-class AssessmentResult:
-    """Result of a single assessment task."""
-
-    task_id: str
-    success: bool
-    assessment_data: Dict[str, Any]
-    confidence_alerts: List[Dict[str, Any]]
-    error_message: Optional[str] = None
-    processing_time: float = 0.0
-    metering: Optional[Dict[str, Any]] = None
+logger = Logger(service="assessment", level=os.getenv("LOG_LEVEL", "INFO"))
 
 
 def _safe_float_conversion(value: Any, default: float = 0.0) -> float:
@@ -114,49 +78,13 @@ def _safe_float_conversion(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _get_value_at_path(data: Dict[str, Any], path: Tuple[Union[str, int], ...]) -> Any:
-    """
-    Navigate nested data structure using tuple path.
-
-    Args:
-        data: Nested dictionary/list structure
-        path: Tuple of keys/indices like ("address", "street") or ("items", 0, "price")
-
-    Returns:
-        Value at the specified path, or None if path doesn't exist
-
-    Examples:
-        >>> data = {"address": {"street": "123 Main St"}}
-        >>> _get_value_at_path(data, ("address", "street"))
-        "123 Main St"
-
-        >>> data = {"items": [{"price": 10.99}, {"price": 20.99}]}
-        >>> _get_value_at_path(data, ("items", 0, "price"))
-        10.99
-    """
-    current = data
-    for key in path:
-        if current is None:
-            return None
-        if isinstance(current, dict):
-            current = current.get(key)
-        elif isinstance(current, list):
-            if isinstance(key, int) and 0 <= key < len(current):
-                current = current[key]
-            else:
-                return None
-        else:
-            return None
-    return current
-
-
 class GranularAssessmentService:
     """Enhanced assessment service with granular, cached, and parallel processing."""
 
     def __init__(
         self,
         region: str | None = None,
-        config: Dict[str, Any] | IDPConfig | None = None,
+        config: dict[str, Any] | IDPConfig | None = None,
         cache_table: str | None = None,
     ):
         """
@@ -194,8 +122,10 @@ class GranularAssessmentService:
         if self.cache_table_name:
             import boto3
 
-            dynamodb = boto3.resource("dynamodb", region_name=self.region)
-            self.cache_table = dynamodb.Table(self.cache_table_name)  # type: ignore[attr-defined]
+            dynamodb: DynamoDBServiceResource = boto3.resource(
+                "dynamodb", region_name=self.region
+            )  # pyright: ignore[reportAssignmentType]modb", region_name=self.region)
+            self.cache_table = dynamodb.Table(self.cache_table_name)
             logger.info(
                 f"Granular assessment caching enabled using table: {self.cache_table_name}"
             )
@@ -220,7 +150,7 @@ class GranularAssessmentService:
             f"caching={'enabled' if self.cache_table else 'disabled'}"
         )
 
-    def _get_class_schema(self, class_label: str) -> Dict[str, Any]:
+    def _get_class_schema(self, class_label: str) -> dict[str, Any]:
         """
         Get JSON Schema for a specific document class.
 
@@ -238,7 +168,7 @@ class GranularAssessmentService:
         return {}
 
     def _get_confidence_threshold_by_path(
-        self, properties: Dict[str, Any], path: str, default: float = 0.9
+        self, properties: dict[str, Any], path: str, default: float = 0.9
     ) -> float:
         """
         Get confidence threshold for a property path (e.g., 'CompanyAddress.Street').
@@ -283,10 +213,10 @@ class GranularAssessmentService:
 
     def _create_assessment_tasks(
         self,
-        extraction_results: Dict[str, Any],
-        properties: Dict[str, Any],
+        extraction_results: dict[str, Any],
+        properties: dict[str, Any],
         default_confidence_threshold: float,
-    ) -> Tuple[List[AssessmentTask], Dict[str, Any]]:
+    ) -> tuple[list[AssessmentTask], dict[str, Any]]:
         """
         Create assessment tasks and pre-build assessment structure.
 
@@ -302,18 +232,18 @@ class GranularAssessmentService:
 
         Returns:
             Tuple of (tasks, assessment_structure)
-            - tasks: List of AssessmentTask objects
-            - assessment_structure: Dict mirroring extraction_results shape
+            - tasks: list of AssessmentTask objects
+            - assessment_structure: dict mirroring extraction_results shape
         """
-        tasks: List[AssessmentTask] = []
-        assessment_structure: Dict[str, Any] = {}
+        tasks: list[AssessmentTask] = []
+        assessment_structure: dict[str, Any] = {}
         task_counter = [0]  # Use list for mutable counter in nested function
 
         def _traverse(
-            schema_props: Dict[str, Any],
-            extraction_data: Dict[str, Any],
-            current_path: Tuple[Union[str, int], ...],
-            parent_dict: Dict[str, Any],
+            schema_props: dict[str, Any],
+            extraction_data: dict[str, Any],
+            current_path: tuple[str | int, ...],
+            parent_dict: dict[str, Any],
         ) -> None:
             """
             Recursively traverse schema and extraction data to build tasks and structure.
@@ -334,7 +264,7 @@ class GranularAssessmentService:
 
                 if prop_type == TYPE_OBJECT and isinstance(prop_value, dict):
                     # Create nested dict in assessment structure
-                    nested_dict: Dict[str, Any] = {}
+                    nested_dict: dict[str, Any] = {}
                     parent_dict[prop_name] = nested_dict
 
                     # Recurse into nested object
@@ -343,7 +273,7 @@ class GranularAssessmentService:
 
                 elif prop_type == TYPE_ARRAY and isinstance(prop_value, list):
                     # Create list in assessment structure
-                    assessment_list: List[Any] = []
+                    assessment_list: list[Any] = []
                     parent_dict[prop_name] = assessment_list
 
                     # Process each array item
@@ -355,7 +285,7 @@ class GranularAssessmentService:
 
                         if item_type == TYPE_OBJECT and isinstance(item_value, dict):
                             # Create dict for this array item
-                            item_dict: Dict[str, Any] = {}
+                            item_dict: dict[str, Any] = {}
                             assessment_list.append(item_dict)
 
                             # Recurse into array item properties
@@ -438,7 +368,7 @@ class GranularAssessmentService:
 
     def _get_cached_assessment_tasks(
         self, document_id: str, workflow_execution_arn: str, section_id: str
-    ) -> Dict[str, AssessmentResult]:
+    ) -> dict[str, AssessmentResult]:
         """
         Retrieve cached assessment task results for a document section.
 
@@ -448,7 +378,7 @@ class GranularAssessmentService:
             section_id: Section ID
 
         Returns:
-            Dictionary mapping task_id to cached AssessmentResult, empty dict if no cache
+            dictionary mapping task_id to cached AssessmentResult, empty dict if no cache
         """
         logger.info(
             f"Attempting to retrieve cached assessment tasks for document {document_id} section {section_id}"
@@ -476,8 +406,6 @@ class GranularAssessmentService:
             # Extract task results from JSON attribute
             if "task_results" in cached_data:
                 try:
-                    import json
-
                     task_data_list = json.loads(cached_data["task_results"])
 
                     for task_data in task_data_list:
@@ -515,7 +443,7 @@ class GranularAssessmentService:
         document_id: str,
         workflow_execution_arn: str,
         section_id: str,
-        task_results: List[AssessmentResult],
+        task_results: list[AssessmentResult],
     ) -> None:
         """
         Cache successful assessment task results to DynamoDB as a JSON-serialized list.
@@ -524,7 +452,7 @@ class GranularAssessmentService:
             document_id: Document ID
             workflow_execution_arn: Workflow execution ARN
             section_id: Section ID
-            task_results: List of successful assessment task results
+            task_results: list of successful assessment task results
         """
         if not self.cache_table or not task_results:
             return
@@ -608,16 +536,16 @@ class GranularAssessmentService:
 
     def _aggregate_assessment_results(
         self,
-        tasks: List[AssessmentTask],
-        results: List[AssessmentResult],
-        assessment_structure: Dict[str, Any],
-    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Dict[str, Any]]:
+        tasks: list[AssessmentTask],
+        results: list[AssessmentResult],
+        assessment_structure: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
         """
         Aggregate individual task results into assessment structure using direct parent insertion.
 
         Args:
-            tasks: List of assessment tasks
-            results: List of assessment results
+            tasks: list of assessment tasks
+            results: list of assessment results
             assessment_structure: Pre-built assessment structure from _create_assessment_tasks
 
         Returns:
@@ -717,17 +645,17 @@ class GranularAssessmentService:
         return "Text Confidence Data Unavailable"
 
     def _convert_bbox_to_geometry(
-        self, bbox_coords: List[float], page_num: int
-    ) -> Dict[str, Any]:
+        self, bbox_coords: list[float], page_num: int
+    ) -> dict[str, Any]:
         """
         Convert [x1,y1,x2,y2] coordinates to geometry format.
 
         Args:
-            bbox_coords: List of 4 coordinates [x1, y1, x2, y2] in 0-1000 scale
+            bbox_coords: list of 4 coordinates [x1, y1, x2, y2] in 0-1000 scale
             page_num: Page number where the bounding box appears
 
         Returns:
-            Dictionary in geometry format compatible with pattern-1 UI
+            dictionary in geometry format compatible with pattern-1 UI
         """
         if len(bbox_coords) != 4:
             raise ValueError(f"Expected 4 coordinates, got {len(bbox_coords)}")
@@ -750,8 +678,8 @@ class GranularAssessmentService:
         }
 
     def _process_single_assessment_geometry(
-        self, attr_assessment: Dict[str, Any], attr_name: str = ""
-    ) -> Dict[str, Any]:
+        self, attr_assessment: dict[str, Any], attr_name: str = ""
+    ) -> dict[str, Any]:
         """
         Process geometry data for a single assessment (with confidence key).
 
@@ -808,8 +736,8 @@ class GranularAssessmentService:
         return enhanced_attr
 
     def _extract_geometry_from_assessment(
-        self, assessment_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, assessment_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Extract geometry data from assessment response and convert to proper format.
         Now supports recursive processing of nested group attributes.
@@ -960,6 +888,9 @@ class GranularAssessmentService:
             # Read page images with configurable dimensions (type-safe access)
             target_width = self.config.assessment.image.target_width
             target_height = self.config.assessment.image.target_height
+            logger.info(
+                f"Image resize config: target_width={target_width}, target_height={target_height}"
+            )
 
             page_images = []
             for page_id in sorted_page_ids:
@@ -968,9 +899,12 @@ class GranularAssessmentService:
 
                 page = document.pages[page_id]
                 image_uri = page.image_uri
-                # Just pass the values directly - prepare_image handles empty strings/None
+                # For assessment, convert to PNG for better compression with rulers/overlays
                 image_content = image.prepare_image(
-                    image_uri, target_width, target_height
+                    image_uri, target_width, target_height, output_format="PNG"
+                )
+                logger.info(
+                    f"Loaded page {page_id} image as PNG: {len(image_content):,} bytes"
                 )
                 page_images.append(image_content)
 
@@ -1043,8 +977,11 @@ class GranularAssessmentService:
 
                 # Apply grid overlay to page images for assessment
                 grid_page_images = []
-                for page_img in page_images:
+                for idx, page_img in enumerate(page_images):
                     grid_img = add_ruler_edges(page_img)
+                    logger.info(
+                        f"Added ruler overlay to page {idx}: {len(page_img):,} bytes -> {len(grid_img):,} bytes"
+                    )
                     grid_page_images.append(grid_img)
 
                 # Execute tasks using Strands-based parallel executor
@@ -1065,6 +1002,7 @@ class GranularAssessmentService:
                         system_prompt=self.config.assessment.system_prompt,
                         temperature=self.config.assessment.temperature,
                         max_tokens=self.config.assessment.max_tokens,
+                        document_schema=class_schema,
                         max_concurrent=self.max_workers,
                     )
                 )
@@ -1354,10 +1292,10 @@ class GranularAssessmentService:
     def _handle_parsing_errors(
         self,
         document: Document,
-        failed_tasks: List[str],
+        failed_tasks: list[str],
         document_text: str,
-        extraction_results: Dict,
-    ) -> Optional[str]:
+        extraction_results: dict,
+    ) -> str | None:
         """Handle multiple parsing errors with user-friendly messaging."""
         # Check for token limit issues
         token_warning = check_token_limit(

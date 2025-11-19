@@ -12,40 +12,16 @@ from typing import Any
 
 from aws_lambda_powertools import Logger
 from botocore.config import Config
-from pydantic import BaseModel
 from strands import Agent, tool
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.types.content import ContentBlock, Message
 
+from idp_common.assessment.models import AssessmentResult, AssessmentTask
 from idp_common.assessment.strands_models import AssessmentOutput
 from idp_common.assessment.strands_tools import create_strands_tools
 
 logger = Logger(service="assessment", level=os.getenv("LOG_LEVEL", "INFO"))
-
-
-# Pydantic versions of AssessmentTask/Result for Strands compatibility
-# Note: granular_service has dataclass versions - these are separate for Strands
-class AssessmentTask(BaseModel):
-    """Assessment task definition."""
-
-    task_id: str
-    task_type: str
-    attributes: list[str]
-    task_schema: dict[str, Any]
-    confidence_thresholds: dict[str, float]
-
-
-class AssessmentResult(BaseModel):
-    """Assessment result."""
-
-    task_id: str
-    success: bool
-    assessment_data: dict[str, Any]
-    confidence_alerts: list[dict[str, Any]]
-    error_message: str | None = None
-    processing_time: float = 0.0
-    metering: dict[str, Any] | None = None
 
 
 def create_submit_assessment_tool():
@@ -99,6 +75,7 @@ async def assess_attribute_with_strands(
     system_prompt: str,
     temperature: float,
     max_tokens: int,
+    document_schema: dict[str, Any],
     max_retries: int = 7,
     connect_timeout: float = 10.0,
     read_timeout: float = 300.0,
@@ -131,10 +108,15 @@ async def assess_attribute_with_strands(
         submit_tool = create_submit_assessment_tool()
         tools = base_tools + [submit_tool]
 
-        # 2. Build task-specific prompt
-        task_prompt = _build_task_prompt(task, extraction_results, len(page_images))
+        # 2. Build enhanced system prompt with schema and extraction (for caching)
+        enhanced_system_prompt = _build_system_prompt_with_context(
+            system_prompt, document_schema, extraction_results, len(page_images)
+        )
 
-        # 3. Create Bedrock model config (following agentic_idp.py pattern)
+        # 3. Build minimal task-specific prompt (just field path and threshold)
+        task_prompt = _build_task_prompt(task)
+
+        # 4. Create Bedrock model config (following agentic_idp.py pattern)
         boto_config = Config(
             retries={
                 "max_attempts": max_retries,
@@ -151,18 +133,18 @@ async def assess_attribute_with_strands(
             "boto_client_config": boto_config,
         }
 
-        # 4. Initialize Strands agent
+        # 5. Initialize Strands agent
         agent = Agent(
             model=BedrockModel(**model_config),
             tools=tools,
-            system_prompt=system_prompt,
+            system_prompt=enhanced_system_prompt,
             state={
                 "task": task.model_dump(),
                 "extraction_results": extraction_results,
                 "assessment_output": None,
             },
             conversation_manager=SummarizingConversationManager(
-                summary_ratio=0.8, preserve_recent_messages=2
+                summary_ratio=0.8, preserve_recent_messages=1
             ),
         )
 
@@ -175,7 +157,7 @@ async def assess_attribute_with_strands(
             extra={
                 "task_id": task.task_id,
                 "task_type": task.task_type,
-                "attributes": task.attributes,
+                "field_name": task.field_name,
             },
         )
 
@@ -193,12 +175,29 @@ async def assess_attribute_with_strands(
         # Validate to Pydantic model
         assessment_output = AssessmentOutput(**assessment_dict)
 
-        # Validate that agent assessed exactly the expected field
-        expected_field = task.attributes[0]  # Task assesses exactly one field
-        if assessment_output.field_name != expected_field:
+        # Validate that agent assessed the expected field
+        # The agent may return:
+        # - Just the field name: "Street"
+        # - Full path with dots: "VendorAddress.Street"
+        # - Full path with array indices: "Items[0].Description"
+        # We accept any of these as long as the expected field_name appears
+        expected_field = task.field_name
+        assessed_field = assessment_output.field_name
+
+        # Check if fields match:
+        # 1. Exact match
+        # 2. Expected field is at the end after a dot: "VendorAddress.Street" ends with ".Street"
+        # 3. Expected field is at the end after bracket: "Items[0].Description" ends with ".Description"
+        if not (
+            assessed_field == expected_field
+            or assessed_field.endswith(f".{expected_field}")
+            or assessed_field.endswith(f"]{expected_field}")
+            or f".{expected_field}" in assessed_field
+            or f"]{expected_field}" in assessed_field
+        ):
             raise ValueError(
                 f"Agent assessed wrong field: expected '{expected_field}', "
-                f"got '{assessment_output.field_name}'"
+                f"got '{assessed_field}'"
             )
 
         # 8. Extract metering from response
@@ -259,51 +258,44 @@ async def assess_attribute_with_strands(
         )
 
 
-def _build_task_prompt(
-    task: AssessmentTask,
+def _build_system_prompt_with_context(
+    base_system_prompt: str,
+    document_schema: dict[str, Any],
     extraction_results: dict[str, Any],
     num_images: int,
 ) -> str:
     """
-    Build prompt for assessing a single field.
+    Build system prompt with full schema and extraction results for prompt caching.
 
-    Includes:
-    - Clear field path (e.g., "address.street" or "items[2].price")
-    - Full extraction results for context
-    - Schema and threshold for the specific field
-    - Instructions for using images and tools
+    This puts the static/cacheable content (schema, extraction, general instructions)
+    in the system prompt, which benefits from prompt caching.
 
     Args:
-        task: Assessment task for one specific field
-        extraction_results: Complete extraction results (arbitrarily nested)
+        base_system_prompt: Base assessment system prompt
+        document_schema: Full JSON schema for the document class
+        extraction_results: Complete extraction results
         num_images: Number of available page images
 
     Returns:
-        Formatted prompt string
+        Enhanced system prompt with schema and extraction context
     """
-    # Get the single field being assessed
-    field_path = task.attributes[
-        0
-    ]  # e.g., "name" or "address.street" or "items[0].price"
-    threshold = list(task.confidence_thresholds.values())[0]
+    return f"""{base_system_prompt}
 
-    prompt = f"""# Confidence Assessment Task
+## Document Schema
 
-You are assessing the confidence of a SINGLE extracted field from a document.
+Below is the full JSON schema for this document type. This defines all fields, their types, and confidence thresholds.
 
-## Field to Assess
-**Field Path**: `{field_path}`
-**Confidence Threshold**: {threshold}
+```json
+{json.dumps(document_schema, indent=2)}
+```
 
 ## Complete Extraction Results
-(Full document context - locate the value for `{field_path}`)
+
+Below are the complete extraction results for the document being assessed. When assessing a specific field, locate its value in this structure.
+
+```json
 {json.dumps(extraction_results, indent=2)}
-
-## Field Schema
-{json.dumps(task.task_schema, indent=2)}
-
-## Your Task
-Assess ONLY the field `{field_path}`. Do not assess any other fields.
+```
 
 ## Available Document Images
 
@@ -335,14 +327,45 @@ Bounding boxes use normalized 0-1000 coordinates:
 
 Example: {{"x1": 150, "y1": 220, "x2": 380, "y2": 245, "page": 1}}
 
-## Output Schema
-
-Your assessment must match the {task.task_type} schema.
-Use the `submit_assessment` tool when ready with a complete assessment dict.
-
-**Important**: You MUST call `submit_assessment` to complete this task.
+**Important**: You MUST call `submit_assessment` to complete each task.
 """
-    return prompt
+
+
+def _build_task_prompt(task: AssessmentTask) -> str:
+    """
+    Build minimal task-specific prompt for assessing a single field.
+
+    This is minimal (just field path and threshold) to maximize the benefit
+    of caching the system prompt which contains the schema and extraction.
+
+    Args:
+        task: Assessment task for one specific field
+
+    Returns:
+        Minimal task prompt string
+    """
+    # Convert field_path tuple to string representation
+    # e.g., ("address", "street") -> "address.street"
+    # e.g., ("items", 0, "price") -> "items[0].price"
+    path_parts = []
+    for part in task.field_path:
+        if isinstance(part, int):
+            path_parts[-1] = f"{path_parts[-1]}[{part}]"
+        else:
+            path_parts.append(str(part))
+    field_path_str = ".".join(path_parts)
+
+    return f"""# Assessment Task
+
+Assess the confidence of this field:
+
+**Field Path**: `{field_path_str}`
+**Confidence Threshold**: {task.confidence_threshold}
+
+Locate the value for `{field_path_str}` in the extraction results provided in the system context, verify it against the document images, and submit your assessment.
+
+You MUST assess ONLY this field - do not assess any other fields.
+"""
 
 
 def _convert_to_assessment_result(

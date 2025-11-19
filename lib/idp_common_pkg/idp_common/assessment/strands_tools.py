@@ -11,6 +11,7 @@ from typing import Any
 from aws_lambda_powertools import Logger
 from pydantic import BaseModel, Field
 from strands import Agent, tool
+from strands.types.content import ContentBlock, ImageContent
 
 from idp_common.assessment.strands_models import BoundingBox
 from idp_common.utils.grid_overlay import draw_bounding_boxes
@@ -48,7 +49,7 @@ def create_view_image_tool(page_images: list[bytes], sorted_page_ids: list[str])
     """
 
     @tool
-    def view_image(input_data: dict[str, Any], agent: Agent) -> str:
+    def view_image(input_data: dict[str, Any], agent: Agent) -> ImageContent:
         """
         View a specific page image, optionally highlighting a bounding box area.
 
@@ -62,7 +63,7 @@ def create_view_image_tool(page_images: list[bytes], sorted_page_ids: list[str])
                 - label (str, optional): Label for the bounding box
 
         Returns:
-            Success message with image details
+            ImageContent object that the LLM can see
 
         Example:
             view_image({
@@ -116,26 +117,29 @@ def create_view_image_tool(page_images: list[bytes], sorted_page_ids: list[str])
                 },
             )
 
-        # Store the image in agent state using standardized key
-        image_key = f"page_{view_input.image_index}_{page_id}"
-        agent.state.set(image_key, img_bytes)
-
         logger.info(
-            "Stored image in agent state",
+            "Returning image to agent",
             extra={
                 "image_index": view_input.image_index,
                 "page_id": page_id,
                 "has_bbox": view_input.bounding_box is not None,
+                "image_size_bytes": len(img_bytes),
             },
         )
 
-        bbox_info = ""
-        if view_input.bounding_box:
-            bbox_info = f"\nHighlighted region: [{view_input.bounding_box.x1}, {view_input.bounding_box.y1}, {view_input.bounding_box.x2}, {view_input.bounding_box.y2}] on page {view_input.bounding_box.page}"
-            if view_input.label:
-                bbox_info += f'\nLabel: "{view_input.label}"'
+        # Return the image as ImageContent so the LLM can actually see it
+        import base64
 
-        return f"Showing page {view_input.image_index} (Page ID: {page_id}){bbox_info}\nUse the coordinate grid (0-1000 scale) to specify bounding boxes."
+        image_b64 = base64.b64encode(img_bytes).decode("utf-8")
+
+        return ImageContent(
+            type="image",
+            source={
+                "type": "base64",
+                "media_type": "image/png",
+                "data": image_b64,
+            },
+        )
 
     return view_image
 

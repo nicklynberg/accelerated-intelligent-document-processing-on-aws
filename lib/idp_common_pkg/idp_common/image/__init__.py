@@ -3,12 +3,13 @@
 
 from PIL import Image, ImageFilter, ImageChops, ImageOps, ImageDraw, ImageFont
 import io
-import logging
+import os
 from typing import Tuple, Optional, Dict, Any, Union, List
+from aws_lambda_powertools import Logger
 from ..s3 import get_binary_content
 from ..utils import parse_s3_uri
 
-logger = logging.getLogger(__name__)
+logger = Logger(service="image", level=os.getenv("LOG_LEVEL", "INFO"))
 
 
 def resize_image(
@@ -16,6 +17,7 @@ def resize_image(
     target_width: Optional[int] = None,
     target_height: Optional[int] = None,
     allow_upscale: bool = False,
+    output_format: Optional[str] = None,
 ) -> bytes:
     """
     Resize an image to fit within target dimensions while preserving aspect ratio.
@@ -27,9 +29,10 @@ def resize_image(
         target_width: Target width in pixels (None or empty string = no resize)
         target_height: Target height in pixels (None or empty string = no resize)
         allow_upscale: Whether to allow making the image larger than original
+        output_format: Force output format (e.g. 'PNG', 'JPEG'). If None, preserves original format.
 
     Returns:
-        Resized image bytes in original format (or JPEG if format cannot be preserved)
+        Resized image bytes in specified format (or original format if output_format is None)
     """
     # Handle empty strings - convert to None
     if isinstance(target_width, str) and not target_width.strip():
@@ -91,8 +94,14 @@ def resize_image(
         # Save in original format if possible
         img_byte_array = io.BytesIO()
 
-        # Determine save format - use original if available, otherwise JPEG
-        if original_format and original_format in [
+        # Determine save format
+        if output_format:
+            # Use explicitly requested format
+            save_format = output_format.upper()
+            logger.info(
+                f"Converting from {original_format or 'unknown'} to {save_format}"
+            )
+        elif original_format and original_format in [
             "JPEG",
             "PNG",
             "GIF",
@@ -112,6 +121,8 @@ def resize_image(
         if save_format in ["JPEG", "JPG"]:
             save_kwargs["quality"] = 95  # High quality
             save_kwargs["optimize"] = True
+        elif save_format == "PNG":
+            save_kwargs["optimize"] = True
 
         # Handle format-specific requirements
         if save_format == "PNG" and image.mode not in ["RGBA", "LA", "L", "P"]:
@@ -120,11 +131,17 @@ def resize_image(
                 image = image.convert("RGB")
 
         image.save(img_byte_array, **save_kwargs)
-        return img_byte_array.getvalue()
+        result_bytes = img_byte_array.getvalue()
+        logger.info(
+            f"resize_image: resized to {image.width}x{image.height}, "
+            f"saved as {save_format}, size={len(result_bytes):,} bytes"
+        )
+        return result_bytes
     else:
         # No resizing needed - return original data unchanged
         logger.info(
-            f"Image {current_width}x{current_height} already fits within {target_width}x{target_height}, returning original"
+            f"resize_image: image {current_width}x{current_height} already fits within "
+            f"{target_width}x{target_height}, returning original ({len(image_data):,} bytes)"
         )
         return image_data
 
@@ -134,6 +151,7 @@ def prepare_image(
     target_width: Optional[int] = None,
     target_height: Optional[int] = None,
     allow_upscale: bool = False,
+    output_format: Optional[str] = None,
 ) -> bytes:
     """
     Prepare an image for model input from either S3 URI or raw bytes
@@ -143,9 +161,10 @@ def prepare_image(
         target_width: Target width in pixels (None or empty string = no resize)
         target_height: Target height in pixels (None or empty string = no resize)
         allow_upscale: Whether to allow making the image larger than original
+        output_format: Force output format (e.g. 'PNG', 'JPEG'). If None, preserves original format.
 
     Returns:
-        Processed image bytes ready for model input (preserves format when possible)
+        Processed image bytes ready for model input
     """
     # Get the image data
     if isinstance(image_source, str) and image_source.startswith("s3://"):
@@ -158,7 +177,9 @@ def prepare_image(
         )
 
     # Resize and process
-    return resize_image(image_data, target_width, target_height, allow_upscale)
+    return resize_image(
+        image_data, target_width, target_height, allow_upscale, output_format
+    )
 
 
 def apply_adaptive_binarization(image_data: bytes) -> bytes:
