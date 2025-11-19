@@ -924,6 +924,7 @@ dependencies = [
     { name = "boto3" },
     { name = "deepdiff" },
     { name = "jsonschema" },
+    { name = "mypy-boto3-bedrock-runtime" },
     { name = "pydantic" },
 ]
 
@@ -1071,6 +1072,7 @@ requires-dist = [
     { name = "moto", extras = ["s3"], marker = "extra == 'test'", specifier = "==5.1.8" },
     { name = "munkres", marker = "extra == 'all'", specifier = ">=1.1.4" },
     { name = "munkres", marker = "extra == 'evaluation'", specifier = ">=1.1.4" },
+    { name = "mypy-boto3-bedrock-runtime", specifier = ">=1.40.76" },
     { name = "mypy-boto3-dynamodb", marker = "extra == 'assessment'", specifier = ">=1.40.56" },
     { name = "numpy", marker = "extra == 'all'", specifier = "==1.26.4" },
     { name = "numpy", marker = "extra == 'evaluation'", specifier = "==1.26.4" },
@@ -1856,6 +1858,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fd/41/6a3d0ef908f47d07c31e5d1c2504388c27c39b10b8cf610175b5a789a5c1/munkres-1.1.4.tar.gz", hash = "sha256:fc44bf3c3979dada4b6b633ddeeb8ffbe8388ee9409e4d4e8310c2da1792db03", size = 14047, upload-time = "2020-09-15T15:12:20.956Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/90/ab/0301c945a704218bc9435f0e3c88884f6b19ef234d8899fb47ce1ccfd0c9/munkres-1.1.4-py2.py3-none-any.whl", hash = "sha256:6b01867d4a8480d865aea2326e4b8f7c46431e9e55b4a2e32d989307d7bced2a", size = 7015, upload-time = "2020-09-15T15:12:19.627Z" },
+]
+
+[[package]]
+name = "mypy-boto3-bedrock-runtime"
+version = "1.40.76"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e7/db/cc668a48a27973df31c7044a6785bd0e8691b1a0419dae001c4c29f1c98f/mypy_boto3_bedrock_runtime-1.40.76.tar.gz", hash = "sha256:52f2a2b3955eb9f4f0d075398f2d430abcc6bf56ff00815b94e3371e66030059", size = 28428, upload-time = "2025-11-18T21:42:43.41Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/6f/8b04729224a76952e08406eccbbbebfa75ee7df91313279d76428f13fdc2/mypy_boto3_bedrock_runtime-1.40.76-py3-none-any.whl", hash = "sha256:0347f6d78e342d640da74bbd6158b276c5cb39ef73405084a65fe490766b6dab", size = 34454, upload-time = "2025-11-18T21:42:42.156Z" },
 ]
 
 [[package]]

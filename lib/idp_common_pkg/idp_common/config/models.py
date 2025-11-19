@@ -317,7 +317,7 @@ Provide your assessment as a JSON object with this exact structure:
     image: ImageConfig = Field(default_factory=ImageConfig)
     # Granular assessment settings (always enabled, no longer nested)
     max_workers: int = Field(
-        default=20, gt=0, description="Max concurrent workers for parallel assessment"
+        default=50, gt=0, description="Max concurrent workers for parallel assessment"
     )
 
     @field_validator(

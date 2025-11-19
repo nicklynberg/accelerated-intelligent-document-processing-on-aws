@@ -25,6 +25,7 @@ dependencies = [
   "jsonschema>=4.25.1",
   "pydantic>=2.12.0",
   "deepdiff>=6.0.0",
+  "mypy-boto3-bedrock-runtime>=1.40.76",
 ]
 readme = "README.md"
 classifiers = [
@@ -73,6 +74,8 @@ extraction = [
 assessment = [
   "Pillow==11.2.1",               # For image handling
   "aws-lambda-powertools>=3.2.0", # Structured logging and observability
+  "mypy-boto3-dynamodb>=1.40.56",
+  "strands-agents==1.17.0",
 ]
 
 # Evaluation module dependencies
@@ -98,7 +101,7 @@ appsync = ["requests==2.32.4"]
 
 # Agents module dependencies
 agents = [
-  "strands-agents==1.14.0; python_version>='3.10'",
+  "strands-agents==1.17.0; python_version>='3.10'",
   "strands-agents-tools==0.2.13; python_version>='3.10'",
   "bedrock-agentcore>=0.1.1; python_version>='3.10'",     # Specifically for the code interpreter tool
 ]
@@ -106,7 +109,7 @@ agents = [
 # Code intelligence module dependencies
 code_intel = [
   "requests==2.32.4",
-  "strands-agents==1.14.0",
+  "strands-agents==1.17.0",
   "strands-agents-tools==0.2.13",
   "bedrock-agentcore>=0.1.1",
   "PyYAML>=6.0.0",
@@ -164,14 +167,14 @@ all = [
   "pyarrow==20.0.0",
   "openpyxl==3.1.5",
   "python-docx==1.2.0",
-  "strands-agents==1.14.0; python_version>='3.10'",
+  "strands-agents==1.17.0; python_version>='3.10'",
   "strands-agents-tools==0.2.13; python_version>='3.10'",
   "bedrock-agentcore>=0.1.1; python_version>='3.10'",
   # "s3fs==2023.12.2" - - disabled till we fix package dependencies
 ]
 agentic-extraction = [
   "jsonpatch==1.33",
-  "strands-agents==1.14.0 ; python_full_version >= '3.10'",
+  "strands-agents==1.17.0 ; python_full_version >= '3.10'",
   "pandas>=2.2.3",
   "pymupdf==1.25.5",                                        # Pinned to 1.25.5 - has pre-built ARM64 wheels, 1.26.x requires compilation
   "email-validator>=2.3.0",

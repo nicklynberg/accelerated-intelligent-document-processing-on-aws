@@ -11,10 +11,8 @@ from typing import Any
 from aws_lambda_powertools import Logger
 from pydantic import BaseModel, Field
 from strands import Agent, tool
-from strands.types.content import ContentBlock, ImageContent
-from strands.types.tools import ToolResult, ToolResultContent, ToolResultStatus
 
-from idp_common.assessment.strands_models import BoundingBox
+from idp_common.assessment.strands_models import AssessmentOutput, BoundingBox
 from idp_common.utils.grid_overlay import draw_bounding_boxes
 from idp_common.utils.strands_agent_tools.todo_list import (
     create_todo_list,
@@ -35,6 +33,38 @@ class ViewImageInput(BaseModel):
         None, description="Optional bounding box to highlight on the image"
     )
     label: str | None = Field(None, description="Optional label for the bounding box")
+
+
+@tool
+def submit_assessment(assessment: AssessmentOutput, agent: Agent) -> str:
+    """
+    Submit your final confidence assessment.
+
+    Use this tool when you have:
+    1. Located the values in the document images
+    2. Determined precise bounding box coordinates using ruler markings
+    3. Assessed the confidence based on clarity and accuracy
+
+    Args:
+        assessment: Dictionary with:
+            - assessments: dict mapping attribute names to ConfidenceAssessment
+            - alerts: list of any threshold alerts (optional)
+
+    Returns:
+        Success confirmation message or validation error details
+    """
+    # Validate assessment structure and return helpful errors
+    validated_assessment = AssessmentOutput(**assessment)  # pyright: ignore[reportCallIssue]
+
+    # Store in agent state
+    agent.state.set("assessment_output", validated_assessment.model_dump())
+
+    logger.info(
+        "Assessment submitted successfully",
+        extra={"assessment": validated_assessment.model_dump()},
+    )
+
+    return "Assessment submitted successfully. You can now finish the task."
 
 
 def create_view_image_tool(page_images: list[bytes], sorted_page_ids: list[str]) -> Any:
@@ -163,4 +193,5 @@ def create_strands_tools(
         create_todo_list,
         update_todo,
         view_todo_list,
+        submit_assessment,
     ]

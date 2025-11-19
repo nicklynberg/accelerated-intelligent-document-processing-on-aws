@@ -14,9 +14,10 @@ This module provides a scalable approach to assessment by:
 import json
 import os
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from aws_lambda_powertools import Logger
+from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
 
 from idp_common import image, metrics, s3, utils
 from idp_common.assessment.models import AssessmentResult, AssessmentTask
@@ -31,7 +32,7 @@ from idp_common.config.schema_constants import (
     X_AWS_IDP_CONFIDENCE_THRESHOLD,
     X_AWS_IDP_DOCUMENT_TYPE,
 )
-from idp_common.extraction.models import ExtractionData, ExtractionMetadata
+from idp_common.extraction.models import ExtractionData
 from idp_common.models import Document, Status
 from idp_common.utils import check_token_limit
 from idp_common.utils.grid_overlay import add_ruler_edges

@@ -12,7 +12,7 @@ from typing import Any
 
 from aws_lambda_powertools import Logger
 from botocore.config import Config
-from strands import Agent, tool
+from strands import Agent
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.models.bedrock import BedrockModel
 from strands.types.content import ContentBlock, Message
@@ -20,50 +20,11 @@ from strands.types.content import ContentBlock, Message
 from idp_common.assessment.models import AssessmentResult, AssessmentTask
 from idp_common.assessment.strands_models import AssessmentOutput
 from idp_common.assessment.strands_tools import create_strands_tools
+from idp_common.utils.bedrock_utils import (
+    async_exponential_backoff_retry,
+)
 
 logger = Logger(service="assessment", level=os.getenv("LOG_LEVEL", "INFO"))
-
-
-def create_submit_assessment_tool():
-    """
-    Create a tool for submitting assessment results.
-
-    Returns:
-        A Strands tool function for submitting assessments
-    """
-
-    @tool
-    def submit_assessment(assessment: AssessmentOutput, agent: Agent) -> str:
-        """
-        Submit your final confidence assessment.
-
-        Use this tool when you have:
-        1. Located the values in the document images
-        2. Determined precise bounding box coordinates using ruler markings
-        3. Assessed the confidence based on clarity and accuracy
-
-        Args:
-            assessment: Dictionary with:
-                - assessments: dict mapping attribute names to ConfidenceAssessment
-                - alerts: list of any threshold alerts (optional)
-
-        Returns:
-            Success confirmation message or validation error details
-        """
-        # Validate assessment structure and return helpful errors
-        validated_assessment = AssessmentOutput(**assessment)  # pyright: ignore[reportCallIssue]
-
-        # Store in agent state
-        agent.state.set("assessment_output", validated_assessment.model_dump())
-
-        logger.info(
-            "Assessment submitted successfully",
-            extra={"assessment": validated_assessment.model_dump()},
-        )
-
-        return "Assessment submitted successfully. You can now finish the task."
-
-    return submit_assessment
 
 
 async def assess_attribute_with_strands(
@@ -105,9 +66,7 @@ async def assess_attribute_with_strands(
     try:
         # 1. Create tools (image viewer + todo list + submit assessment)
         base_tools = create_strands_tools(page_images, sorted_page_ids)
-        submit_tool = create_submit_assessment_tool()
-        tools = base_tools + [submit_tool]
-
+        tools = base_tools
         # 2. Build enhanced system prompt with schema and extraction (for caching)
         enhanced_system_prompt = _build_system_prompt_with_context(
             system_prompt, document_schema, extraction_results, len(page_images)
@@ -161,8 +120,17 @@ async def assess_attribute_with_strands(
             },
         )
 
-        response = await agent.invoke_async([user_message])
+        @async_exponential_backoff_retry(
+            max_retries=30,
+            initial_delay=5,
+            exponential_base=2,
+            jitter=0.5,
+            max_delay=900,
+        )
+        async def invoke_agent_with_retry():
+            return await agent.invoke_async([user_message])
 
+        response = await invoke_agent_with_retry()
         logger.debug("Agent response received", extra={"task_id": task.task_id})
 
         # 7. Extract assessment from agent state
