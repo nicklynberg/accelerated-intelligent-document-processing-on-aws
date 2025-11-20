@@ -46,9 +46,6 @@ from idp_common.utils.strands_agent_tools.todo_list import (
     update_todo,
     view_todo_list,
 )
-from lib.idp_common_pkg.idp_common.utils.bedrock_utils import (
-    async_exponential_backoff_retry,
-)
 
 # Supported image formats for Bedrock API
 SUPPORTED_IMAGE_FORMATS = {"jpeg", "png", "gif", "webp"}

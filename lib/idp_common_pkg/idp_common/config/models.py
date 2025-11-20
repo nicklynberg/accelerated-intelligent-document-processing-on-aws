@@ -132,6 +132,15 @@ class ExtractionConfig(BaseModel):
         if isinstance(v, str):
             return int(v) if v else 0
         return int(v)
+    
+    @model_validator(mode="after")
+    def model_validator(self) -> Self:
+
+        if not self.agentic.review_agent_model:
+            self.agentic.review_agent_model = self.model
+
+        return self
+
 
     @model_validator(mode="after")
     def set_default_review_agent_model(self) -> Self:
