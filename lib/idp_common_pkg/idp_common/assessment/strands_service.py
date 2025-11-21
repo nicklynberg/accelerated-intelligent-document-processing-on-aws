@@ -11,18 +11,17 @@ import time
 from typing import Any
 
 from aws_lambda_powertools import Logger
-from botocore.config import Config
 from strands import Agent
 from strands.agent.conversation_manager import SummarizingConversationManager
 from strands.models.bedrock import BedrockModel
-from strands.types.content import ContentBlock, Message
+from strands.types.content import CachePoint, ContentBlock, Message
+from strands.types.media import ImageContent, ImageSource
 
 from idp_common.assessment.models import AssessmentResult, AssessmentTask
 from idp_common.assessment.strands_models import AssessmentOutput
 from idp_common.assessment.strands_tools import create_strands_tools
-from idp_common.utils.bedrock_utils import (
-    async_exponential_backoff_retry,
-)
+from idp_common.bedrock import build_model_config
+from idp_common.utils.bedrock_utils import async_exponential_backoff_retry
 
 logger = Logger(service="assessment", level=os.getenv("LOG_LEVEL", "INFO"))
 
@@ -63,167 +62,192 @@ async def assess_attribute_with_strands(
     """
     start_time = time.time()
 
+    # 1. Create tools (image viewer + todo list + submit assessment)
+    tools = create_strands_tools(page_images, sorted_page_ids)
+
+    # 2. Build enhanced system prompt with schema and extraction (for caching)
+    enhanced_system_prompt = _build_system_prompt_with_context(
+        system_prompt, document_schema, extraction_results, len(page_images)
+    )
+
+    # 3. Build minimal task-specific prompt (just field path and threshold)
+    task_prompt = _build_task_prompt(task, page_images)
+
+    # 4. Create Bedrock model config using shared utility
+    model_config = build_model_config(
+        model_id=model_id,
+        max_tokens=max_tokens,
+        max_retries=max_retries,
+        connect_timeout=connect_timeout,
+        read_timeout=read_timeout,
+    )
+    # Add temperature (not handled by build_model_config)
+    model_config["temperature"] = temperature
+
+    # 5. Initialize Strands agent
+    agent = Agent(
+        model=BedrockModel(**model_config),
+        tools=tools,
+        system_prompt=enhanced_system_prompt,
+        state={
+            "task": task.model_dump(),
+            "extraction_results": extraction_results,
+            "assessment_output": None,
+        },
+        conversation_manager=SummarizingConversationManager(
+            summary_ratio=0.8, preserve_recent_messages=1
+        ),
+    )
+
+    # 6. Create user message and run agent with retry
+    user_message = Message(role="user", content=task_prompt)
+
+    logger.info(
+        "Starting Strands assessment",
+        extra={
+            "task_id": task.task_id,
+            "task_type": task.task_type,
+            "field_name": task.field_name,
+        },
+    )
+
+    @async_exponential_backoff_retry(
+        max_retries=30,
+        initial_delay=5,
+        exponential_base=2,
+        jitter=0.5,
+        max_delay=900,
+    )
+    async def invoke_agent_with_retry():
+        return await agent.invoke_async([user_message])
+
     try:
-        # 1. Create tools (image viewer + todo list + submit assessment)
-        base_tools = create_strands_tools(page_images, sorted_page_ids)
-        tools = base_tools
-        # 2. Build enhanced system prompt with schema and extraction (for caching)
-        enhanced_system_prompt = _build_system_prompt_with_context(
-            system_prompt, document_schema, extraction_results, len(page_images)
-        )
-
-        # 3. Build minimal task-specific prompt (just field path and threshold)
-        task_prompt = _build_task_prompt(task)
-
-        # 4. Create Bedrock model config (following agentic_idp.py pattern)
-        boto_config = Config(
-            retries={
-                "max_attempts": max_retries,
-                "mode": "adaptive",
-            },
-            connect_timeout=connect_timeout,
-            read_timeout=read_timeout,
-        )
-
-        model_config = {
-            "model_id": model_id,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "boto_client_config": boto_config,
-        }
-
-        # 5. Initialize Strands agent
-        agent = Agent(
-            model=BedrockModel(**model_config),
-            tools=tools,
-            system_prompt=enhanced_system_prompt,
-            state={
-                "task": task.model_dump(),
-                "extraction_results": extraction_results,
-                "assessment_output": None,
-            },
-            conversation_manager=SummarizingConversationManager(
-                summary_ratio=0.8, preserve_recent_messages=1
-            ),
-        )
-
-        # 5. Create user message with task prompt
-        user_message = Message(role="user", content=[ContentBlock(text=task_prompt)])
-
-        # 6. Run agent
-        logger.info(
-            "Starting Strands assessment",
-            extra={
-                "task_id": task.task_id,
-                "task_type": task.task_type,
-                "field_name": task.field_name,
-            },
-        )
-
-        @async_exponential_backoff_retry(
-            max_retries=30,
-            initial_delay=5,
-            exponential_base=2,
-            jitter=0.5,
-            max_delay=900,
-        )
-        async def invoke_agent_with_retry():
-            return await agent.invoke_async([user_message])
-
         response = await invoke_agent_with_retry()
         logger.debug("Agent response received", extra={"task_id": task.task_id})
-
-        # 7. Extract assessment from agent state
-        assessment_dict = agent.state.get("assessment_output")
-        if not assessment_dict:
-            raise ValueError(
-                "Agent did not produce assessment output. Agent may not have called submit_assessment tool."
-            )
-
-        # Validate to Pydantic model
-        assessment_output = AssessmentOutput(**assessment_dict)
-
-        # Validate that agent assessed the expected field
-        # The agent may return:
-        # - Just the field name: "Street"
-        # - Full path with dots: "VendorAddress.Street"
-        # - Full path with array indices: "Items[0].Description"
-        # We accept any of these as long as the expected field_name appears
-        expected_field = task.field_name
-        assessed_field = assessment_output.field_name
-
-        # Check if fields match:
-        # 1. Exact match
-        # 2. Expected field is at the end after a dot: "VendorAddress.Street" ends with ".Street"
-        # 3. Expected field is at the end after bracket: "Items[0].Description" ends with ".Description"
-        if not (
-            assessed_field == expected_field
-            or assessed_field.endswith(f".{expected_field}")
-            or assessed_field.endswith(f"]{expected_field}")
-            or f".{expected_field}" in assessed_field
-            or f"]{expected_field}" in assessed_field
-        ):
-            raise ValueError(
-                f"Agent assessed wrong field: expected '{expected_field}', "
-                f"got '{assessed_field}'"
-            )
-
-        # 8. Extract metering from response
-        metering = {}
-        if response.metrics and response.metrics.accumulated_usage:
-            token_usage = {
-                "inputTokens": response.metrics.accumulated_usage.get("inputTokens", 0),
-                "outputTokens": response.metrics.accumulated_usage.get(
-                    "outputTokens", 0
-                ),
-                "totalTokens": response.metrics.accumulated_usage.get("totalTokens", 0),
-                "cacheReadInputTokens": response.metrics.accumulated_usage.get(
-                    "cacheReadInputTokens", 0
-                ),
-                "cacheWriteInputTokens": response.metrics.accumulated_usage.get(
-                    "cacheWriteInputTokens", 0
-                ),
-            }
-            metering[f"assessment/bedrock/{model_id}"] = token_usage
-
-        # 9. Convert to AssessmentResult format
-        result = _convert_to_assessment_result(
-            task,
-            assessment_output,
-            metering,
-            time.time() - start_time,
-        )
-
-        logger.info(
-            "Assessment completed successfully",
-            extra={
-                "task_id": task.task_id,
-                "processing_time": result.processing_time,
-                "success": result.success,
-            },
-        )
-
-        return result
-
     except Exception as e:
-        # Return failed result
         logger.error(
-            "Assessment failed",
-            extra={
-                "task_id": task.task_id,
-                "error": str(e),
-                "processing_time": time.time() - start_time,
-            },
+            "Agent invocation failed",
+            extra={"task_id": task.task_id, "error": str(e)},
         )
-
         return AssessmentResult(
             task_id=task.task_id,
             success=False,
             assessment_data={},
             confidence_alerts=[],
-            error_message=str(e),
+            error_message=f"Agent invocation failed: {str(e)}",
             processing_time=time.time() - start_time,
         )
+
+    # 7. Extract and validate assessment from agent state
+    assessment_dict = agent.state.get("assessment_output")
+    if not assessment_dict:
+        return AssessmentResult(
+            task_id=task.task_id,
+            success=False,
+            assessment_data={},
+            confidence_alerts=[],
+            error_message="Agent did not produce assessment output. Agent may not have called submit_assessment tool.",
+            processing_time=time.time() - start_time,
+        )
+
+    try:
+        assessment_output = AssessmentOutput(**assessment_dict)
+    except Exception as e:
+        return AssessmentResult(
+            task_id=task.task_id,
+            success=False,
+            assessment_data={},
+            confidence_alerts=[],
+            error_message=f"Invalid assessment output format: {str(e)}",
+            processing_time=time.time() - start_time,
+        )
+
+    # Validate that agent assessed the expected field
+    if not _field_names_match(task.field_name, assessment_output.field_name):
+        return AssessmentResult(
+            task_id=task.task_id,
+            success=False,
+            assessment_data={},
+            confidence_alerts=[],
+            error_message=f"Agent assessed wrong field: expected '{task.field_name}', got '{assessment_output.field_name}'",
+            processing_time=time.time() - start_time,
+        )
+
+    # 8. Extract metering from response
+    metering = _extract_metering(response, model_id)
+
+    # 9. Convert to AssessmentResult format
+    result = _convert_to_assessment_result(
+        task,
+        assessment_output,
+        metering,
+        time.time() - start_time,
+    )
+
+    logger.info(
+        "Assessment completed successfully",
+        extra={
+            "task_id": task.task_id,
+            "processing_time": result.processing_time,
+            "success": result.success,
+        },
+    )
+
+    return result
+
+
+def _field_names_match(expected: str, actual: str) -> bool:
+    """
+    Check if field names match, handling nested paths with dots and array indices.
+
+    Examples:
+        - "address.street" matches "address.street"
+        - "items[0].price" matches "items[0].price"
+        - "address" matches "address"
+
+    Args:
+        expected: Expected field name/path
+        actual: Actual field name/path from agent
+
+    Returns:
+        True if field names match
+    """
+    return expected == actual
+
+
+def _extract_metering(response: Any, model_id: str) -> dict[str, Any]:
+    """
+    Extract metering data from Strands AgentResult response.
+
+    Args:
+        response: AgentResult from agent.invoke_async() (has metrics attribute)
+        model_id: Model ID for metering key
+
+    Returns:
+        Metering dict with token usage, or empty dict if no metrics
+    """
+    metering = {}
+    # AgentResult has metrics attribute at runtime (from Strands)
+    if (
+        hasattr(response, "metrics")
+        and response.metrics
+        and hasattr(response.metrics, "accumulated_usage")
+        and response.metrics.accumulated_usage
+    ):  # type: ignore[attr-defined]
+        token_usage = {
+            "inputTokens": response.metrics.accumulated_usage.get("inputTokens", 0),  # type: ignore[attr-defined]
+            "outputTokens": response.metrics.accumulated_usage.get("outputTokens", 0),  # type: ignore[attr-defined]
+            "totalTokens": response.metrics.accumulated_usage.get("totalTokens", 0),  # type: ignore[attr-defined]
+            "cacheReadInputTokens": response.metrics.accumulated_usage.get(  # type: ignore[attr-defined]
+                "cacheReadInputTokens", 0
+            ),
+            "cacheWriteInputTokens": response.metrics.accumulated_usage.get(  # type: ignore[attr-defined]
+                "cacheWriteInputTokens", 0
+            ),
+        }
+        metering[f"assessment/bedrock/{model_id}"] = token_usage
+
+    return metering
 
 
 def _build_system_prompt_with_context(
@@ -299,7 +323,36 @@ Example: {{"x1": 150, "y1": 220, "x2": 380, "y2": 245, "page": 1}}
 """
 
 
-def _build_task_prompt(task: AssessmentTask) -> str:
+def _convert_field_path_to_string(field_path: tuple[str | int, ...]) -> str:
+    """
+    Convert field path tuple to dot notation string.
+
+    Examples:
+        ("address", "street") → "address.street"
+        ("items", 0, "price") → "items[0].price"
+        ("orders", 2, "line_items", 1, "quantity") → "orders[2].line_items[1].quantity"
+
+    Args:
+        field_path: Tuple of field names (str) and array indices (int)
+
+    Returns:
+        Dot notation path string with array indices in brackets
+    """
+    path_parts = []
+    for part in field_path:
+        if isinstance(part, int):
+            # Append array index to previous part: "items" → "items[0]"
+            path_parts[-1] = f"{path_parts[-1]}[{part}]"
+        else:
+            # Add new field name
+            path_parts.append(str(part))
+
+    return ".".join(path_parts)
+
+
+def _build_task_prompt(
+    task: AssessmentTask, page_images: list[bytes]
+) -> list[ContentBlock]:
     """
     Build minimal task-specific prompt for assessing a single field.
 
@@ -308,32 +361,38 @@ def _build_task_prompt(task: AssessmentTask) -> str:
 
     Args:
         task: Assessment task for one specific field
+        page_images: List of page images to include in the prompt
 
     Returns:
-        Minimal task prompt string
+        List of content blocks with images and task text
     """
-    # Convert field_path tuple to string representation
-    # e.g., ("address", "street") -> "address.street"
-    # e.g., ("items", 0, "price") -> "items[0].price"
-    path_parts = []
-    for part in task.field_path:
-        if isinstance(part, int):
-            path_parts[-1] = f"{path_parts[-1]}[{part}]"
-        else:
-            path_parts.append(str(part))
-    field_path_str = ".".join(path_parts)
+    field_path_str = _convert_field_path_to_string(task.field_path)
 
-    return f"""# Assessment Task
+    # Create image content blocks
+    image_blocks = [
+        ContentBlock(image=ImageContent(format="png", source=ImageSource(bytes=img)))
+        for img in page_images
+    ]
 
-Assess the confidence of this field:
+    # Create task instruction block
+    task_block = ContentBlock(
+        text=f"""# Assessment Task
 
-**Field Path**: `{field_path_str}`
-**Confidence Threshold**: {task.confidence_threshold}
+        Assess the confidence of this field:
 
-Locate the value for `{field_path_str}` in the extraction results provided in the system context, verify it against the document images, and submit your assessment.
+        **Field Path**: `{field_path_str}`
+        **Confidence Threshold**: {task.confidence_threshold}
 
-You MUST assess ONLY this field - do not assess any other fields.
-"""
+        Locate the value for `{field_path_str}` in the extraction results provided in the system context, verify it against the document images, and submit your assessment.
+
+        You MUST assess ONLY this field - do not assess any other fields.
+        """
+    )
+
+    # Add cache point after task instructions
+    cache_block = ContentBlock(cachePoint=CachePoint(type="default"))
+
+    return [*image_blocks, task_block, cache_block]
 
 
 def _convert_to_assessment_result(

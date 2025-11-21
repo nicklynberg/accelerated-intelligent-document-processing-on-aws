@@ -10,7 +10,7 @@ the confidence and accuracy of extraction results.
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AttributeAssessment(BaseModel):
@@ -93,3 +93,70 @@ class AssessmentResult(BaseModel):
     error_message: str | None = None
     processing_time: float = 0.0
     metering: dict[str, Any] | None = None
+
+
+# ============================================================================
+# Models for assessment service.py (data flow and processing)
+# ============================================================================
+
+
+class Geometry(BaseModel):
+    """Geometry in IDP format (converted from BoundingBox)."""
+
+    boundingBox: dict[str, float]  # {top, left, width, height}
+    page: int
+
+
+class ConfidenceAlert(BaseModel):
+    """Alert for confidence threshold violation."""
+
+    attribute_name: str
+    confidence: float
+    confidence_threshold: float
+
+    @field_validator("confidence", "confidence_threshold", mode="before")
+    @classmethod
+    def parse_float(cls, v: Any) -> float:
+        """Parse float from string or number, handle None."""
+        if v is None:
+            return 0.0
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            if not v.strip():
+                return 0.0
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                return 0.0
+        # Fallback for other types
+        try:
+            return float(v)
+        except (ValueError, TypeError):
+            return 0.0
+
+
+class DocumentContent(BaseModel):
+    """Loaded content from document pages."""
+
+    document_text: str
+    page_images: list[Any]
+    ocr_text_confidence: str
+
+
+class ExtractionData(BaseModel):
+    """Loaded extraction data from S3."""
+
+    extraction_results: dict[str, Any]  # The inference_result dict
+    full_data: dict[str, Any]  # Complete data including metadata
+
+
+class AssessmentProcessingResult(BaseModel):
+    """Result of processing assessment data."""
+
+    enhanced_assessment_data: dict[str, Any]
+    confidence_alerts: list[ConfidenceAlert]
+    metering: dict[str, Any]
+    processing_metadata: dict[
+        str, Any
+    ]  # Contains assessment_time_seconds, parsing_succeeded, etc.

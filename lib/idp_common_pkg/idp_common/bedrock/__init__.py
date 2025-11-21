@@ -3,7 +3,13 @@
 
 """Bedrock integration module for IDP Common package."""
 
-from .client import BedrockClient, invoke_model, default_client
+from .client import BedrockClient, default_client, invoke_model
+from .model_config import (
+    build_model_config,
+    get_model_max_tokens,
+    supports_prompt_caching,
+    supports_tool_caching,
+)
 
 # Add version info
 __version__ = "0.1.0"
@@ -12,7 +18,11 @@ __version__ = "0.1.0"
 __all__ = [
     "BedrockClient",
     "invoke_model",
-    "default_client"
+    "default_client",
+    "build_model_config",
+    "get_model_max_tokens",
+    "supports_prompt_caching",
+    "supports_tool_caching",
 ]
 
 # Re-export key functions from the default client for backward compatibility

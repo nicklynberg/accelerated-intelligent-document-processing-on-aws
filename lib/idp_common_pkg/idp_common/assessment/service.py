@@ -17,9 +17,15 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, List, Union
+from typing import Any
 
 from idp_common import bedrock, image, metrics, s3, utils
+from idp_common.assessment.models import (
+    ConfidenceAlert,
+    DocumentContent,
+    ExtractionData,
+)
+from idp_common.bedrock import format_prompt
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
     SCHEMA_DESCRIPTION,
@@ -34,57 +40,37 @@ from idp_common.config.schema_constants import (
     X_AWS_IDP_LIST_ITEM_DESCRIPTION,
 )
 from idp_common.models import Document
+from idp_common.ocr.service import OcrService
 from idp_common.utils import extract_json_from_text
 
 logger = logging.getLogger(__name__)
 
 
-def _safe_float_conversion(value: Any, default: float = 0.0) -> float:
-    """
-    Safely convert a value to float, handling strings and None values.
-
-    Args:
-        value: Value to convert to float
-        default: Default value if conversion fails
-
-    Returns:
-        Float value or default if conversion fails
-    """
-    if value is None:
-        return default
-
-    if isinstance(value, (int, float)):
-        return float(value)
-
-    if isinstance(value, str):
-        # Handle empty strings
-        if not value.strip():
-            return default
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            logger.warning(
-                f"Could not convert string '{value}' to float, using default {default}"
-            )
-            return default
-
-    # Handle other types by attempting conversion
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        logger.warning(
-            f"Could not convert {type(value)} '{value}' to float, using default {default}"
-        )
-        return default
-
-
 class AssessmentService:
-    """Service for assessing extraction result confidence using LLMs."""
+    """
+    Service for assessing extraction result confidence using LLMs.
+
+    This service evaluates extraction results by analyzing them against source documents,
+    providing confidence scores and optional bounding box information for each extracted field.
+
+    The class is organized into the following sections:
+    1. INITIALIZATION - Setup and configuration
+    2. SCHEMA & CONFIGURATION - Schema lookup and property formatting
+    3. CONFIDENCE THRESHOLD HANDLING - Threshold validation and alert generation
+    4. PROMPT BUILDING - Template processing and content preparation
+    5. DATA LOADING - Loading document content and OCR data
+    6. GEOMETRY PROCESSING - Bounding box conversion and validation
+    7. PUBLIC API - Main entry points for assessment
+    """
+
+    # ============================================================================
+    # INITIALIZATION
+    # ============================================================================
 
     def __init__(
         self,
         region: str | None = None,
-        config: Union[Dict[str, Any], IDPConfig, None] = None,
+        config: dict[str, Any] | IDPConfig | None = None,
     ):
         """
         Initialize the assessment service.
@@ -117,7 +103,11 @@ class AssessmentService:
         model_id = self.config.assessment.model
         logger.info(f"Initialized assessment service with model {model_id}")
 
-    def _get_class_schema(self, class_label: str) -> Dict[str, Any]:
+    # ============================================================================
+    # SCHEMA & CONFIGURATION
+    # ============================================================================
+
+    def _get_class_schema(self, class_label: str) -> dict[str, Any]:
         """
         Get JSON Schema for a specific document class.
 
@@ -134,7 +124,7 @@ class AssessmentService:
                 return schema
         return {}
 
-    def _format_property_descriptions(self, schema: Dict[str, Any]) -> str:
+    def _format_property_descriptions(self, schema: dict[str, Any]) -> str:
         """
         Format property descriptions from JSON Schema for the prompt.
 
@@ -178,9 +168,13 @@ class AssessmentService:
 
         return "\n".join(formatted_lines)
 
+    # ============================================================================
+    # CONFIDENCE THRESHOLD HANDLING
+    # ============================================================================
+
     def _enhance_dict_assessment(
-        self, assessment_dict: Dict[str, Any], threshold: float
-    ) -> Dict[str, Any]:
+        self, assessment_dict: dict[str, Any], threshold: float
+    ) -> dict[str, Any]:
         """
         Enhance an assessment dictionary by adding confidence thresholds to confidence assessments.
 
@@ -228,12 +222,31 @@ class AssessmentService:
                 enhanced[key] = value
         return enhanced
 
+    def _get_confidence_threshold(
+        self, prop_schema: dict[str, Any], default: float
+    ) -> float:
+        """
+        Get confidence threshold from property schema with validation.
+
+        Args:
+            prop_schema: Property schema dictionary
+            default: Default threshold if not specified in schema
+
+        Returns:
+            Validated float threshold value
+        """
+        value = prop_schema.get(X_AWS_IDP_CONFIDENCE_THRESHOLD, default)
+        # Use ConfidenceAlert's validator to parse the float safely
+        return ConfidenceAlert(
+            attribute_name="", confidence=0.0, confidence_threshold=value
+        ).confidence_threshold
+
     def _check_confidence_alerts(
         self,
-        assessment_data: Dict[str, Any],
+        assessment_data: dict[str, Any],
         attr_name: str,
         threshold: float,
-        alerts_list: List[Dict[str, Any]],
+        alerts_list: list[ConfidenceAlert],
     ) -> None:
         """
         Check assessment data for confidence threshold violations and add alerts.
@@ -252,48 +265,41 @@ class AssessmentService:
             )
             return
 
-        # Safety check: ensure threshold is a valid float
-        safe_threshold = _safe_float_conversion(threshold, 0.9)
-
         # First check if this assessment_data itself is a direct confidence assessment
         if "confidence" in assessment_data:
-            confidence = _safe_float_conversion(
-                assessment_data.get("confidence", 0.0), 0.0
+            alert = ConfidenceAlert(
+                attribute_name=attr_name,
+                confidence=assessment_data.get("confidence", 0.0),
+                confidence_threshold=threshold,
             )
-            if confidence < safe_threshold:
-                alerts_list.append(
-                    {
-                        "attribute_name": attr_name,
-                        "confidence": confidence,
-                        "confidence_threshold": safe_threshold,
-                    }
-                )
+            if alert.confidence < alert.confidence_threshold:
+                alerts_list.append(alert)
 
         # Then check for nested sub-attributes (for group/complex attributes)
         for sub_attr_name, sub_assessment in assessment_data.items():
             if isinstance(sub_assessment, dict) and "confidence" in sub_assessment:
-                confidence = _safe_float_conversion(
-                    sub_assessment.get("confidence", 0.0), 0.0
+                full_attr_name = (
+                    f"{attr_name}.{sub_attr_name}"
+                    if "." not in attr_name
+                    else f"{attr_name}.{sub_attr_name}"
                 )
-                if confidence < safe_threshold:
-                    full_attr_name = (
-                        f"{attr_name}.{sub_attr_name}"
-                        if "." not in attr_name
-                        else f"{attr_name}.{sub_attr_name}"
-                    )
-                    alerts_list.append(
-                        {
-                            "attribute_name": full_attr_name,
-                            "confidence": confidence,
-                            "confidence_threshold": safe_threshold,
-                        }
-                    )
+                alert = ConfidenceAlert(
+                    attribute_name=full_attr_name,
+                    confidence=sub_assessment.get("confidence", 0.0),
+                    confidence_threshold=threshold,
+                )
+                if alert.confidence < alert.confidence_threshold:
+                    alerts_list.append(alert)
+
+    # ============================================================================
+    # PROMPT BUILDING
+    # ============================================================================
 
     def _prepare_prompt_from_template(
         self,
         prompt_template: str,
-        substitutions: Dict[str, str],
-        required_placeholders: List[str] = None,
+        substitutions: dict[str, str],
+        required_placeholders: list[str] | None = None,
     ) -> str:
         """
         Prepare prompt from template by replacing placeholders with values.
@@ -309,8 +315,6 @@ class AssessmentService:
         Raises:
             ValueError: If a required placeholder is missing from the template
         """
-        from idp_common.bedrock import format_prompt
-
         return format_prompt(prompt_template, substitutions, required_placeholders)
 
     def _build_content_with_or_without_image_placeholder(
@@ -322,7 +326,7 @@ class AssessmentService:
         extraction_results: str,
         ocr_text_confidence: str = "",
         image_content: Any = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Build content array, automatically deciding whether to use image placeholder processing.
 
@@ -368,7 +372,7 @@ class AssessmentService:
         extraction_results: str,
         ocr_text_confidence: str,
         image_content: Any = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Build content array with image inserted at DOCUMENT_IMAGE placeholder if present.
 
@@ -453,7 +457,7 @@ class AssessmentService:
         extraction_results: str,
         ocr_text_confidence: str,
         image_content: Any = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Build content array without DOCUMENT_IMAGE placeholder (text-only processing).
 
@@ -485,6 +489,101 @@ class AssessmentService:
         # Return text content only - no images unless DOCUMENT_IMAGE placeholder is used
         return [{"text": task_prompt}]
 
+    # ============================================================================
+    # DATA LOADING
+    # ============================================================================
+
+    def _load_extraction_data(self, section) -> ExtractionData:
+        """
+        Load extraction results from S3.
+
+        Args:
+            section: Section object containing extraction_result_uri
+
+        Returns:
+            ExtractionData with extraction_results and full_data
+
+        Raises:
+            ValueError: If no extraction results found
+        """
+        extraction_data = s3.get_json_content(section.extraction_result_uri)
+        extraction_results = extraction_data.get("inference_result", {})
+
+        if not extraction_results:
+            raise ValueError(
+                f"No extraction results found for section {section.section_id}"
+            )
+
+        return ExtractionData(
+            extraction_results=extraction_results, full_data=extraction_data
+        )
+
+    def _load_document_content(self, document: Document, section) -> DocumentContent:
+        """
+        Load document text, images, and OCR confidence for all pages in section.
+
+        Args:
+            document: Document object containing pages
+            section: Section object with page_ids
+
+        Returns:
+            DocumentContent with document_text, page_images, and ocr_text_confidence
+        """
+        # Sort pages by page number
+        sorted_page_ids = sorted(section.page_ids, key=int)
+
+        # Read document text from all pages in order
+        document_texts = []
+        for page_id in sorted_page_ids:
+            if page_id not in document.pages:
+                logger.warning(f"Page {page_id} not found in document")
+                continue
+
+            page = document.pages[page_id]
+            text_path = page.parsed_text_uri
+            if text_path:
+                page_text = s3.get_text_content(text_path)
+                document_texts.append(page_text)
+
+        document_text = "\n".join(document_texts)
+
+        # Read page images with configurable dimensions
+        target_width = self.config.assessment.image.target_width
+        target_height = self.config.assessment.image.target_height
+
+        page_images = []
+        for page_id in sorted_page_ids:
+            if page_id not in document.pages:
+                continue
+
+            page = document.pages[page_id]
+            image_uri = page.image_uri
+            if image_uri:
+                image_content = image.prepare_image(
+                    image_uri, target_width, target_height
+                )
+                page_images.append(image_content)
+
+        # Read text confidence data for confidence information
+        ocr_text_confidence = ""
+        for page_id in sorted_page_ids:
+            if page_id not in document.pages:
+                continue
+
+            page = document.pages[page_id]
+            text_confidence_data_str = self._get_text_confidence_data(page)
+            if text_confidence_data_str:
+                ocr_text_confidence += (
+                    f"\n--- Page {page_id} Text Confidence Data ---\n"
+                )
+                ocr_text_confidence += text_confidence_data_str
+
+        return DocumentContent(
+            document_text=document_text,
+            page_images=page_images,
+            ocr_text_confidence=ocr_text_confidence,
+        )
+
     def _get_text_confidence_data(self, page) -> str:
         """
         Get text confidence data for a page from pre-generated text confidence files.
@@ -508,8 +607,6 @@ class AssessmentService:
         # Fallback: use raw OCR data if text confidence is not available (for backward compatibility)
         if page.raw_text_uri:
             try:
-                from idp_common.ocr.service import OcrService
-
                 ocr_service = OcrService()
                 raw_ocr_data = s3.get_json_content(page.raw_text_uri)
                 text_confidence_data = ocr_service._generate_text_confidence_data(
@@ -523,9 +620,13 @@ class AssessmentService:
 
         return ""
 
+    # ============================================================================
+    # GEOMETRY PROCESSING
+    # ============================================================================
+
     def _convert_bbox_to_geometry(
-        self, bbox_coords: List[float], page_num: int
-    ) -> Dict[str, Any]:
+        self, bbox_coords: list[float], page_num: int
+    ) -> dict[str, Any]:
         """
         Convert [x1,y1,x2,y2] coordinates to geometry format.
 
@@ -557,8 +658,8 @@ class AssessmentService:
         }
 
     def _process_single_assessment_geometry(
-        self, attr_assessment: Dict[str, Any], attr_name: str = ""
-    ) -> Dict[str, Any]:
+        self, attr_assessment: dict[str, Any], attr_name: str = ""
+    ) -> dict[str, Any]:
         """
         Process geometry data for a single assessment (with confidence key).
 
@@ -615,8 +716,8 @@ class AssessmentService:
         return enhanced_attr
 
     def _extract_geometry_from_assessment(
-        self, assessment_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, assessment_data: dict[str, Any]
+    ) -> dict[str, Any]:
         """
         Extract geometry data from assessment response and convert to proper format.
         Now supports recursive processing of nested group attributes.
@@ -666,6 +767,250 @@ class AssessmentService:
 
         return enhanced_assessment
 
+    # ============================================================================
+    # RESULT PROCESSING
+    # ============================================================================
+
+    def _process_assessment_response(
+        self,
+        assessment_text: str,
+        extraction_results: dict[str, Any],
+        class_schema: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[ConfidenceAlert], bool]:
+        """
+        Process raw assessment response from LLM.
+
+        Args:
+            assessment_text: Raw text response from LLM
+            extraction_results: Original extraction results
+            class_schema: JSON Schema for the document class
+
+        Returns:
+            Tuple of (enhanced_assessment_data, confidence_alerts, parsing_succeeded)
+        """
+        # Parse response into JSON
+        assessment_data = {}
+        parsing_succeeded = True
+
+        try:
+            assessment_data = json.loads(extract_json_from_text(assessment_text))
+        except Exception as e:
+            logger.error(
+                f"Error parsing assessment LLM output - invalid JSON?: {assessment_text} - {e}"
+            )
+            logger.info("Using default confidence scores.")
+            # Create default assessments for all extracted attributes
+            assessment_data = {}
+            for attr_name in extraction_results.keys():
+                assessment_data[attr_name] = {
+                    "confidence": 0.5,
+                    "confidence_reason": "Unable to parse assessment response - default score assigned",
+                }
+            parsing_succeeded = False
+
+        # Process bounding boxes automatically if bbox data is present
+        try:
+            logger.debug("Checking for bounding box data in assessment response")
+            assessment_data = self._extract_geometry_from_assessment(assessment_data)
+        except Exception as e:
+            logger.warning(f"Failed to extract geometry data: {str(e)}")
+
+        # Enhance assessment data with confidence thresholds and create alerts
+        enhanced_assessment_data, confidence_alerts = (
+            self._enhance_and_check_thresholds(assessment_data, class_schema)
+        )
+
+        return enhanced_assessment_data, confidence_alerts, parsing_succeeded
+
+    def _enhance_and_check_thresholds(
+        self, assessment_data: dict[str, Any], class_schema: dict[str, Any]
+    ) -> tuple[dict[str, Any], list[ConfidenceAlert]]:
+        """
+        Enhance assessment data with thresholds and generate alerts.
+
+        Args:
+            assessment_data: Raw assessment data from LLM
+            class_schema: JSON Schema for the document class
+
+        Returns:
+            Tuple of (enhanced_assessment_data, confidence_alerts)
+        """
+        default_confidence_threshold = (
+            self.config.assessment.default_confidence_threshold
+        )
+
+        enhanced_assessment_data = {}
+        confidence_threshold_alerts: list[ConfidenceAlert] = []
+        properties = class_schema.get(SCHEMA_PROPERTIES, {})
+
+        for attr_name, attr_assessment in assessment_data.items():
+            prop_schema = properties.get(attr_name, {})
+            attr_threshold = self._get_confidence_threshold(
+                prop_schema, default_confidence_threshold
+            )
+
+            # Get property type
+            prop_type_json = prop_schema.get(SCHEMA_TYPE, TYPE_STRING)
+            if prop_type_json == TYPE_OBJECT:
+                attr_type = "group"
+            elif prop_type_json == TYPE_ARRAY:
+                attr_type = "list"
+            else:
+                attr_type = "simple"
+
+            # Process based on type
+            if isinstance(attr_assessment, dict):
+                enhanced_assessment_data[attr_name] = self._enhance_dict_assessment(
+                    attr_assessment, attr_threshold
+                )
+                self._check_confidence_alerts(
+                    attr_assessment,
+                    attr_name,
+                    attr_threshold,
+                    confidence_threshold_alerts,
+                )
+
+            elif isinstance(attr_assessment, list) and attr_type == "list":
+                enhanced_list = []
+                for i, item_assessment in enumerate(attr_assessment):
+                    if isinstance(item_assessment, dict):
+                        enhanced_item = self._enhance_dict_assessment(
+                            item_assessment, attr_threshold
+                        )
+                        enhanced_list.append(enhanced_item)
+                        self._check_confidence_alerts(
+                            item_assessment,
+                            f"{attr_name}[{i}]",
+                            attr_threshold,
+                            confidence_threshold_alerts,
+                        )
+                    else:
+                        # Unexpected format within list
+                        logger.warning(
+                            f"List item {i} in attribute '{attr_name}' is not a dictionary. Using default confidence."
+                        )
+                        default_item = {
+                            "confidence": 0.5,
+                            "confidence_reason": f"List item {i} in '{attr_name}' has unexpected format.",
+                            "confidence_threshold": attr_threshold,
+                        }
+                        enhanced_list.append(default_item)
+
+                        if 0.5 < attr_threshold:
+                            alert = ConfidenceAlert(
+                                attribute_name=f"{attr_name}[{i}]",
+                                confidence=0.5,
+                                confidence_threshold=attr_threshold,
+                            )
+                            confidence_threshold_alerts.append(alert)
+
+                enhanced_assessment_data[attr_name] = enhanced_list
+
+            else:
+                # Unexpected type - use default
+                logger.warning(
+                    f"Attribute '{attr_name}' has unexpected assessment format. Using default confidence."
+                )
+                default_assessment = {
+                    "confidence": 0.5,
+                    "confidence_reason": f"LLM returned unexpected format for '{attr_name}'.",
+                    "confidence_threshold": attr_threshold,
+                }
+                enhanced_assessment_data[attr_name] = default_assessment
+
+        return enhanced_assessment_data, confidence_threshold_alerts
+
+    # ============================================================================
+    # ASSESSMENT EXECUTION
+    # ============================================================================
+
+    def _execute_bedrock_assessment(
+        self, content: list[dict[str, Any]]
+    ) -> tuple[str, dict[str, Any], float]:
+        """
+        Execute Bedrock model invocation for assessment.
+
+        Args:
+            content: Formatted content for the model
+
+        Returns:
+            Tuple of (assessment_text, metering_data, duration_seconds)
+        """
+        # Get assessment configuration
+        model_id = self.config.assessment.model
+        if not model_id:
+            raise ValueError("Assessment model_id is required but not configured")
+
+        request_start_time = time.time()
+
+        # Invoke Bedrock
+        response_with_metering = bedrock.invoke_model(
+            model_id=model_id,
+            system_prompt=self.config.assessment.system_prompt,
+            content=content,
+            temperature=self.config.assessment.temperature,
+            top_k=self.config.assessment.top_k,
+            top_p=self.config.assessment.top_p,
+            max_tokens=self.config.assessment.max_tokens,
+            context="Assessment",
+        )
+
+        total_duration = time.time() - request_start_time
+
+        # Extract text from response
+        assessment_text = bedrock.extract_text_from_response(response_with_metering)
+        metering = response_with_metering.get("metering", {})
+
+        return assessment_text, metering, total_duration
+
+    # ============================================================================
+    # VALIDATION & HELPERS
+    # ============================================================================
+
+    def _validate_and_get_section(self, document: Document, section_id: str):
+        """
+        Validate document and return the section to process.
+
+        Args:
+            document: Document object to validate
+            section_id: ID of section to retrieve
+
+        Returns:
+            Section object
+
+        Raises:
+            ValueError: If validation fails
+        """
+        if not document:
+            raise ValueError("No document provided")
+
+        if not document.sections:
+            raise ValueError("Document has no sections to process")
+
+        # Find the section with the given ID
+        section = None
+        for s in document.sections:
+            if s.section_id == section_id:
+                section = s
+                break
+
+        if not section:
+            raise ValueError(f"Section {section_id} not found in document")
+
+        if not section.extraction_result_uri:
+            raise ValueError(
+                f"Section {section_id} has no extraction results to assess"
+            )
+
+        if not section.page_ids:
+            raise ValueError(f"Section {section_id} has no page IDs")
+
+        return section
+
+    # ============================================================================
+    # PUBLIC API
+    # ============================================================================
+
     def process_document_section(self, document: Document, section_id: str) -> Document:
         """
         Process a single section from a Document object to assess extraction confidence.
@@ -677,51 +1022,20 @@ class AssessmentService:
         Returns:
             Document: Updated Document object with assessment results appended to extraction results
         """
-        # Check if assessment is enabled in typed configuration
-        enabled = self.config.assessment.enabled
-        if not enabled:
+        # Check if assessment is enabled
+        if not self.config.assessment.enabled:
             logger.info("Assessment is disabled via configuration")
             return document
 
-        # Validate input document
-        if not document:
-            logger.error("No document provided")
+        # Validate and get section
+        try:
+            section = self._validate_and_get_section(document, section_id)
+        except ValueError as e:
+            logger.error(str(e))
+            document.errors.append(str(e))
             return document
 
-        if not document.sections:
-            logger.error("Document has no sections to process")
-            document.errors.append("Document has no sections to process")
-            return document
-
-        # Find the section with the given ID
-        section = None
-        for s in document.sections:
-            if s.section_id == section_id:
-                section = s
-                break
-
-        if not section:
-            error_msg = f"Section {section_id} not found in document"
-            logger.error(error_msg)
-            document.errors.append(error_msg)
-            return document
-
-        # Check if section has extraction results to assess
-        if not section.extraction_result_uri:
-            error_msg = f"Section {section_id} has no extraction results to assess"
-            logger.error(error_msg)
-            document.errors.append(error_msg)
-            return document
-
-        # Extract information about the section
         class_label = section.classification
-
-        # Check if the section has required pages
-        if not section.page_ids:
-            error_msg = f"Section {section_id} has no page IDs"
-            logger.error(error_msg)
-            document.errors.append(error_msg)
-            return document
 
         # Sort pages by page number
         sorted_page_ids = sorted(section.page_ids, key=int)
@@ -736,81 +1050,17 @@ class AssessmentService:
         metrics.put_metric("InputDocumentPagesForAssessment", len(section.page_ids))
 
         try:
-            # Read existing extraction results
+            # Load extraction data
             t0 = time.time()
-            extraction_data = s3.get_json_content(section.extraction_result_uri)
-            extraction_results = extraction_data.get("inference_result", {})
-
-            # Skip assessment if no extraction results found
-            if not extraction_results:
-                logger.warning(f"No extraction results found for section {section_id}")
-                return document
-
+            extraction_data_model = self._load_extraction_data(section)
+            extraction_results = extraction_data_model.extraction_results
             t1 = time.time()
-            logger.info(f"Time taken to read extraction results: {t1 - t0:.2f} seconds")
+            logger.info(f"Time taken to load extraction data: {t1 - t0:.2f} seconds")
 
-            # Read document text from all pages in order
-            document_texts = []
-            for page_id in sorted_page_ids:
-                if page_id not in document.pages:
-                    error_msg = f"Page {page_id} not found in document"
-                    logger.error(error_msg)
-                    document.errors.append(error_msg)
-                    continue
-
-                page = document.pages[page_id]
-                text_path = page.parsed_text_uri
-                page_text = s3.get_text_content(text_path)
-                document_texts.append(page_text)
-
-            document_text = "\n".join(document_texts)
+            # Load document content (text, images, OCR confidence)
+            document_content = self._load_document_content(document, section)
             t2 = time.time()
-            logger.info(f"Time taken to read text content: {t2 - t1:.2f} seconds")
-
-            # Read page images with configurable dimensions (type-safe access)
-            target_width = self.config.assessment.image.target_width
-            target_height = self.config.assessment.image.target_height
-
-            page_images = []
-            for page_id in sorted_page_ids:
-                if page_id not in document.pages:
-                    continue
-
-                page = document.pages[page_id]
-                image_uri = page.image_uri
-                # Just pass the values directly - prepare_image handles empty strings/None
-                image_content = image.prepare_image(
-                    image_uri, target_width, target_height
-                )
-                page_images.append(image_content)
-
-            t3 = time.time()
-            logger.info(f"Time taken to read images: {t3 - t2:.2f} seconds")
-
-            # Read text confidence data for confidence information
-            ocr_text_confidence = ""
-            for page_id in sorted_page_ids:
-                if page_id not in document.pages:
-                    continue
-
-                page = document.pages[page_id]
-                text_confidence_data_str = self._get_text_confidence_data(page)
-                if text_confidence_data_str:
-                    ocr_text_confidence += (
-                        f"\n--- Page {page_id} Text Confidence Data ---\n"
-                    )
-                    ocr_text_confidence += text_confidence_data_str
-
-            t4 = time.time()
-            logger.info(f"Time taken to read raw OCR results: {t4 - t3:.2f} seconds")
-
-            # Get assessment configuration (type-safe access, Pydantic handles conversions)
-            model_id = self.config.assessment.model
-            temperature = self.config.assessment.temperature
-            top_k = self.config.assessment.top_k
-            top_p = self.config.assessment.top_p
-            max_tokens = self.config.assessment.max_tokens
-            system_prompt = self.config.assessment.system_prompt
+            logger.info(f"Time taken to load document content: {t2 - t1:.2f} seconds")
 
             # Get schema for this document class
             class_schema = self._get_class_schema(class_label)
@@ -832,12 +1082,12 @@ class AssessmentService:
                 try:
                     content = self._build_content_with_or_without_image_placeholder(
                         prompt_template,
-                        document_text,
+                        document_content.document_text,
                         class_label,
                         property_descriptions,
                         extraction_results_str,
-                        ocr_text_confidence,
-                        page_images,  # Pass images to the content builder
+                        document_content.ocr_text_confidence,
+                        document_content.page_images,
                     )
                 except ValueError as e:
                     logger.error(f"Error formatting prompt template: {str(e)}")
@@ -849,203 +1099,53 @@ class AssessmentService:
                 f"Assessing extraction confidence for {class_label} document, section {section_id}"
             )
 
-            # Time the model invocation
-            request_start_time = time.time()
-
-            # Invoke Bedrock with the common library
-            response_with_metering = bedrock.invoke_model(
-                model_id=model_id,
-                system_prompt=system_prompt,
-                content=content,
-                temperature=temperature,
-                top_k=top_k,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                context="Assessment",
+            # Execute Bedrock assessment
+            assessment_text, metering, total_duration = (
+                self._execute_bedrock_assessment(content)
             )
-
-            total_duration = time.time() - request_start_time
             logger.info(f"Time taken for assessment: {total_duration:.2f} seconds")
 
-            # Extract text from response
-            assessment_text = bedrock.extract_text_from_response(response_with_metering)
-            metering = response_with_metering.get("metering", {})
-
-            # Parse response into JSON
-            assessment_data = {}
-            parsing_succeeded = True  # Flag to track if parsing was successful
-
-            try:
-                # Try to parse the assessment text as JSON
-                assessment_data = json.loads(extract_json_from_text(assessment_text))
-            except Exception as e:
-                # Handle parsing error
-                logger.error(
-                    f"Error parsing assessment LLM output - invalid JSON?: {assessment_text} - {e}"
-                )
-                logger.info("Using default confidence scores.")
-                # Create default assessments for all extracted attributes
-                assessment_data = {}
-                for attr_name in extraction_results.keys():
-                    assessment_data[attr_name] = {
-                        "confidence": 0.5,
-                        "confidence_reason": "Unable to parse assessment response - default score assigned",
-                    }
-                parsing_succeeded = False  # Mark that parsing failed
-
-            # Process bounding boxes automatically if bbox data is present
-            try:
-                logger.debug("Checking for bounding box data in assessment response")
-                assessment_data = self._extract_geometry_from_assessment(
-                    assessment_data
-                )
-            except Exception as e:
-                logger.warning(f"Failed to extract geometry data: {str(e)}")
-                # Continue with assessment even if geometry extraction fails
-
-            # Get confidence thresholds (type-safe, already float from Pydantic)
-            default_confidence_threshold = (
-                self.config.assessment.default_confidence_threshold
+            # Process assessment response
+            (
+                enhanced_assessment_data,
+                confidence_threshold_alerts,
+                parsing_succeeded,
+            ) = self._process_assessment_response(
+                assessment_text, extraction_results, class_schema
             )
-
-            # Enhance assessment data with confidence thresholds and create confidence threshold alerts
-            enhanced_assessment_data = {}
-            confidence_threshold_alerts = []
-
-            # Get properties dict once for efficient access
-            properties = class_schema.get(SCHEMA_PROPERTIES, {})
-
-            for attr_name, attr_assessment in assessment_data.items():
-                # Get property schema (if it exists in schema)
-                prop_schema = properties.get(attr_name, {})
-
-                # Get threshold for this property
-                attr_threshold = _safe_float_conversion(
-                    prop_schema.get(
-                        X_AWS_IDP_CONFIDENCE_THRESHOLD, default_confidence_threshold
-                    ),
-                    default_confidence_threshold,
-                )
-
-                # Get property type
-                prop_type_json = prop_schema.get(SCHEMA_TYPE, TYPE_STRING)
-
-                # Map JSON Schema type to legacy attribute type for existing logic
-                if prop_type_json == TYPE_OBJECT:
-                    attr_type = "group"
-                elif prop_type_json == TYPE_ARRAY:
-                    attr_type = "list"
-                else:
-                    attr_type = "simple"
-
-                # Check if attr_assessment is a dictionary (expected format for simple/group attributes)
-                if isinstance(attr_assessment, dict):
-                    # For simple attributes or group attributes - add confidence_threshold to each confidence assessment
-                    enhanced_assessment_data[attr_name] = self._enhance_dict_assessment(
-                        attr_assessment, attr_threshold
-                    )
-
-                    # Check for confidence threshold alerts in the assessment
-                    self._check_confidence_alerts(
-                        attr_assessment,
-                        attr_name,
-                        attr_threshold,
-                        confidence_threshold_alerts,
-                    )
-
-                elif isinstance(attr_assessment, list):
-                    # Handle list attributes (expected format for LIST attributes like transactions)
-                    if attr_type == "list":
-                        # This is expected for list attributes - process each item in the list
-                        enhanced_list = []
-                        for i, item_assessment in enumerate(attr_assessment):
-                            if isinstance(item_assessment, dict):
-                                enhanced_item = self._enhance_dict_assessment(
-                                    item_assessment, attr_threshold
-                                )
-                                enhanced_list.append(enhanced_item)
-
-                                # Check for confidence threshold alerts in list items
-                                self._check_confidence_alerts(
-                                    item_assessment,
-                                    f"{attr_name}[{i}]",
-                                    attr_threshold,
-                                    confidence_threshold_alerts,
-                                )
-                            else:
-                                # Handle unexpected format within list
-                                logger.warning(
-                                    f"List item {i} in attribute '{attr_name}' is not a dictionary. "
-                                    f"Expected dict, got {type(item_assessment)}. Using default confidence."
-                                )
-                                default_item = {
-                                    "confidence": 0.5,
-                                    "confidence_reason": f"List item {i} in '{attr_name}' has unexpected format. Using default confidence.",
-                                    "confidence_threshold": attr_threshold,
-                                }
-                                enhanced_list.append(default_item)
-
-                                # Add alert for default confidence
-                                if 0.5 < attr_threshold:
-                                    confidence_threshold_alerts.append(
-                                        {
-                                            "attribute_name": f"{attr_name}[{i}]",
-                                            "confidence": 0.5,
-                                            "confidence_threshold": attr_threshold,
-                                        }
-                                    )
-
-                        enhanced_assessment_data[attr_name] = enhanced_list
-                    else:
-                        # List format for non-list attribute is unexpected
-                        logger.warning(
-                            f"Attribute '{attr_name}' (type: {attr_type}) assessment is a list but attribute is not configured as list type. "
-                            f"Using default confidence."
-                        )
-
-                        # Create a default assessment structure
-                        default_assessment = {
-                            "confidence": 0.5,
-                            "confidence_reason": f"LLM returned list format for non-list attribute '{attr_name}'. Using default confidence (0.5) and threshold ({attr_threshold}).",
-                            "confidence_threshold": attr_threshold,
-                        }
-                        enhanced_assessment_data[attr_name] = default_assessment
-
-                else:
-                    # Handle other unexpected types
-                    logger.warning(
-                        f"Attribute '{attr_name}' assessment is of unexpected type {type(attr_assessment)}. "
-                        f"Expected dictionary or list (for list attributes). Using default confidence."
-                    )
-
-                    # Create a default assessment structure
-                    default_assessment = {
-                        "confidence": 0.5,
-                        "confidence_reason": f"LLM returned unexpected type {type(attr_assessment)} for attribute '{attr_name}'. Using default confidence (0.5) and threshold ({attr_threshold}).",
-                        "confidence_threshold": attr_threshold,
-                    }
-                    enhanced_assessment_data[attr_name] = default_assessment
 
             # Update the existing extraction result with enhanced assessment data
-            extraction_data["explainability_info"] = [enhanced_assessment_data]
-            extraction_data["metadata"] = extraction_data.get("metadata", {})
-            extraction_data["metadata"]["assessment_time_seconds"] = total_duration
-            extraction_data["metadata"]["assessment_parsing_succeeded"] = (
-                parsing_succeeded
+            extraction_data_model.full_data["explainability_info"] = [
+                enhanced_assessment_data
+            ]
+            extraction_data_model.full_data["metadata"] = (
+                extraction_data_model.full_data.get("metadata", {})
             )
+            extraction_data_model.full_data["metadata"]["assessment_time_seconds"] = (
+                total_duration
+            )
+            extraction_data_model.full_data["metadata"][
+                "assessment_parsing_succeeded"
+            ] = parsing_succeeded
 
             # Write the updated result back to S3
+            # extraction_result_uri is guaranteed to exist by _validate_and_get_section
+            assert section.extraction_result_uri is not None
             bucket, key = utils.parse_s3_uri(section.extraction_result_uri)
             s3.write_content(
-                extraction_data, bucket, key, content_type="application/json"
+                extraction_data_model.full_data,
+                bucket,
+                key,
+                content_type="application/json",
             )
 
             # Update the section in the document with confidence threshold alerts
             for doc_section in document.sections:
                 if doc_section.section_id == section_id:
-                    doc_section.confidence_threshold_alerts = (
-                        confidence_threshold_alerts
-                    )
+                    # Convert ConfidenceAlert objects to dicts
+                    doc_section.confidence_threshold_alerts = [
+                        alert.model_dump() for alert in confidence_threshold_alerts
+                    ]
                     break
 
             # Update document with metering data

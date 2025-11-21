@@ -278,34 +278,7 @@ Guidelines:
 - For bounding boxes, provide normalized coordinates (0.0 to 1.0) in the format: {"left": x1, "top": y1, "width": w, "height": h}
 </assessment-guidelines>
 
-<attributes-definitions>
-{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-</attributes-definitions>
-
-<<CACHEPOINT>>
-
-<document-image>
-{DOCUMENT_IMAGE}
-</document-image>
-
-<ocr-text-confidence-results>
-{OCR_TEXT_CONFIDENCE}
-</ocr-text-confidence-results>
-
-<<CACHEPOINT>>
-
-<extraction-results>
-{EXTRACTION_RESULTS}
-</extraction-results>
-
-Provide your assessment as a JSON object with this exact structure:
-{
-  "attribute_name": {
-    "confidence": 0.0 to 1.0,
-    "confidence_reason": "explanation",
-    "bounding_box": {"left": 0.0, "top": 0.0, "width": 0.0, "height": 0.0}
-  }
-}""",
+""",
         description="Task prompt template for assessment",
     )
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)

@@ -11,7 +11,6 @@ import io
 import json
 import logging
 import os
-import re
 import threading
 from pathlib import Path
 from typing import (
@@ -22,7 +21,6 @@ from typing import (
 
 import jsonpatch
 from aws_lambda_powertools import Logger
-from botocore.config import Config
 from PIL import Image
 from pydantic import BaseModel, Field
 from strands import Agent, tool
@@ -36,7 +34,9 @@ from strands.types.media import (
     ImageSource,
 )
 
-from idp_common.bedrock.client import CACHEPOINT_SUPPORTED_MODELS
+from idp_common.bedrock import (
+    build_model_config,
+)
 from idp_common.config.models import IDPConfig
 from idp_common.utils.bedrock_utils import (
     async_exponential_backoff_retry,
@@ -84,35 +84,6 @@ logging.getLogger("strands.models.bedrock").setLevel(
     os.getenv("STRANDS_LOG_LEVEL", os.getenv("LOG_LEVEL", "INFO"))
 )
 TargetModel = TypeVar("TargetModel", bound=BaseModel)
-
-
-def supports_tool_caching(model_id: str) -> bool:
-    """
-    Check if a model supports tool caching (cachePoint in toolConfig).
-
-    Note: Only Claude models support tool caching. Nova models support
-    prompt caching but NOT tool caching.
-
-    Args:
-        model_id: The Bedrock model identifier
-
-    Returns:
-        True if the model supports tool caching, False otherwise
-    """
-    return "anthropic.claude" in model_id or "us.anthropic.claude" in model_id
-
-
-def supports_prompt_caching(model_id: str) -> bool:
-    """
-    Check if a model supports prompt caching (cachePoint in system prompt).
-
-    Args:
-        model_id: The Bedrock model identifier
-
-    Returns:
-        True if the model supports prompt caching, False otherwise
-    """
-    return model_id in CACHEPOINT_SUPPORTED_MODELS
 
 
 class BedrockUsage(TypedDict, total=False):
@@ -1058,7 +1029,7 @@ async def structured_output_async(
     )
 
     # Build model configuration with token limits and caching
-    model_config = _build_model_config(
+    model_config = build_model_config(
         model_id=model_id,
         max_tokens=max_tokens,
         max_retries=max_retries,
@@ -1148,7 +1119,7 @@ async def structured_output_async(
             ],
         )
         # Build config for review agent
-        review_model_config = _build_model_config(
+        review_model_config = build_model_config(
             model_id=config.extraction.agentic.review_agent_model,
             max_tokens=max_tokens,
             max_retries=max_retries,
