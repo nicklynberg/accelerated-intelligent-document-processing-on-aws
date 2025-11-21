@@ -1142,9 +1142,10 @@ class AssessmentService:
             # Update the section in the document with confidence threshold alerts
             for doc_section in document.sections:
                 if doc_section.section_id == section_id:
-                    # Convert ConfidenceAlert objects to dicts
+                    # Convert ConfidenceAlert objects to dicts with camelCase keys for UI
                     doc_section.confidence_threshold_alerts = [
-                        alert.model_dump() for alert in confidence_threshold_alerts
+                        alert.model_dump(by_alias=True)
+                        for alert in confidence_threshold_alerts
                     ]
                     break
 

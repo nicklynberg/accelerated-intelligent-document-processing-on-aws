@@ -110,9 +110,9 @@ class Geometry(BaseModel):
 class ConfidenceAlert(BaseModel):
     """Alert for confidence threshold violation."""
 
-    attribute_name: str
+    attribute_name: str = Field(serialization_alias="attributeName")
     confidence: float
-    confidence_threshold: float
+    confidence_threshold: float = Field(serialization_alias="confidenceThreshold")
 
     @field_validator("confidence", "confidence_threshold", mode="before")
     @classmethod
