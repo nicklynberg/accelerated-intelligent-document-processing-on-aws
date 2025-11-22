@@ -74,6 +74,7 @@ extraction = [
 # Assessment module dependencies
 assessment = [
   "Pillow==11.2.1",               # For image handling
+  "PyMuPDF==1.25.5",              # Required by OcrService for PDF processing
   "aws-lambda-powertools>=3.2.0", # Structured logging and observability
   "mypy-boto3-dynamodb>=1.40.56",
   "strands-agents==1.17.0",
