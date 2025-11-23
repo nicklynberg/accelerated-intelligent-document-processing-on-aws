@@ -142,23 +142,18 @@ class TestConfigModels:
         result = process_config(config)
         assert result is True
 
-    def test_assessment_granular_config(self):
-        """Test granular assessment configuration"""
+    def test_assessment_config(self):
+        """Test assessment configuration with new flat structure"""
         config_dict = {
             "model": "us.amazon.nova-lite-v1:0",
-            "granular": {
-                "enabled": True,
-                "list_batch_size": "5",
-                "simple_batch_size": "10",
-                "max_workers": "20",
-            },
+            "enabled": True,
+            "max_workers": "20",
         }
         config = AssessmentConfig.model_validate(config_dict)
 
-        assert config.granular.enabled is True
-        assert config.granular.list_batch_size == 5
-        assert config.granular.simple_batch_size == 10
-        assert config.granular.max_workers == 20
+        assert config.enabled is True
+        assert config.max_workers == 20
+        assert isinstance(config.max_workers, int)
 
     def test_config_validation_range_checks(self):
         """Test that validation enforces ranges"""

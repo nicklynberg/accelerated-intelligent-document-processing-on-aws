@@ -217,12 +217,10 @@ class TestConfigModelsIntegration:
         assert config.assessment is not None
         assert isinstance(config.assessment.enabled, bool)
 
-        # Validate granular assessment settings
-        if hasattr(config.assessment, "granular"):
-            assert isinstance(config.assessment.granular.enabled, bool)
-            if config.assessment.granular.enabled:
-                assert config.assessment.granular.list_batch_size > 0
-                assert config.assessment.granular.simple_batch_size > 0
+        # Validate assessment settings
+        assert isinstance(config.assessment.enabled, bool)
+        if config.assessment.enabled:
+            assert config.assessment.max_workers > 0
 
     def test_config_with_all_optional_fields(self, config_root):
         """Test that configs work even if optional fields are missing"""
@@ -284,8 +282,8 @@ class TestConfigModelsIntegration:
         assert config.extraction.top_p == 0.2
         assert isinstance(config.extraction.top_p, float)
 
-        assert config.assessment.granular.list_batch_size == 5
-        assert isinstance(config.assessment.granular.list_batch_size, int)
+        assert config.assessment.max_workers == 20
+        assert isinstance(config.assessment.max_workers, int)
 
     def test_boolean_variations(self):
         """Test various boolean representations"""

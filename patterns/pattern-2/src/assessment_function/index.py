@@ -151,13 +151,9 @@ def handler(event, context):
     if not section:
         raise ValueError(f"Section {section_id} not found in document")
 
-    # Check if granular assessment is enabled (moved earlier for Lambda metering context)
-    assessment_context = (
-        "GranularAssessment" if config.assessment.granular.enabled else "Assessment"
-    )
-    logger.info(
-        f"Assessment mode: {'Granular' if config.assessment.granular.enabled else 'Regular'} (context: {assessment_context})"
-    )
+    # Assessment context for Lambda metering
+    assessment_context = "Assessment"
+    logger.info(f"Assessment mode: Strands-based (context: {assessment_context})")
 
     # Intelligent Assessment Skip: Check if extraction results already contain explainability_info
     if section.extraction_result_uri and section.extraction_result_uri.strip():
@@ -254,15 +250,13 @@ def handler(event, context):
     # Initialize assessment service with cache table for enhanced retry handling
     cache_table = os.environ.get("TRACKING_TABLE")
 
-    # Check if granular assessment is enabled
-
-    # Use granular assessment service (always enabled)
+    # Use Strands-based granular assessment service (always enabled)
     from idp_common.assessment.granular_service import GranularAssessmentService
 
     assessment_service = GranularAssessmentService(
         config=config, cache_table=cache_table
     )
-    logger.info("Using granular assessment service")
+    logger.info("Using Strands-based assessment service")
 
     # Process the document section for assessment
     t0 = time.time()
@@ -333,11 +327,11 @@ def handler(event, context):
 
     # Assessment validation
     validation_enabled = (
-        config.assessment.granular.enabled and config.assessment.validation_enabled
+        config.assessment.enabled and config.assessment.validation_enabled
     )
-    logger.info(f"Assessment Enabled:{config.assessment.granular.enabled}")
-    logger.info(f"Validation Enabled:{validation_enabled}")
-    if not config.assessment.granular.enabled:
+    logger.info(f"Assessment Enabled: {config.assessment.enabled}")
+    logger.info(f"Validation Enabled: {validation_enabled}")
+    if not config.assessment.enabled:
         logger.info("Assessment is disabled.")
     elif not validation_enabled:
         logger.info("Assessment validation is disabled.")

@@ -63,13 +63,9 @@ def handler(event, context):
     if not section:
         raise ValueError(f"Section {section_id} not found in document")
 
-    # Check if granular assessment is enabled (for Lambda metering context)
-    granular_config = config.assessment.granular
-    granular_enabled = granular_config.enabled
-    assessment_context = "GranularAssessment" if granular_enabled else "Assessment"
-    logger.info(
-        f"Assessment mode: {'Granular' if granular_enabled else 'Regular'} (context: {assessment_context})"
-    )
+    # Assessment context for Lambda metering
+    assessment_context = "Assessment"
+    logger.info(f"Assessment mode: Strands-based (context: {assessment_context})")
 
     # Intelligent Assessment Skip: Check if extraction results already contain explainability_info
     if section.extraction_result_uri and section.extraction_result_uri.strip():
