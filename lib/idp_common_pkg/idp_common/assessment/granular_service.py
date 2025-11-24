@@ -309,7 +309,6 @@ class GranularAssessmentService:
                                 field_name=_convert_field_path_to_string(item_path),
                                 field_schema=items_schema,
                                 confidence_threshold=threshold,
-                                parent_assessment_dict=assessment_list,  # type: ignore
                             )
                             tasks.append(task)
                             task_counter[0] += 1
@@ -332,7 +331,6 @@ class GranularAssessmentService:
                         field_name=_convert_field_path_to_string(field_path),
                         field_schema=prop_schema,
                         confidence_threshold=threshold,
-                        parent_assessment_dict=parent_dict,
                     )
                     tasks.append(task)
                     task_counter[0] += 1
@@ -536,6 +534,32 @@ class GranularAssessmentService:
             for throttle_term in self.throttling_exceptions
         )
 
+    def _insert_at_field_path(
+        self,
+        structure: dict[str, Any],
+        field_path: tuple[str | int, ...],
+        value: Any,
+    ) -> None:
+        """
+        Navigate through structure using field_path and insert value at the end.
+
+        Args:
+            structure: The assessment structure to navigate
+            field_path: Tuple path like ("Account Holder Address", "City") or ("Transactions", 0, "Amount")
+            value: The assessment data to insert
+
+        Example:
+            field_path = ("Account Holder Address", "City")
+            -> structure["Account Holder Address"]["City"] = value
+
+            field_path = ("Transactions", 0, "Amount")
+            -> structure["Transactions"][0]["Amount"] = value
+        """
+        parent = structure
+        for key in field_path[:-1]:
+            parent = parent[key]
+        parent[field_path[-1]] = value
+
     def _aggregate_assessment_results(
         self,
         tasks: list[AssessmentTask],
@@ -543,7 +567,7 @@ class GranularAssessmentService:
         assessment_structure: dict[str, Any],
     ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
         """
-        Aggregate individual task results into assessment structure using direct parent insertion.
+        Aggregate individual task results into assessment structure using field_path navigation.
 
         Args:
             tasks: list of assessment tasks
@@ -553,13 +577,12 @@ class GranularAssessmentService:
         Returns:
             Tuple of (assessment_structure, confidence_alerts, aggregated_metering)
         """
-        all_confidence_alerts = []
-        aggregated_metering = {}
+        all_confidence_alerts: list[dict[str, Any]] = []
+        aggregated_metering: dict[str, Any] = {}
 
         # Create a mapping from task_id to result
         result_map = {result.task_id: result for result in results}
 
-        # Process each task result - direct O(1) insertion using parent reference
         for task in tasks:
             result = result_map.get(task.task_id)
             if not result or not result.success:
@@ -575,45 +598,31 @@ class GranularAssessmentService:
             # Add confidence alerts
             all_confidence_alerts.extend(result.confidence_alerts)
 
-            # Get assessment data from result - should be a single assessment object
-            # The Strands agent returns the assessment in result.assessment_data
-            assessment_obj = result.assessment_data
+            # Get assessment data directly from result
+            # strands_service returns flat assessment dict: {confidence, value, reasoning, ...}
+            field_assessment = result.assessment_data
 
-            if not isinstance(assessment_obj, dict):
+            if not isinstance(field_assessment, dict):
                 logger.warning(
-                    f"Task {task.task_id}: expected dict assessment, got {type(assessment_obj)}"
+                    f"Task {task.task_id}: expected dict assessment, got {type(field_assessment)}"
                 )
                 continue
 
-            # Add confidence_threshold to the assessment object
-            assessment_obj["confidence_threshold"] = task.confidence_threshold
+            # Add confidence_threshold if not already present
+            if "confidence_threshold" not in field_assessment:
+                field_assessment["confidence_threshold"] = task.confidence_threshold
 
-            # Direct insertion using parent reference - O(1) operation!
-            parent = task.parent_assessment_dict
-            field_name = task.field_name
-
-            if isinstance(parent, dict):
-                # Regular field - insert into parent dict
-                parent[field_name] = assessment_obj
-            elif isinstance(parent, list):
-                # Array item - get index from field_path
-                # field_path is like ("items", 0, "price") - second-to-last is the index
-                if len(task.field_path) >= 2 and isinstance(task.field_path[-2], int):
-                    idx = task.field_path[-2]
-                    # Replace the None placeholder we created during structure building
-                    if idx < len(parent):
-                        parent[idx] = assessment_obj
-                    else:
-                        logger.warning(
-                            f"Task {task.task_id}: index {idx} out of range for list of length {len(parent)}"
-                        )
-                else:
-                    logger.warning(
-                        f"Task {task.task_id}: cannot determine array index from path {task.field_path}"
-                    )
-            else:
-                logger.warning(
-                    f"Task {task.task_id}: unexpected parent type {type(parent)}"
+            # Insert directly at field_path - no unwrapping needed
+            try:
+                self._insert_at_field_path(
+                    assessment_structure, task.field_path, field_assessment
+                )
+                logger.debug(
+                    f"Task {task.task_id}: Inserted assessment at {task.field_path}"
+                )
+            except (KeyError, IndexError, TypeError) as e:
+                logger.error(
+                    f"Task {task.task_id}: Failed to insert at path {task.field_path}: {e}"
                 )
 
         return assessment_structure, all_confidence_alerts, aggregated_metering

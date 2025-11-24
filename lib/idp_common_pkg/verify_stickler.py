@@ -10,7 +10,7 @@ features are available for the IDP evaluation system.
 """
 
 import sys
-from typing import Any, dict
+from typing import Any
 
 
 def verify_stickler_import():

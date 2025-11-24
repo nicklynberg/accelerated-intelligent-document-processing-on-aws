@@ -142,14 +142,15 @@ def example_granular_assessment():
 
     # Demonstrate task creation (this would normally be done internally)
     if hasattr(assessment_service, "_create_assessment_tasks"):
-        attributes = assessment_service._get_class_attributes("Bank Statement")
-        tasks = assessment_service._create_assessment_tasks(
-            example_extraction_results, attributes, 0.9
+        class_schema = assessment_service._get_class_schema("Bank Statement")
+        properties = class_schema.get("properties", {})
+        tasks, assessment_structure = assessment_service._create_assessment_tasks(
+            example_extraction_results, properties, 0.9
         )
 
         logger.info(f"\nCreated {len(tasks)} assessment tasks:")
         for task in tasks:
-            logger.info(f"  - {task.task_id}: {task.task_type} for {task.attributes}")
+            logger.info(f"  - {task.task_id}: {task.task_type} for {task.field_name}")
 
     return assessment_service, config
 

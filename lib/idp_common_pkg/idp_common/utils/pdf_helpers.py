@@ -75,7 +75,7 @@ def pdf_page_to_image(
 
         # Render page to pixmap
         mat = fitz.Matrix(dpi_scale, dpi_scale)
-        pix = page.get_pixmap(matrix=mat)
+        pix = page.get_pixmap(matrix=mat)  # pyright: ignore[reportAttributeAccessIssue]
 
         # Convert to PNG bytes
         png_bytes = pix.tobytes("png")
@@ -144,7 +144,7 @@ def pdf_to_images(
 
             # Render page to pixmap
             mat = fitz.Matrix(dpi_scale, dpi_scale)
-            pix = page.get_pixmap(matrix=mat)
+            pix = page.get_pixmap(matrix=mat)  # pyright: ignore[reportAttributeAccessIssue]
 
             # Convert to PNG bytes
             png_bytes = pix.tobytes("png")

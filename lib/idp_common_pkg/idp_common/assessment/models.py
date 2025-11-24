@@ -78,10 +78,6 @@ class AssessmentTask(BaseModel):
     # Confidence threshold for this field
     confidence_threshold: float
 
-    # Direct reference to parent container in assessment structure (for O(1) insertion)
-    # Can be Dict for regular fields or list for array items
-    parent_assessment_dict: dict[str, Any] | list[Any]
-
 
 class AssessmentResult(BaseModel):
     """Result of a single assessment task (used by both granular and strands services)."""

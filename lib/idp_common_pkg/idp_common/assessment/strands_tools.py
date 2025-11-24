@@ -37,22 +37,6 @@ class ViewImageInput(BaseModel):
 
 @tool
 def submit_assessment(assessment: AssessmentOutput, agent: Agent) -> str:
-    """
-    Submit your final confidence assessment.
-
-    Use this tool when you have:
-    1. Located the values in the document images
-    2. Determined precise bounding box coordinates using ruler markings
-    3. Assessed the confidence based on clarity and accuracy
-
-    Args:
-        assessment: Dictionary with:
-            - assessments: dict mapping attribute names to ConfidenceAssessment
-            - alerts: list of any threshold alerts (optional)
-
-    Returns:
-        Success confirmation message or validation error details
-    """
     # Validate assessment structure and return helpful errors
     validated_assessment = AssessmentOutput.model_validate(assessment)
 

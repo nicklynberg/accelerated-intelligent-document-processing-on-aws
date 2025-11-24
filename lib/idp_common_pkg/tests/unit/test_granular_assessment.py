@@ -155,8 +155,8 @@ class TestGranularAssessmentService:
         # All tasks should have field_path as tuple
         assert all(isinstance(t.field_path, tuple) for t in tasks)
 
-        # All tasks should have parent_assessment_dict reference
-        assert all(t.parent_assessment_dict is not None for t in tasks)
+        # All tasks should have confidence_threshold set
+        assert all(t.confidence_threshold > 0 for t in tasks)
 
         # Check that assessment_structure mirrors extraction_results
         assert isinstance(assessment_structure, dict)
@@ -268,7 +268,7 @@ class TestGranularAssessmentService:
             "date": None,
         }
 
-        # Create tasks with new structure
+        # Create tasks with new structure (field_path used for navigation)
         task1 = AssessmentTask(
             task_id="task_0",
             task_type="attribute",
@@ -276,7 +276,6 @@ class TestGranularAssessmentService:
             field_name="sender_name",
             field_schema={"type": "string"},
             confidence_threshold=0.9,
-            parent_assessment_dict=assessment_structure,
         )
 
         task2 = AssessmentTask(
@@ -286,7 +285,6 @@ class TestGranularAssessmentService:
             field_name="recipient_name",
             field_schema={"type": "string"},
             confidence_threshold=0.9,
-            parent_assessment_dict=assessment_structure,
         )
 
         task3 = AssessmentTask(
@@ -296,7 +294,6 @@ class TestGranularAssessmentService:
             field_name="date",
             field_schema={"type": "string"},
             confidence_threshold=0.9,
-            parent_assessment_dict=assessment_structure,
         )
 
         # Create results

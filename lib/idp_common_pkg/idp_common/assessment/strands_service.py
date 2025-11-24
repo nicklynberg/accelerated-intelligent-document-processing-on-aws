@@ -405,8 +405,12 @@ def _convert_to_assessment_result(
     metering: dict[str, Any],
     processing_time: float,
 ) -> AssessmentResult:
-    """Convert Strands AssessmentOutput to AssessmentResult with standardized geometry format."""
-    # Single field assessment
+    """
+    Convert Strands AssessmentOutput to AssessmentResult with standardized geometry format.
+
+    The assessment_data is returned as a flat dict (not wrapped by field name) because
+    the aggregation step uses task.field_path for insertion into the final structure.
+    """
     field_name = output.field_name
     assessment = output.assessment
 
@@ -429,8 +433,9 @@ def _convert_to_assessment_result(
         page_num=assessment.bounding_box.page if assessment.bounding_box else None,
     )
 
-    # Convert to explainability format
-    assessment_data = {field_name: field_data.to_explainability_format()}
+    # Return assessment data directly (not wrapped by field name)
+    # The aggregation step uses task.field_path for proper insertion
+    assessment_data = field_data.to_explainability_format()
 
     # Check for confidence threshold violations
     confidence_alerts = []
