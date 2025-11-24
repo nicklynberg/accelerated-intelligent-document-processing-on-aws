@@ -22,6 +22,7 @@ from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
 from idp_common import image, metrics, s3, utils
 from idp_common.assessment.models import AssessmentResult, AssessmentTask
 from idp_common.assessment.strands_executor import execute_assessment_tasks_parallel
+from idp_common.assessment.strands_service import _convert_field_path_to_string
 from idp_common.config.models import IDPConfig
 from idp_common.config.schema_constants import (
     SCHEMA_ITEMS,
@@ -305,7 +306,7 @@ class GranularAssessmentService:
                                 task_id=f"task_{task_counter[0]}",
                                 task_type="attribute",
                                 field_path=item_path,
-                                field_name=prop_name,
+                                field_name=_convert_field_path_to_string(item_path),
                                 field_schema=items_schema,
                                 confidence_threshold=threshold,
                                 parent_assessment_dict=assessment_list,  # type: ignore
@@ -328,7 +329,7 @@ class GranularAssessmentService:
                         task_id=f"task_{task_counter[0]}",
                         task_type="attribute",
                         field_path=field_path,
-                        field_name=prop_name,
+                        field_name=_convert_field_path_to_string(field_path),
                         field_schema=prop_schema,
                         confidence_threshold=threshold,
                         parent_assessment_dict=parent_dict,
