@@ -57,11 +57,11 @@ def submit_assessment(assessment: AssessmentOutput, agent: Agent) -> str:
     validated_assessment = AssessmentOutput.model_validate(assessment)
 
     # Store in agent state
-    agent.state.set("assessment_output", validated_assessment.model_dump())
+    agent.state.set("assessment_output", validated_assessment.model_dump(mode="json"))
 
     logger.info(
         "Assessment submitted successfully",
-        extra={"assessment": validated_assessment.model_dump()},
+        extra={"assessment": validated_assessment.model_dump(mode="json")},
     )
 
     return "Assessment submitted successfully. You can now finish the task."
