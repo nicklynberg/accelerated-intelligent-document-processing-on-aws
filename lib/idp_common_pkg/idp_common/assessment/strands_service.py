@@ -95,8 +95,7 @@ async def assess_attribute_with_strands(
         system_prompt=enhanced_system_prompt,
         state={
             "task": task.model_dump(),
-            "extraction_results": extraction_results,
-            "assessment_output": None,
+            "assessment_output": None,  # Will be populated by submit_assessment tool
         },
         conversation_manager=SummarizingConversationManager(
             summary_ratio=0.8, preserve_recent_messages=1

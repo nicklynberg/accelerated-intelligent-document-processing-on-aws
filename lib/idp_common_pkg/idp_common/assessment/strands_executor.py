@@ -39,7 +39,6 @@ async def execute_tasks_async(
 
     Args:
         tasks: List of assessment tasks to execute
-        base_content: Base prompt content
         extraction_results: Full extraction results
         page_images: List of page images (with grid overlay)
         sorted_page_ids: List of page IDs
@@ -166,7 +165,6 @@ def execute_assessment_tasks_parallel(
 
     Args:
         tasks: List of assessment tasks
-        base_content: Base prompt content
         extraction_results: Full extraction results
         page_images: List of page images (with grid overlay already applied)
         sorted_page_ids: List of page IDs in sorted order

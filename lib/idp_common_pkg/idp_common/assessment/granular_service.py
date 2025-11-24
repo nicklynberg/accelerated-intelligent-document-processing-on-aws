@@ -126,7 +126,7 @@ class GranularAssessmentService:
 
             dynamodb: DynamoDBServiceResource = boto3.resource(
                 "dynamodb", region_name=self.region
-            )  # pyright: ignore[reportAssignmentType]modb", region_name=self.region)
+            )  # pyright: ignore[reportAssignmentType]
             self.cache_table = dynamodb.Table(self.cache_table_name)
             logger.info(
                 f"Granular assessment caching enabled using table: {self.cache_table_name}"
