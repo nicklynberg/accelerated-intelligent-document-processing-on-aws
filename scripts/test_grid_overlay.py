@@ -28,7 +28,7 @@ from pathlib import Path
 # Add the library to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib" / "idp_common_pkg"))
 
-from idp_common.grid_overlay import (
+from idp_common.utils.grid_overlay import (
     add_ruler_edges,
     draw_bounding_boxes,
     add_ruler_and_draw_boxes,
@@ -44,7 +44,7 @@ def convert_pdf_to_image(pdf_path: str) -> bytes:
         page = doc.load_page(0)  # First page
 
         # Render at 150 DPI for good quality
-        pix = page.get_pixmap(dpi=150)
+        pix = page.get_pixmap(dpi=150)  # pyright: ignore[reportAttributeAccessIssue]
         return pix.tobytes("jpeg")
     except ImportError:
         print("ERROR: PyMuPDF (fitz) is required for PDF conversion.")
