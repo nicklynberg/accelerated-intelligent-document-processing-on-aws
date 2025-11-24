@@ -969,6 +969,7 @@ assessment = [
     { name = "aws-lambda-powertools" },
     { name = "mypy-boto3-dynamodb" },
     { name = "pillow" },
+    { name = "pymupdf" },
     { name = "strands-agents" },
 ]
 classification = [
@@ -1099,6 +1100,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "pymupdf", marker = "extra == 'agentic-extraction'", specifier = "==1.25.5" },
     { name = "pymupdf", marker = "extra == 'all'", specifier = "==1.25.5" },
+    { name = "pymupdf", marker = "extra == 'assessment'", specifier = "==1.25.5" },
     { name = "pymupdf", marker = "extra == 'ocr'", specifier = "==1.25.5" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=7.4.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=1.1.0" },

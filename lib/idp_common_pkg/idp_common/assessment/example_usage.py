@@ -3,10 +3,11 @@
 # SPDX-License-Identifier: MIT-0
 
 """
-Example usage of the Granular Assessment Service.
+Example usage of the Strands-Based Assessment Service.
 
-This script demonstrates how to use the granular assessment approach
+This script demonstrates how to use the Strands-based assessment approach
 for improved accuracy and scalability when assessing document extraction confidence.
+All assessment now uses this unified approach with tool-based agent interactions.
 """
 
 import json
@@ -30,13 +31,14 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
 
 def example_granular_assessment():
-    """Example of using granular assessment service."""
+    """Example of using Strands-based assessment service."""
 
-    # Load configuration with granular assessment enabled
+    # Load configuration for assessment (always uses Strands-based approach)
     config = {
         "assessment": {
+            "enabled": True,
             "default_confidence_threshold": 0.9,
-            "model": "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+            "model": "us.anthropic.claude-sonnet-4-20250514-v1:0",
             "system_prompt": "You are a document analysis assessment expert...",
             "task_prompt": """
             <background>
@@ -53,13 +55,8 @@ def example_granular_assessment():
             Analyze and provide confidence assessments...
             </final-instructions>
             """,
-            # Granular assessment configuration
-            "granular": {
-                "enabled": True,
-                "max_workers": 20,
-                "simple_batch_size": 3,
-                "list_batch_size": 1,
-            },
+            # Strands-based assessment settings
+            "max_workers": 20,
         },
         "classes": [
             {
@@ -158,86 +155,61 @@ def example_granular_assessment():
 
 
 def compare_approaches():
-    """Compare original vs granular assessment approaches."""
+    """Demonstrate the Strands-based assessment approach."""
 
-    logger.info("=== Comparison: Original vs Granular Assessment ===")
+    logger.info("=== Strands-Based Assessment Approach ===")
 
-    # Configuration for original approach
-    original_config = {"assessment": {"granular": {"enabled": False}}}
-
-    # Configuration for granular approach
-    granular_config = {
+    # Configuration for Strands-based assessment (always used)
+    assessment_config = {
         "assessment": {
-            "granular": {
-                "enabled": True,
-                "max_workers": 4,
-                "simple_batch_size": 3,
-                "list_batch_size": 1,
-            }
+            "enabled": True,
+            "max_workers": 4,
         }
     }
 
     from idp_common.assessment import create_assessment_service
 
-    # Create both services
-    original_service = create_assessment_service(config=original_config)
-    granular_service = create_assessment_service(config=granular_config)
+    # Create assessment service
+    assessment_service = create_assessment_service(config=assessment_config)
 
-    logger.info(f"Original service: {type(original_service).__name__}")
-    logger.info(f"Granular service: {type(granular_service).__name__}")
+    logger.info(f"Assessment service: {type(assessment_service).__name__}")
 
-    # Show the differences
-    logger.info("\nKey Differences:")
-    logger.info("Original Approach:")
-    logger.info("  - Single inference for all attributes")
-    logger.info("  - Simple implementation")
-    logger.info("  - May struggle with complex documents")
-
-    logger.info("\nGranular Approach:")
-    logger.info("  - Multiple focused inferences")
+    # Show the features
+    logger.info("\nStrands-Based Assessment Features:")
+    logger.info("  - Multiple focused inferences per field")
+    logger.info("  - Tool-based interaction with Strands agents")
     logger.info("  - Prompt caching for cost optimization")
     logger.info("  - Parallel processing for speed")
     logger.info("  - Better handling of complex documents")
+    logger.info("  - Consistent assessment structure")
 
 
 def demonstrate_configuration_options():
-    """Demonstrate different configuration options for granular assessment."""
+    """Demonstrate different configuration options for Strands-based assessment."""
 
     logger.info("=== Configuration Options ===")
 
     # Conservative configuration (good for starting)
     conservative_config = {
         "assessment": {
-            "granular": {
-                "enabled": True,
-                "max_workers": 2,
-                "simple_batch_size": 2,
-                "list_batch_size": 1,
-            }
+            "enabled": True,
+            "max_workers": 2,
         }
     }
 
     # Aggressive configuration (for high-throughput)
     aggressive_config = {
         "assessment": {
-            "granular": {
-                "enabled": True,
-                "max_workers": 8,
-                "simple_batch_size": 5,
-                "list_batch_size": 2,
-            }
+            "enabled": True,
+            "max_workers": 50,
         }
     }
 
     # Balanced configuration (recommended)
     balanced_config = {
         "assessment": {
-            "granular": {
-                "enabled": True,
-                "max_workers": 4,
-                "simple_batch_size": 3,
-                "list_batch_size": 1,
-            }
+            "enabled": True,
+            "max_workers": 20,
         }
     }
 
@@ -249,23 +221,23 @@ def demonstrate_configuration_options():
 
     for name, config in configs.items():
         logger.info(f"\n{name} Configuration:")
-        granular_settings = config["assessment"]["granular"]
-        for key, value in granular_settings.items():
+        assessment_settings = config["assessment"]
+        for key, value in assessment_settings.items():
             logger.info(f"  {key}: {value}")
 
 
 def main():
     """Main example function."""
 
-    logger.info("=== Granular Assessment Service Examples ===")
+    logger.info("=== Strands-Based Assessment Service Examples ===")
 
     try:
         # Example 1: Basic usage
         logger.info("\n1. Basic Usage Example")
         service, config = example_granular_assessment()
 
-        # Example 2: Compare approaches
-        logger.info("\n2. Approach Comparison")
+        # Example 2: Demonstrate the approach
+        logger.info("\n2. Assessment Approach")
         compare_approaches()
 
         # Example 3: Configuration options
@@ -273,11 +245,12 @@ def main():
         demonstrate_configuration_options()
 
         logger.info("\n=== Examples Complete ===")
-        logger.info("To use granular assessment in your application:")
-        logger.info("1. Add granular configuration to your config file")
-        logger.info("2. Use create_assessment_service() factory function")
-        logger.info("3. Process documents with the same interface")
-        logger.info("4. Monitor performance and tune parameters")
+        logger.info("To use Strands-based assessment in your application:")
+        logger.info("1. Set assessment.enabled to true in your config")
+        logger.info("2. Configure max_workers based on your throughput needs")
+        logger.info("3. Use create_assessment_service() factory function")
+        logger.info("4. Process documents with the same interface")
+        logger.info("5. Monitor performance and tune max_workers parameter")
 
     except ImportError as e:
         logger.error(f"Import error: {e}")

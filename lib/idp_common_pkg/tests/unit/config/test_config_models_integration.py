@@ -261,12 +261,8 @@ class TestConfigModelsIntegration:
             },
             "assessment": {
                 "model": "test",
-                "granular": {
-                    "enabled": True,
-                    "list_batch_size": "5",  # String
-                    "simple_batch_size": 10,  # Int
-                    "max_workers": "20",  # String
-                },
+                "enabled": True,
+                "max_workers": "20",  # String
             },
             "classes": [],
         }
