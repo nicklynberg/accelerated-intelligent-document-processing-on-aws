@@ -511,8 +511,8 @@ class AssessmentService:
         extraction_results = extraction_data.get("inference_result", {})
 
         if not extraction_results:
-            raise ValueError(
-                f"No extraction results found for section {section.section_id}"
+            logger.warning(
+                f"No extraction results found for section {section.section_id}, skipping assessment"
             )
 
         return ExtractionData(
@@ -914,6 +914,13 @@ class AssessmentService:
             extraction_results = extraction_data_model.extraction_results
             t1 = time.time()
             logger.info(f"Time taken to load extraction data: {t1 - t0:.2f} seconds")
+
+            # Handle empty extraction results gracefully
+            if not extraction_results:
+                logger.warning(
+                    f"No extraction results for section {section_id}, skipping assessment"
+                )
+                return document
 
             # Load document content (text, images, OCR confidence)
             document_content = self._load_document_content(document, section)
