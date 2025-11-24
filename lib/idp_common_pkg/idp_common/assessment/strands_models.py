@@ -9,6 +9,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from idp_common.assessment.models import Geometry
+
 
 class BoundingBox(BaseModel):
     """Bounding box coordinates in normalized 0-1000 scale."""
@@ -21,20 +23,18 @@ class BoundingBox(BaseModel):
 
     def to_geometry(self) -> dict[str, Any]:
         """
-        Convert to IDP geometry format.
+        Convert to IDP geometry format compatible with UI.
 
         Returns:
-            Dictionary with BoundingBox and Page in IDP format
+            Dictionary in UI-compatible format (lowercase, no array wrapper here)
         """
-        return {
-            "BoundingBox": {
-                "Width": (self.x2 - self.x1) / 1000.0,
-                "Height": (self.y2 - self.y1) / 1000.0,
-                "Left": self.x1 / 1000.0,
-                "Top": self.y1 / 1000.0,
-            },
-            "Page": self.page,
-        }
+        # Create proper Geometry object
+        geometry = Geometry.from_bbox_list(
+            [self.x1, self.y1, self.x2, self.y2], self.page
+        )
+
+        # Return UI format (will be wrapped in array by caller)
+        return geometry.to_ui_format()
 
 
 class ConfidenceAssessment(BaseModel):
@@ -43,17 +43,9 @@ class ConfidenceAssessment(BaseModel):
     value: Any = Field(..., description="The extracted value")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score 0-1")
     reasoning: str = Field(..., description="Explanation for the confidence score")
-    threshold: float = Field(
-        ..., ge=0.0, le=1.0, description="Required confidence threshold"
-    )
     bounding_box: BoundingBox | None = Field(
         None, description="Location of value in document"
     )
-
-    @property
-    def meets_threshold(self) -> bool:
-        """Computed field: whether confidence meets threshold."""
-        return self.confidence >= self.threshold
 
 
 class AssessmentOutput(BaseModel):
@@ -70,7 +62,4 @@ class AssessmentOutput(BaseModel):
     )
     assessment: ConfidenceAssessment = Field(
         ..., description="Confidence assessment for this specific field"
-    )
-    alerts: list[str] = Field(
-        default_factory=list, description="Any confidence threshold alerts or issues"
     )

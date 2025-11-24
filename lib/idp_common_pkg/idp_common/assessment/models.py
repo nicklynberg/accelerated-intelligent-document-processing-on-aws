@@ -100,11 +100,156 @@ class AssessmentResult(BaseModel):
 # ============================================================================
 
 
-class Geometry(BaseModel):
-    """Geometry in IDP format (converted from BoundingBox)."""
+class BoundingBoxCoordinates(BaseModel):
+    """Normalized bounding box coordinates (0-1 scale)."""
 
-    boundingBox: dict[str, float]  # {top, left, width, height}
-    page: int
+    top: float = Field(..., ge=0.0, le=1.0, description="Top coordinate (normalized)")
+    left: float = Field(..., ge=0.0, le=1.0, description="Left coordinate (normalized)")
+    width: float = Field(..., ge=0.0, le=1.0, description="Width (normalized)")
+    height: float = Field(..., ge=0.0, le=1.0, description="Height (normalized)")
+
+    @classmethod
+    def from_corners(
+        cls, x1: float, y1: float, x2: float, y2: float, scale: float = 1000.0
+    ) -> "BoundingBoxCoordinates":
+        """
+        Create from corner coordinates.
+
+        Args:
+            x1, y1: Top-left corner in 0-scale range
+            x2, y2: Bottom-right corner in 0-scale range
+            scale: Normalization scale (default 1000.0)
+
+        Returns:
+            BoundingBoxCoordinates with normalized 0-1 values
+        """
+        # Ensure coordinates are in correct order
+        x1, x2 = min(x1, x2), max(x1, x2)
+        y1, y2 = min(y1, y2), max(y1, y2)
+
+        # Normalize to 0-1 scale
+        left = x1 / scale
+        top = y1 / scale
+        width = (x2 - x1) / scale
+        height = (y2 - y1) / scale
+
+        return cls(top=top, left=left, width=width, height=height)
+
+
+class Geometry(BaseModel):
+    """
+    Standard IDP geometry format compatible with UI expectations.
+
+    This is the single source of truth for geometry data structure.
+    Frontend expects: geometry[0].boundingBox.{left, top, width, height}
+    """
+
+    boundingBox: BoundingBoxCoordinates = Field(
+        ...,
+        description="Normalized bounding box coordinates",
+        serialization_alias="boundingBox",  # Ensure lowercase in JSON
+    )
+    page: int = Field(..., ge=1, description="Page number (1-indexed)")
+    vertices: list[dict[str, float]] | None = Field(
+        None, description="Optional polygon vertices for complex shapes"
+    )
+
+    @classmethod
+    def from_bbox_list(cls, bbox_coords: list[float], page_num: int) -> "Geometry":
+        """
+        Create from LLM bbox response format [x1, y1, x2, y2].
+
+        Args:
+            bbox_coords: List of 4 coordinates in 0-1000 scale
+            page_num: Page number (1-indexed)
+
+        Returns:
+            Geometry object
+
+        Raises:
+            ValueError: If bbox_coords is not exactly 4 values
+        """
+        if len(bbox_coords) != 4:
+            raise ValueError(f"Expected 4 coordinates, got {len(bbox_coords)}")
+
+        x1, y1, x2, y2 = bbox_coords
+        bbox = BoundingBoxCoordinates.from_corners(x1, y1, x2, y2, scale=1000.0)
+
+        return cls(boundingBox=bbox, page=page_num, vertices=None)
+
+    def to_ui_format(self) -> dict[str, Any]:
+        """
+        Convert to UI-compatible format.
+
+        Returns:
+            Dict with geometry data: {"boundingBox": {...}, "page": 1}
+        """
+        result: dict[str, Any] = {
+            "boundingBox": {
+                "top": self.boundingBox.top,
+                "left": self.boundingBox.left,
+                "width": self.boundingBox.width,
+                "height": self.boundingBox.height,
+            },
+            "page": self.page,
+        }
+        if self.vertices is not None:
+            result["vertices"] = self.vertices
+        return result
+
+
+class FieldAssessmentData(BaseModel):
+    """
+    Standard assessment data for a single field.
+    Ensures consistent structure across all assessment services.
+    """
+
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    value: Any = Field(None, description="The extracted value")
+    reasoning: str = Field(..., description="Confidence reasoning")
+    confidence_threshold: float = Field(..., ge=0.0, le=1.0)
+    geometry: list[Geometry] | None = Field(
+        None,
+        description="Bounding box locations (always wrapped in list for UI compatibility)",
+    )
+
+    @classmethod
+    def from_llm_response(
+        cls,
+        confidence: float,
+        value: Any,
+        reasoning: str,
+        confidence_threshold: float,
+        bbox_coords: list[float] | None = None,
+        page_num: int | None = None,
+    ) -> "FieldAssessmentData":
+        """Create from LLM response data."""
+        geometry = None
+        if bbox_coords is not None and page_num is not None:
+            geom = Geometry.from_bbox_list(bbox_coords, page_num)
+            geometry = [geom]  # Always wrap in list
+
+        return cls(
+            confidence=confidence,
+            value=value,
+            reasoning=reasoning,
+            confidence_threshold=confidence_threshold,
+            geometry=geometry,
+        )
+
+    def to_explainability_format(self) -> dict[str, Any]:
+        """Convert to explainability_info format for frontend."""
+        result = {
+            "confidence": self.confidence,
+            "value": self.value,
+            "reasoning": self.reasoning,
+            "confidence_threshold": self.confidence_threshold,
+        }
+
+        if self.geometry:
+            result["geometry"] = [g.to_ui_format() for g in self.geometry]
+
+        return result
 
 
 class ConfidenceAlert(BaseModel):

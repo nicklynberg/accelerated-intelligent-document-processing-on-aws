@@ -17,7 +17,11 @@ from strands.models.bedrock import BedrockModel
 from strands.types.content import CachePoint, ContentBlock, Message
 from strands.types.media import ImageContent, ImageSource
 
-from idp_common.assessment.models import AssessmentResult, AssessmentTask
+from idp_common.assessment.models import (
+    AssessmentResult,
+    AssessmentTask,
+    FieldAssessmentData,
+)
 from idp_common.assessment.strands_models import AssessmentOutput
 from idp_common.assessment.strands_tools import create_strands_tools
 from idp_common.bedrock import build_model_config
@@ -401,33 +405,41 @@ def _convert_to_assessment_result(
     metering: dict[str, Any],
     processing_time: float,
 ) -> AssessmentResult:
-    """Convert Strands AssessmentOutput to AssessmentResult."""
-
+    """Convert Strands AssessmentOutput to AssessmentResult with standardized geometry format."""
     # Single field assessment
     field_name = output.field_name
     assessment = output.assessment
 
-    # Build assessment data with confidence score
-    assessment_data = {
-        field_name: {
-            "confidence": assessment.confidence,
-            "value": assessment.value,
-            "reasoning": assessment.reasoning,
-        }
-    }
+    # Create standardized field assessment data
+    field_data = FieldAssessmentData.from_llm_response(
+        confidence=assessment.confidence,
+        value=assessment.value,
+        reasoning=assessment.reasoning,
+        confidence_threshold=task.confidence_threshold,
+        bbox_coords=(
+            [
+                assessment.bounding_box.x1,
+                assessment.bounding_box.y1,
+                assessment.bounding_box.x2,
+                assessment.bounding_box.y2,
+            ]
+            if assessment.bounding_box
+            else None
+        ),
+        page_num=assessment.bounding_box.page if assessment.bounding_box else None,
+    )
 
-    # Add geometry if bounding box provided
-    if assessment.bounding_box:
-        assessment_data[field_name]["Geometry"] = assessment.bounding_box.to_geometry()
+    # Convert to explainability format
+    assessment_data = {field_name: field_data.to_explainability_format()}
 
     # Check for confidence threshold violations
     confidence_alerts = []
-    if not assessment.meets_threshold:
+    if assessment.confidence < task.confidence_threshold:
         confidence_alerts.append(
             {
                 "attribute_name": field_name,
                 "confidence": assessment.confidence,
-                "confidence_threshold": assessment.threshold,
+                "confidence_threshold": task.confidence_threshold,
             }
         )
 
