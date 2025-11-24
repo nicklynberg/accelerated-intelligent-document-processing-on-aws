@@ -54,7 +54,7 @@ def submit_assessment(assessment: AssessmentOutput, agent: Agent) -> str:
         Success confirmation message or validation error details
     """
     # Validate assessment structure and return helpful errors
-    validated_assessment = AssessmentOutput(**assessment)  # pyright: ignore[reportCallIssue]
+    validated_assessment = AssessmentOutput.model_validate(assessment)
 
     # Store in agent state
     agent.state.set("assessment_output", validated_assessment.model_dump())
@@ -80,7 +80,7 @@ def create_view_image_tool(page_images: list[bytes], sorted_page_ids: list[str])
     """
 
     @tool
-    def view_image(input_data: dict[str, Any], agent: Agent) -> dict:
+    def view_image(input_data: ViewImageInput, agent: Agent) -> dict:
         """
         View a specific page image, optionally highlighting a bounding box area.
 
@@ -104,7 +104,7 @@ def create_view_image_tool(page_images: list[bytes], sorted_page_ids: list[str])
             }, agent)
         """
         # Validate input - let ValidationError propagate
-        view_input = ViewImageInput(**input_data)
+        view_input = ViewImageInput.model_validate(input_data)
 
         # Validate image index exists
         if view_input.image_index >= len(page_images):
