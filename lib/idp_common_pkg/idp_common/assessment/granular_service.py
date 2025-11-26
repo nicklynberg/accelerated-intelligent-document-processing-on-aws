@@ -1094,9 +1094,10 @@ class GranularAssessmentService:
         if (
             document.status == Status.FAILED
             and document.errors
-            and not hasattr(document, "metadata")
-            or not document.metadata
-            or "failed_assessment_tasks" not in document.metadata
+            and (
+                not document.metadata
+                or "failed_assessment_tasks" not in document.metadata
+            )
         ):
             # Check if any errors contain throttling keywords
             throttling_keywords = [
@@ -1162,7 +1163,7 @@ class GranularAssessmentService:
     def _handle_parsing_errors(
         self,
         document: Document,
-        failed_tasks: list[str],
+        failed_tasks: list[AssessmentResult],
         document_text: str,
         extraction_results: dict,
     ) -> str | None:

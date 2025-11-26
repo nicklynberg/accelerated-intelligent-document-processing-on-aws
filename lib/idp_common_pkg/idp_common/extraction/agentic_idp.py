@@ -467,7 +467,7 @@ def patch_buffer_data(patches: list[dict[str, Any]], agent: Agent) -> str:
 
     logger.info(f"Current length of buffer data {len(patched_data)} ")
 
-    return f"Successfully patched {str(patched_data)[100:]}...."
+    return f"Successfully patched {str(patched_data)[:100]}...."
 
 
 SYSTEM_PROMPT = """

@@ -174,7 +174,7 @@ def handler(event, context):
     logger.info(f"Starting assessment for section {section_id}")
     updated_document = assessment_service.process_document_section(document, section_id)
     t1 = time.time()
-    logger.info(f"Total extraction time: {t1 - t0:.2f} seconds")
+    logger.info(f"Total assessment time: {t1 - t0:.2f} seconds")
 
     # Check if document processing failed
     if updated_document.status == Status.FAILED:

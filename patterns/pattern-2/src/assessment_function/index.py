@@ -6,7 +6,7 @@ import json
 import time
 import logging
 
-from idp_common import get_config, assessment
+from idp_common import get_config
 from idp_common.models import Document, Status
 from idp_common.docs_service import create_document_service
 from idp_common import s3

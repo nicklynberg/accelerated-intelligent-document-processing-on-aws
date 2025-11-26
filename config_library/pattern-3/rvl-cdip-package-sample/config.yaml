@@ -932,11 +932,6 @@ assessment:
   image:
     target_height: ""
     target_width: ""
-  granular:
-    enabled: true
-    max_workers: "20"
-    simple_batch_size: "3"
-    list_batch_size: "1"
   default_confidence_threshold: "0.8"
   top_p: "0.0"
   max_tokens: "10000"
