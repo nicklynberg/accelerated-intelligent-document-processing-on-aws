@@ -291,7 +291,8 @@ class TestClassificationService:
 
         # Verify calls
         mock_get_text.assert_called_once_with("s3://bucket/text.txt")
-        mock_prepare_image.assert_called_once_with("s3://bucket/image.jpg", None, None)
+        # ImageConfig defaults to 1200x1200 when not explicitly configured
+        mock_prepare_image.assert_called_once_with("s3://bucket/image.jpg", 1200, 1200)
         mock_prepare_bedrock_image.assert_called_once_with(b"image_data")
         mock_invoke.assert_called_once()
 

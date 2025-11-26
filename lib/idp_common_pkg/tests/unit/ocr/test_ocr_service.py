@@ -106,10 +106,10 @@ class TestOcrService:
             assert service.max_workers == 20
             assert service.dpi is None  # Default is None
             assert service.enhanced_features is False
-            # Default image sizing
+            # Default image sizing (from ImageConfig defaults)
             assert service.resize_config == {
-                "target_width": 951,
-                "target_height": 1268,
+                "target_width": 1200,
+                "target_height": 1200,
             }
             assert service.preprocessing_config is None
 
@@ -198,10 +198,10 @@ class TestOcrService:
         with patch("boto3.client"):
             service = OcrService(config=config)
 
-            # Verify defaults are applied
+            # Verify defaults are applied (from ImageConfig model defaults)
             assert service.resize_config == {
-                "target_width": 951,
-                "target_height": 1268,
+                "target_width": 1200,
+                "target_height": 1200,
             }
             assert service.dpi == 200
 
@@ -242,7 +242,8 @@ class TestOcrService:
         with patch("boto3.client"):
             service = OcrService(config=config)
 
-            # Verify defaults are applied (empty strings treated same as None)
+            # Verify OCR service defaults are applied (empty strings treated same as None)
+            # Note: Empty strings bypass Pydantic defaults, triggering OCR service defaults
             assert service.resize_config == {
                 "target_width": 951,
                 "target_height": 1268,
