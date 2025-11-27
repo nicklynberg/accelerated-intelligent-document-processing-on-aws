@@ -141,7 +141,6 @@ class ExtractionConfig(BaseModel):
 
         return self
 
-
     @model_validator(mode="after")
     def set_default_review_agent_model(self) -> Self:
         """Set review_agent_model to extraction model if not specified."""
@@ -231,7 +230,8 @@ class AssessmentConfig(BaseModel):
 
     enabled: bool = Field(default=True, description="Enable assessment")
     model: Optional[str] = Field(
-        default=None, description="Bedrock model ID for assessment"
+        default="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        description="Bedrock model ID for assessment",
     )
     system_prompt: str = Field(
         default="You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data extraction results by analyzing them against source documents.\n\nProvide accurate confidence scores for each assessment.",

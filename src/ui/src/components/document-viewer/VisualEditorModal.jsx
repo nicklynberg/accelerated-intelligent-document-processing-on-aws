@@ -24,136 +24,136 @@ import { getFieldConfidenceInfo } from '../common/confidence-alerts-utils';
 
 const logger = new ConsoleLogger('VisualEditorModal');
 
-// Memoized component to render a bounding box on an image
-const BoundingBox = memo(({ box, page, currentPage, imageRef, zoomLevel = 1, panOffset = { x: 0, y: 0 } }) => {
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+// Component that renders document image with bounding box overlay
+// The bounding box is drawn on a canvas that sits directly on top of the image
+// Both are wrapped in a container that handles transforms together
+const DocumentImageWithOverlay = memo(
+  React.forwardRef(
+    ({ src, alt, geometry, maxHeight = 'min(70vh, 700px)', zoomLevel = 1, panOffset = { x: 0, y: 0 }, onError }, ref) => {
+      const containerRef = useRef(null);
+      const canvasRef = useRef(null);
+      const internalImageRef = useRef(null);
+      const [imageDimensions, setImageDimensions] = useState({ width: 0, height: 0 });
 
-  useEffect(() => {
-    if (imageRef.current && page === currentPage) {
-      const updateDimensions = () => {
-        const img = imageRef.current;
-        const rect = img.getBoundingClientRect();
-        const containerRect = img.parentElement.getBoundingClientRect();
+      // Expose the image ref to parent component
+      React.useImperativeHandle(ref, () => internalImageRef.current);
 
-        // Get the actual displayed dimensions and position after all transforms
-        const transformedWidth = rect.width;
-        const transformedHeight = rect.height;
-        const transformedOffsetX = rect.left - containerRect.left;
-        const transformedOffsetY = rect.top - containerRect.top;
-
-        setDimensions({
-          transformedWidth,
-          transformedHeight,
-          transformedOffsetX,
-          transformedOffsetY,
-        });
-
-        logger.debug('VisualEditorModal - BoundingBox dimensions updated:', {
-          imageWidth: img.width,
-          imageHeight: img.height,
-          naturalWidth: img.naturalWidth,
-          naturalHeight: img.naturalHeight,
-          offsetX: rect.left - containerRect.left,
-          offsetY: rect.top - containerRect.top,
-          imageRect: rect,
-          containerRect,
-        });
-      };
-
-      // Update dimensions when image loads
-      if (imageRef.current.complete && imageRef.current.naturalWidth > 0) {
-        updateDimensions();
-      } else {
-        imageRef.current.addEventListener('load', updateDimensions);
-      }
-
-      return () => {
-        if (imageRef.current) {
-          imageRef.current.removeEventListener('load', updateDimensions);
+      // Draw bounding box on canvas whenever geometry or dimensions change
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas || !imageDimensions.width || !imageDimensions.height) {
+          logger.debug('DocumentImageWithOverlay - Canvas draw skipped:', {
+            hasCanvas: !!canvas,
+            imageDimensions,
+            geometry,
+          });
+          return;
         }
-      };
-    }
-    return undefined;
-  }, [imageRef, page, currentPage]);
 
-  // Update dimensions when zoom or pan changes
-  useEffect(() => {
-    if (imageRef.current && page === currentPage) {
-      const updateDimensions = () => {
-        const img = imageRef.current;
-        const rect = img.getBoundingClientRect();
-        const containerRect = img.parentElement.getBoundingClientRect();
+        // Set canvas internal resolution to match displayed size
+        // This is critical - canvas.width/height set the drawing resolution
+        canvas.width = imageDimensions.width;
+        canvas.height = imageDimensions.height;
 
-        // Get the actual displayed dimensions and position after all transforms
-        const transformedWidth = rect.width;
-        const transformedHeight = rect.height;
-        const transformedOffsetX = rect.left - containerRect.left;
-        const transformedOffsetY = rect.top - containerRect.top;
+        const ctx = canvas.getContext('2d');
+        // Clear previous drawings
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        setDimensions({
-          transformedWidth,
-          transformedHeight,
-          transformedOffsetX,
-          transformedOffsetY,
+        if (!geometry?.boundingBox) {
+          logger.debug('DocumentImageWithOverlay - No geometry to draw:', { geometry });
+          return;
+        }
+
+        const bbox = geometry.boundingBox;
+        const padding = 3;
+
+        // Calculate pixel coordinates from normalized values (0-1)
+        // Coordinates are in document space (0-1), directly mapped to image dimensions
+        const x = bbox.left * imageDimensions.width - padding;
+        const y = bbox.top * imageDimensions.height - padding;
+        const width = bbox.width * imageDimensions.width + padding * 2;
+        const height = bbox.height * imageDimensions.height + padding * 2;
+
+        // Draw semi-transparent fill
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+        ctx.fillRect(x, y, width, height);
+
+        // Draw border
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, width, height);
+
+        logger.debug('DocumentImageWithOverlay - Drew bounding box:', {
+          bbox,
+          pixelCoords: { x, y, width, height },
+          canvasDimensions: { width: canvas.width, height: canvas.height },
+          imageDimensions,
         });
+      }, [geometry, imageDimensions]);
+
+      const handleImageLoad = (e) => {
+        const img = e.target;
+        // Get the displayed dimensions of the image
+        const displayedWidth = img.offsetWidth;
+        const displayedHeight = img.offsetHeight;
+
+        // Get bounding rect to check for any offset
+        setImageDimensions({ width: displayedWidth, height: displayedHeight });
       };
-      // Delay to allow transforms to complete
-      const timeoutId = setTimeout(updateDimensions, 150);
-      // Ensure accuracy after reset
-      const secondTimeoutId = setTimeout(updateDimensions, 300);
-      return () => {
-        clearTimeout(timeoutId);
-        clearTimeout(secondTimeoutId);
-      };
+
+      return (
+        <div
+          ref={containerRef}
+          style={{
+            position: 'relative',
+            display: 'inline-block',
+            transform: `scale(${zoomLevel}) translate(${panOffset.x / zoomLevel}px, ${panOffset.y / zoomLevel}px)`,
+            transformOrigin: 'center center',
+            transition: 'transform 0.1s ease-out',
+            // Ensure the container doesn't have extra space
+            lineHeight: 0,
+            fontSize: 0,
+          }}
+        >
+          <img
+            ref={internalImageRef}
+            src={src}
+            alt={alt}
+            onLoad={handleImageLoad}
+            onError={onError}
+            style={{
+              maxWidth: '100%',
+              maxHeight,
+              width: 'auto',
+              height: 'auto',
+              objectFit: 'contain',
+              display: 'block',
+              // Ensure no extra space below image
+              verticalAlign: 'top',
+            }}
+          />
+          <canvas
+            ref={canvasRef}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              pointerEvents: 'none',
+              // Set CSS width/height to match the displayed image dimensions
+              // This ensures the canvas overlays exactly on top of the image
+              // The canvas.width/height attributes (set in useEffect) control the drawing resolution
+              // The CSS width/height control the display size
+              width: imageDimensions.width > 0 ? `${imageDimensions.width}px` : 'auto',
+              height: imageDimensions.height > 0 ? `${imageDimensions.height}px` : 'auto',
+            }}
+          />
+        </div>
+      );
     }
-    return undefined;
-  }, [zoomLevel, panOffset, imageRef, page, currentPage]);
+  )
+);
 
-  if (page !== currentPage || !box || !dimensions.transformedWidth) {
-    return null;
-  }
-
-  // Calculate position based on image dimensions with proper zoom and pan handling
-  if (!box.boundingBox) {
-    return null;
-  }
-
-  const padding = 5;
-  const bbox = box.boundingBox;
-
-  // Calculate position and size directly on the transformed image
-  const finalLeft = bbox.left * dimensions.transformedWidth + dimensions.transformedOffsetX - padding;
-  const finalTop = bbox.top * dimensions.transformedHeight + dimensions.transformedOffsetY - padding;
-  const finalWidth = bbox.width * dimensions.transformedWidth + padding * 2;
-  const finalHeight = bbox.height * dimensions.transformedHeight + padding * 2;
-
-  // Position the bounding box directly without additional transforms
-  const style = {
-    position: 'absolute',
-    left: `${finalLeft}px`,
-    top: `${finalTop}px`,
-    width: `${finalWidth}px`,
-    height: `${finalHeight}px`,
-    border: '2px solid red',
-    pointerEvents: 'none',
-    zIndex: 10,
-    transition: 'all 0.1s ease-out',
-  };
-
-  logger.debug('VisualEditorModal - BoundingBox style calculated:', {
-    bbox,
-    dimensions,
-    finalLeft,
-    finalTop,
-    finalWidth,
-    finalHeight,
-    style,
-  });
-
-  return <div style={style} />;
-});
-
-BoundingBox.displayName = 'BoundingBox';
+DocumentImageWithOverlay.displayName = 'DocumentImageWithOverlay';
 
 // Memoized component to render a form field based on its type
 const FormFieldRenderer = memo(
@@ -965,39 +965,43 @@ const VisualEditorModal = ({ visible, onDismiss, jsonData, onChange, isReadOnly,
     }
   };
 
+  // Determine the geometry to display based on current page
+  const currentPageIndex = pageIds.indexOf(currentPage) + 1; // 1-based page number
+  const geometryForCurrentPage =
+    activeFieldGeometry && activeFieldGeometry.page === currentPageIndex ? activeFieldGeometry : null;
+
   // Create carousel items from page images
-  const carouselItems = pageIds.map((pageId) => ({
-    id: pageId,
-    content: (
-      <div
-        ref={pageId === currentPage ? imageContainerRef : null}
-        style={{
-          position: 'relative',
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          justifyContent: 'center',
-          overflow: 'hidden',
-          cursor: zoomLevel > 1 ? 'grab' : 'default',
-        }}
-        onWheel={handleWheel}
-      >
-        {pageImages[pageId] ? (
-          <>
-            <img
-              ref={pageId === currentPage ? imageRef : null}
+  const carouselItems = pageIds.map((pageId) => {
+    const isCurrentPage = pageId === currentPage;
+    const pageIndex = pageIds.indexOf(pageId) + 1;
+    const geometryForPage = activeFieldGeometry && activeFieldGeometry.page === pageIndex ? activeFieldGeometry : null;
+
+    return {
+      id: pageId,
+      content: (
+        <div
+          ref={isCurrentPage ? imageContainerRef : null}
+          style={{
+            position: 'relative',
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'flex-start',
+            overflow: 'hidden',
+            cursor: zoomLevel > 1 ? 'grab' : 'default',
+          }}
+          onWheel={handleWheel}
+        >
+          {pageImages[pageId] ? (
+            <DocumentImageWithOverlay
+              ref={isCurrentPage ? imageRef : null}
               src={pageImages[pageId]}
               alt={`Page ${pageId}`}
-              style={{
-                maxWidth: '100%',
-                maxHeight: 'min(70vh, 700px)',
-                width: 'auto',
-                height: 'auto',
-                objectFit: 'contain',
-                transform: `scale(${zoomLevel}) translate(${panOffset.x / zoomLevel}px, ${panOffset.y / zoomLevel}px)`,
-                transformOrigin: 'center center',
-                transition: 'transform 0.1s ease-out',
-              }}
+              geometry={geometryForPage}
+              maxHeight="min(70vh, 700px)"
+              zoomLevel={zoomLevel}
+              panOffset={panOffset}
               onError={(e) => {
                 logger.error(`Error loading image for page ${pageId}:`, e);
                 // Fallback image for error state
@@ -1009,26 +1013,16 @@ const VisualEditorModal = ({ visible, onDismiss, jsonData, onChange, isReadOnly,
                 e.target.src = fallbackImage;
               }}
             />
-            {activeFieldGeometry && (
-              <BoundingBox
-                box={activeFieldGeometry}
-                page={currentPage}
-                currentPage={currentPage}
-                imageRef={imageRef}
-                zoomLevel={zoomLevel}
-                panOffset={panOffset}
-              />
-            )}
-          </>
-        ) : (
-          <Box padding="xl" textAlign="center">
-            <Spinner />
-            <div>Loading image...</div>
-          </Box>
-        )}
-      </div>
-    ),
-  }));
+          ) : (
+            <Box padding="xl" textAlign="center">
+              <Spinner />
+              <div>Loading image...</div>
+            </Box>
+          )}
+        </div>
+      ),
+    };
+  });
 
   return (
     <Modal

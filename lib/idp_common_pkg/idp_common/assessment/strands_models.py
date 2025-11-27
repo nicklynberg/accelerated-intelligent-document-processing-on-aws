@@ -40,7 +40,6 @@ class BoundingBox(BaseModel):
 class ConfidenceAssessment(BaseModel):
     """Confidence assessment for an attribute value."""
 
-    value: Any = Field(..., description="The extracted value")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score 0-1")
     reasoning: str = Field(..., description="Explanation for the confidence score")
     bounding_box: BoundingBox | None = Field(

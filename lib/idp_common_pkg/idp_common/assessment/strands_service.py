@@ -416,7 +416,6 @@ def _convert_to_assessment_result(
     # Create standardized field assessment data
     field_data = FieldAssessmentData.from_llm_response(
         confidence=assessment.confidence,
-        value=assessment.value,
         reasoning=assessment.reasoning,
         confidence_threshold=task.confidence_threshold,
         bbox_coords=(

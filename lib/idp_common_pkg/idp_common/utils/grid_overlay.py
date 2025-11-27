@@ -147,8 +147,7 @@ def add_ruler_edges(
 def draw_bounding_boxes(
     image_data: bytes,
     bboxes: list[dict],
-    has_ruler: bool = False,
-    ruler_width: int = 30,
+    margin_offset: int = 0,
     box_color: str = "red",
     box_width: int = 3,
     label_font_size: int = 12,
@@ -160,12 +159,11 @@ def draw_bounding_boxes(
     Args:
         image_data: Raw image bytes
         bboxes: List of bounding box dictionaries, each containing:
-            - 'bbox': [x1, y1, x2, y2] in 0-1000 normalized scale
+            - 'bbox': [x1, y1, x2, y2] in 0-1000 normalized scale (document space)
             - 'label': Optional label text for the box
             - 'color': Optional color override for this box
             - 'page': Optional page number (for multi-page docs)
-        has_ruler: If True, account for ruler margins in coordinate calculation
-        ruler_width: Width of ruler margin (only used if has_ruler=True)
+        margin_offset: Pixel offset for top-left margin (e.g., if image has decorative margins)
         box_color: Default color for bounding boxes
         box_width: Line width for bounding boxes
         label_font_size: Font size for box labels
@@ -191,17 +189,11 @@ def draw_bounding_boxes(
     image = Image.open(io.BytesIO(image_data)).convert("RGBA")
     width, height = image.size
 
-    # If image has ruler edges, calculate the actual document area
-    if has_ruler:
-        doc_width = width - ruler_width
-        doc_height = height - ruler_width
-        offset_x = ruler_width
-        offset_y = ruler_width
-    else:
-        doc_width = width
-        doc_height = height
-        offset_x = 0
-        offset_y = 0
+    # Calculate document area (excluding any margin offset)
+    doc_width = width - margin_offset
+    doc_height = height - margin_offset
+    offset_x = margin_offset
+    offset_y = margin_offset
 
     # Create overlay for semi-transparent boxes
     overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -331,12 +323,11 @@ def add_ruler_and_draw_boxes(
         label_interval=label_interval,
     )
 
-    # Then draw bounding boxes (accounting for ruler offset)
+    # Then draw bounding boxes (accounting for margin offset from ruler)
     result = draw_bounding_boxes(
         image_with_ruler,
         bboxes,
-        has_ruler=True,
-        ruler_width=ruler_width,
+        margin_offset=ruler_width,
         box_color=box_color,
         box_width=box_width,
     )

@@ -115,13 +115,12 @@ def create_view_image_tool(page_images: list[bytes], sorted_page_ids: list[str])
                 "color": "red",
             }
 
-            # Draw the bounding box on the image (which already has ruler)
+            # Draw the bounding box on the image (which has 30px margin for ruler)
             # Let drawing errors propagate - if we can't draw, something is wrong
             img_bytes = draw_bounding_boxes(
                 img_bytes,
                 [bbox_dict],
-                has_ruler=True,
-                ruler_width=30,
+                margin_offset=30,
             )
 
             logger.debug(

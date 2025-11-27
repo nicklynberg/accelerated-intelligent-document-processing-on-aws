@@ -106,10 +106,15 @@ class BoundingBoxCoordinates(BaseModel):
 
     @classmethod
     def from_corners(
-        cls, x1: float, y1: float, x2: float, y2: float, scale: float = 1000.0
+        cls,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        scale: float = 1000.0,
     ) -> "BoundingBoxCoordinates":
         """
-        Create from corner coordinates.
+        Create from corner coordinates in document space.
 
         Args:
             x1, y1: Top-left corner in 0-scale range
@@ -128,6 +133,12 @@ class BoundingBoxCoordinates(BaseModel):
         top = y1 / scale
         width = (x2 - x1) / scale
         height = (y2 - y1) / scale
+
+        # Clamp to valid range
+        left = min(max(left, 0.0), 1.0)
+        top = min(max(top, 0.0), 1.0)
+        width = min(width, 1.0 - left)
+        height = min(height, 1.0 - top)
 
         return cls(top=top, left=left, width=width, height=height)
 
@@ -201,7 +212,6 @@ class FieldAssessmentData(BaseModel):
     """
 
     confidence: float = Field(..., ge=0.0, le=1.0)
-    value: Any = Field(None, description="The extracted value")
     reasoning: str = Field(..., description="Confidence reasoning")
     confidence_threshold: float = Field(..., ge=0.0, le=1.0)
     geometry: list[Geometry] | None = Field(
@@ -213,7 +223,6 @@ class FieldAssessmentData(BaseModel):
     def from_llm_response(
         cls,
         confidence: float,
-        value: Any,
         reasoning: str,
         confidence_threshold: float,
         bbox_coords: list[float] | None = None,
@@ -227,7 +236,6 @@ class FieldAssessmentData(BaseModel):
 
         return cls(
             confidence=confidence,
-            value=value,
             reasoning=reasoning,
             confidence_threshold=confidence_threshold,
             geometry=geometry,
@@ -235,10 +243,9 @@ class FieldAssessmentData(BaseModel):
 
     def to_explainability_format(self) -> dict[str, Any]:
         """Convert to explainability_info format for frontend."""
-        result = {
+        result: dict[str, Any] = {
             "confidence": self.confidence,
-            "value": self.value,
-            "reasoning": self.reasoning,
+            "confidence_reason": self.reasoning,
             "confidence_threshold": self.confidence_threshold,
         }
 
