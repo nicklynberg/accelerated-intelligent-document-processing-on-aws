@@ -125,7 +125,13 @@ def create_view_image_tool(page_images: list[bytes], sorted_page_ids: list[str])
                 "Added ruler and drew bounding box on image",
                 extra={
                     "image_index": view_input.image_index,
-                    "bbox": bbox_dict["bbox"],
+                    "page_id": page_id,
+                    "x1": view_input.bounding_box.x1,
+                    "y1": view_input.bounding_box.y1,
+                    "x2": view_input.bounding_box.x2,
+                    "y2": view_input.bounding_box.y2,
+                    "page": view_input.bounding_box.page,
+                    "label": view_input.label,
                 },
             )
         else:
