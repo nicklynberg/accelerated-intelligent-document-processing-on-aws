@@ -19,6 +19,7 @@ from mypy_boto3_bedrock_runtime.type_defs import (
     InvokeModelRequestTypeDef,
     InvokeModelResponseTypeDef,
 )
+from strands.models.bedrock import ModelThrottledException
 
 # Optional import for strands-agents (may not be installed in all environments)
 try:
