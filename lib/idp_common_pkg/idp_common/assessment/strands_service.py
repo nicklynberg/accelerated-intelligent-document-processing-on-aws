@@ -26,6 +26,7 @@ from idp_common.assessment.strands_models import AssessmentOutput
 from idp_common.assessment.strands_tools import create_strands_tools
 from idp_common.bedrock import build_model_config
 from idp_common.utils.bedrock_utils import async_exponential_backoff_retry
+from idp_common.utils.grid_overlay import add_ruler_edges
 
 logger = Logger(service="assessment", level=os.getenv("LOG_LEVEL", "INFO"))
 
@@ -49,9 +50,8 @@ async def assess_attribute_with_strands(
 
     Args:
         task: Assessment task to process
-        base_content: Base prompt content (includes images)
         extraction_results: Full extraction results
-        page_images: List of page images (with grid overlay already applied)
+        page_images: List of raw page images (ruler overlay added internally)
         sorted_page_ids: List of page IDs in sorted order
         model_id: Bedrock model ID
         system_prompt: System prompt for assessment
@@ -364,16 +364,21 @@ def _build_task_prompt(
 
     Args:
         task: Assessment task for one specific field
-        page_images: List of page images to include in the prompt
+        page_images: List of raw page images (ruler will be added here)
 
     Returns:
         List of content blocks with images and task text
     """
     field_path_str = _convert_field_path_to_string(task.field_path)
 
-    # Create image content blocks
+    # Create image content blocks with ruler overlay
+    # Rulers are added here so the LLM can see coordinate reference marks
     image_blocks = [
-        ContentBlock(image=ImageContent(format="png", source=ImageSource(bytes=img)))
+        ContentBlock(
+            image=ImageContent(
+                format="png", source=ImageSource(bytes=add_ruler_edges(img))
+            )
+        )
         for img in page_images
     ]
 
@@ -414,6 +419,8 @@ def _convert_to_assessment_result(
     assessment = output.assessment
 
     # Create standardized field assessment data
+    # Note: bounding box coordinates are already adjusted for ruler offset
+    # by the submit_assessment tool in strands_tools.py
     field_data = FieldAssessmentData.from_llm_response(
         confidence=assessment.confidence,
         reasoning=assessment.reasoning,

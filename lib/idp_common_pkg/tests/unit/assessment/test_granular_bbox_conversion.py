@@ -2,16 +2,15 @@
 # SPDX-License-Identifier: MIT-0
 
 """
-Test to verify that both regular and granular assessment services
-handle bounding box conversion correctly.
+Test to verify that the geometry_utils module correctly handles
+bounding box conversion for assessment data.
 """
 
-from idp_common.assessment.granular_service import GranularAssessmentService
-from idp_common.assessment.service import AssessmentService
+from idp_common.assessment.geometry_utils import extract_geometry_from_nested_dict
 
 
 def test_both_services_convert_bbox_to_geometry():
-    """Test that both regular and granular services convert bbox to geometry."""
+    """Test that geometry_utils converts bbox to geometry correctly."""
 
     # Test data with bbox coordinates
     mock_assessment_data = {
@@ -37,105 +36,56 @@ def test_both_services_convert_bbox_to_geometry():
         },
     }
 
-    print("=== Testing Bounding Box Conversion in Both Services ===")
+    print("=== Testing Bounding Box Conversion in geometry_utils ===")
 
-    # Test regular assessment service
-    print("\n📝 Testing Regular AssessmentService")
-    regular_service = AssessmentService()
-    regular_result = regular_service._extract_geometry_from_assessment(
-        mock_assessment_data
-    )
+    # Test geometry conversion using geometry_utils
+    print("\n📝 Testing extract_geometry_from_nested_dict")
+    result = extract_geometry_from_nested_dict(mock_assessment_data)
 
     # Check YTDNetPay conversion
-    regular_ytd = regular_result["YTDNetPay"]
-    regular_ytd_has_geometry = "geometry" in regular_ytd
-    regular_ytd_has_bbox = "bbox" in regular_ytd
+    ytd = result["YTDNetPay"]
+    ytd_has_geometry = "geometry" in ytd
+    ytd_has_bbox = "bbox" in ytd
 
-    print(
-        f"Regular Service - YTDNetPay: geometry={regular_ytd_has_geometry}, bbox={regular_ytd_has_bbox}"
-    )
+    print(f"YTDNetPay: geometry={ytd_has_geometry}, bbox={ytd_has_bbox}")
 
     # Check CompanyAddress.State conversion
-    regular_state = regular_result["CompanyAddress"]["State"]
-    regular_state_has_geometry = "geometry" in regular_state
-    regular_state_has_bbox = "bbox" in regular_state
+    state = result["CompanyAddress"]["State"]
+    state_has_geometry = "geometry" in state
+    state_has_bbox = "bbox" in state
 
-    print(
-        f"Regular Service - CompanyAddress.State: geometry={regular_state_has_geometry}, bbox={regular_state_has_bbox}"
-    )
+    print(f"CompanyAddress.State: geometry={state_has_geometry}, bbox={state_has_bbox}")
 
-    # Test granular assessment service
-    print("\n📝 Testing GranularAssessmentService")
-    granular_service = GranularAssessmentService()
-    granular_result = granular_service._extract_geometry_from_assessment(
-        mock_assessment_data
-    )
-
-    # Check YTDNetPay conversion
-    granular_ytd = granular_result["YTDNetPay"]
-    granular_ytd_has_geometry = "geometry" in granular_ytd
-    granular_ytd_has_bbox = "bbox" in granular_ytd
-
-    print(
-        f"Granular Service - YTDNetPay: geometry={granular_ytd_has_geometry}, bbox={granular_ytd_has_bbox}"
-    )
-
-    # Check CompanyAddress.State conversion
-    granular_state = granular_result["CompanyAddress"]["State"]
-    granular_state_has_geometry = "geometry" in granular_state
-    granular_state_has_bbox = "bbox" in granular_state
-
-    print(
-        f"Granular Service - CompanyAddress.State: geometry={granular_state_has_geometry}, bbox={granular_state_has_bbox}"
-    )
-
-    # Verify both services work identically
+    # Verify conversion
     print("\n🔍 Verification:")
 
-    # Both should convert bbox to geometry
-    assert regular_ytd_has_geometry, (
-        "Regular service should convert YTDNetPay bbox to geometry"
-    )
-    assert not regular_ytd_has_bbox, (
-        "Regular service should remove YTDNetPay bbox after conversion"
-    )
-    assert granular_ytd_has_geometry, (
-        "Granular service should convert YTDNetPay bbox to geometry"
-    )
-    assert not granular_ytd_has_bbox, (
-        "Granular service should remove YTDNetPay bbox after conversion"
-    )
+    # Should convert bbox to geometry
+    assert ytd_has_geometry, "Should convert YTDNetPay bbox to geometry"
+    assert not ytd_has_bbox, "Should remove YTDNetPay bbox after conversion"
 
-    # Both should handle nested attributes
-    assert regular_state_has_geometry, (
-        "Regular service should convert nested State bbox to geometry"
-    )
-    assert not regular_state_has_bbox, (
-        "Regular service should remove nested State bbox after conversion"
-    )
-    assert granular_state_has_geometry, (
-        "Granular service should convert nested State bbox to geometry"
-    )
-    assert not granular_state_has_bbox, (
-        "Granular service should remove nested State bbox after conversion"
-    )
+    # Should handle nested attributes
+    assert state_has_geometry, "Should convert nested State bbox to geometry"
+    assert not state_has_bbox, "Should remove nested State bbox after conversion"
 
-    # Check geometry values are equivalent
-    regular_ytd_geometry = regular_ytd["geometry"][0]["boundingBox"]
-    granular_ytd_geometry = granular_ytd["geometry"][0]["boundingBox"]
+    # Check geometry values are correct
+    ytd_geometry = ytd["geometry"][0]["boundingBox"]
+    assert ytd_geometry["top"] == 0.333  # 333/1000
+    assert ytd_geometry["left"] == 0.443  # 443/1000
+    assert ytd_geometry["width"] == 0.064  # (507-443)/1000
+    assert ytd_geometry["height"] == 0.012  # (345-333)/1000
 
-    assert regular_ytd_geometry == granular_ytd_geometry, (
-        "Both services should produce identical geometry"
-    )
+    state_geometry = state["geometry"][0]["boundingBox"]
+    assert state_geometry["top"] == 0.116  # 116/1000
+    assert state_geometry["left"] == 0.23  # 230/1000
+    assert state_geometry["width"] == 0.029  # (259-230)/1000
+    assert state_geometry["height"] == 0.01  # (126-116)/1000
 
-    print("✅ Regular AssessmentService: Converts bbox → geometry correctly")
-    print("✅ GranularAssessmentService: Converts bbox → geometry correctly")
-    print("✅ Both services handle nested attributes (CompanyAddress.State)")
-    print("✅ Both services produce identical geometry output")
-    print("✅ Both services remove raw bbox data after conversion")
+    print("✅ Converts bbox → geometry correctly")
+    print("✅ Handles nested attributes (CompanyAddress.State)")
+    print("✅ Removes raw bbox data after conversion")
+    print("✅ Produces correct normalized geometry values")
 
-    print("\n🎉 Both services now support automatic bounding box conversion!")
-    print("Your deployed stack with granular assessment will now work correctly!")
+    print("\n🎉 geometry_utils correctly supports automatic bounding box conversion!")
 
     return True
 

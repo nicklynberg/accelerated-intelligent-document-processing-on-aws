@@ -2,11 +2,14 @@
 # SPDX-License-Identifier: MIT-0
 
 """
-Unit tests for nested geometry conversion in AssessmentService.
+Unit tests for nested geometry conversion in geometry_utils.
 Tests the recursive processing of group attributes with bounding boxes.
 """
 
-from idp_common.assessment.service import AssessmentService
+from idp_common.assessment.geometry_utils import (
+    extract_geometry_from_nested_dict,
+    process_assessment_geometry,
+)
 
 
 class TestNestedGeometryConversion:
@@ -14,8 +17,6 @@ class TestNestedGeometryConversion:
 
     def test_simple_attribute_geometry_conversion(self):
         """Test that simple attributes still work correctly."""
-        service = AssessmentService()
-
         assessment_data = {
             "YTDCityTax": {
                 "confidence": 1.0,
@@ -25,7 +26,7 @@ class TestNestedGeometryConversion:
             }
         }
 
-        result = service._extract_geometry_from_assessment(assessment_data)
+        result = extract_geometry_from_nested_dict(assessment_data)
 
         # Check conversion worked
         assert "geometry" in result["YTDCityTax"]
@@ -45,8 +46,6 @@ class TestNestedGeometryConversion:
 
     def test_nested_group_attribute_geometry_conversion(self):
         """Test that nested group attributes are processed recursively."""
-        service = AssessmentService()
-
         assessment_data = {
             "CompanyAddress": {
                 "State": {
@@ -64,7 +63,7 @@ class TestNestedGeometryConversion:
             }
         }
 
-        result = service._extract_geometry_from_assessment(assessment_data)
+        result = extract_geometry_from_nested_dict(assessment_data)
 
         # Check that nested attributes were processed
         company_address = result["CompanyAddress"]
@@ -90,8 +89,6 @@ class TestNestedGeometryConversion:
 
     def test_mixed_attributes_with_and_without_geometry(self):
         """Test processing of mixed attributes - some with geometry, some without."""
-        service = AssessmentService()
-
         assessment_data = {
             "currency": {
                 "confidence": 0.0,
@@ -119,7 +116,7 @@ class TestNestedGeometryConversion:
             },
         }
 
-        result = service._extract_geometry_from_assessment(assessment_data)
+        result = extract_geometry_from_nested_dict(assessment_data)
 
         # currency should pass through unchanged (no geometry)
         assert "geometry" not in result["currency"]
@@ -141,8 +138,6 @@ class TestNestedGeometryConversion:
 
     def test_list_attributes_with_nested_geometry(self):
         """Test processing of list attributes where each item may have geometry."""
-        service = AssessmentService()
-
         assessment_data = {
             "Transactions": [
                 {
@@ -175,7 +170,7 @@ class TestNestedGeometryConversion:
             ]
         }
 
-        result = service._extract_geometry_from_assessment(assessment_data)
+        result = extract_geometry_from_nested_dict(assessment_data)
 
         transactions = result["Transactions"]
         assert len(transactions) == 2
@@ -196,8 +191,6 @@ class TestNestedGeometryConversion:
 
     def test_deeply_nested_group_attributes(self):
         """Test deeply nested group attributes."""
-        service = AssessmentService()
-
         assessment_data = {
             "EmployeeInfo": {
                 "PersonalDetails": {
@@ -224,7 +217,7 @@ class TestNestedGeometryConversion:
             }
         }
 
-        result = service._extract_geometry_from_assessment(assessment_data)
+        result = extract_geometry_from_nested_dict(assessment_data)
 
         employee_info = result["EmployeeInfo"]
 
@@ -247,8 +240,6 @@ class TestNestedGeometryConversion:
 
     def test_invalid_nested_bbox_data(self):
         """Test handling of invalid bbox data in nested attributes."""
-        service = AssessmentService()
-
         assessment_data = {
             "CompanyAddress": {
                 "State": {
@@ -266,7 +257,7 @@ class TestNestedGeometryConversion:
             }
         }
 
-        result = service._extract_geometry_from_assessment(assessment_data)
+        result = extract_geometry_from_nested_dict(assessment_data)
 
         # Both should have invalid bbox data removed but confidence preserved
         state = result["CompanyAddress"]["State"]
@@ -281,9 +272,7 @@ class TestNestedGeometryConversion:
         assert zip_code["confidence"] == 0.85
 
     def test_process_single_assessment_geometry_method(self):
-        """Test the helper method for processing single assessments."""
-        service = AssessmentService()
-
+        """Test the helper function for processing single assessments."""
         # Test valid geometry conversion
         assessment = {
             "confidence": 0.95,
@@ -292,7 +281,7 @@ class TestNestedGeometryConversion:
             "page": 1,
         }
 
-        result = service._process_single_assessment_geometry(assessment, "test_field")
+        result = process_assessment_geometry(assessment, "test_field")
 
         assert "geometry" in result
         assert "bbox" not in result

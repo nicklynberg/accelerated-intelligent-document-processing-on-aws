@@ -114,7 +114,7 @@ class BoundingBoxCoordinates(BaseModel):
         scale: float = 1000.0,
     ) -> "BoundingBoxCoordinates":
         """
-        Create from corner coordinates in document space.
+        Create from corner coordinates.
 
         Args:
             x1, y1: Top-left corner in 0-scale range
@@ -228,7 +228,16 @@ class FieldAssessmentData(BaseModel):
         bbox_coords: list[float] | None = None,
         page_num: int | None = None,
     ) -> "FieldAssessmentData":
-        """Create from LLM response data."""
+        """
+        Create from LLM response data.
+
+        Args:
+            confidence: Confidence score (0-1)
+            reasoning: Explanation for confidence
+            confidence_threshold: Threshold for confidence alerts
+            bbox_coords: Optional bounding box coordinates [x1, y1, x2, y2]
+            page_num: Optional page number (1-indexed)
+        """
         geometry = None
         if bbox_coords is not None and page_num is not None:
             geom = Geometry.from_bbox_list(bbox_coords, page_num)

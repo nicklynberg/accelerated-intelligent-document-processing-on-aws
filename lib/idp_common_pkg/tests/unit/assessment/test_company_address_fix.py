@@ -7,13 +7,11 @@ Test to verify the specific CompanyAddress nested geometry conversion issue is f
 
 import json
 
-from idp_common.assessment.service import AssessmentService
+from idp_common.assessment.geometry_utils import extract_geometry_from_nested_dict
 
 
 def test_company_address_geometry_conversion():
     """Test the exact CompanyAddress case provided by the user."""
-    service = AssessmentService()
-
     # This is the exact data structure from the user's example
     assessment_data = {
         "YTDCityTax": {
@@ -49,7 +47,7 @@ def test_company_address_geometry_conversion():
     }
 
     # Process the assessment data
-    result = service._extract_geometry_from_assessment(assessment_data)
+    result = extract_geometry_from_nested_dict(assessment_data)
 
     print("=== Before/After Comparison ===")
     print("\nBEFORE (with bbox):")

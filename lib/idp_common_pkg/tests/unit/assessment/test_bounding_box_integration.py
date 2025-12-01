@@ -2,203 +2,193 @@
 # SPDX-License-Identifier: MIT-0
 
 """
-Unit tests for bounding box integration in AssessmentService.
+Unit tests for bounding box conversion models.
+
+These tests validate the coordinate conversion from LLM bounding box responses
+(in 0-1000 scale) to normalized 0-1 scale for the UI.
+
+Note: Ruler offset adjustment is handled separately in strands_tools.py when
+the LLM submits assessments. The models here work with document-space coordinates.
 """
 
 import pytest
-from idp_common.assessment.service import AssessmentService
+from idp_common.assessment.models import (
+    BoundingBoxCoordinates,
+    FieldAssessmentData,
+    Geometry,
+)
 
 
-class TestBoundingBoxIntegration:
-    """Test bounding box functionality in AssessmentService."""
+class TestBoundingBoxCoordinates:
+    """Test BoundingBoxCoordinates model."""
 
-    def test_convert_bbox_to_geometry_valid_coordinates(self):
-        """Test conversion from bbox coordinates to geometry format."""
-        service = AssessmentService()
+    def test_from_corners_basic_conversion(self):
+        """Test basic conversion from corner coordinates to normalized bbox."""
+        bbox = BoundingBoxCoordinates.from_corners(
+            x1=100,
+            y1=200,
+            x2=300,
+            y2=400,
+            scale=1000.0,
+        )
 
-        # Test normal coordinates
-        bbox_coords = [100, 200, 300, 400]  # x1, y1, x2, y2 in 0-1000 scale
-        page_num = 1
+        assert bbox.left == 0.1
+        assert bbox.top == 0.2
+        assert bbox.width == 0.2
+        assert bbox.height == 0.2
 
-        result = service._convert_bbox_to_geometry(bbox_coords, page_num)
-
-        expected = {
-            "boundingBox": {
-                "top": 0.2,  # y1/1000
-                "left": 0.1,  # x1/1000
-                "width": 0.2,  # (x2-x1)/1000
-                "height": 0.2,  # (y2-y1)/1000
-            },
-            "page": 1,
-        }
-
-        assert result == expected
-
-    def test_convert_bbox_to_geometry_reversed_coordinates(self):
+    def test_from_corners_handles_reversed_coordinates(self):
         """Test that coordinates are corrected when reversed."""
-        service = AssessmentService()
-
-        # Test with reversed coordinates (x2 < x1, y2 < y1)
-        bbox_coords = [300, 400, 100, 200]  # Reversed
-        page_num = 2
-
-        result = service._convert_bbox_to_geometry(bbox_coords, page_num)
+        bbox = BoundingBoxCoordinates.from_corners(
+            x1=300,
+            y1=400,
+            x2=100,
+            y2=200,  # Reversed
+            scale=1000.0,
+        )
 
         # Should be corrected to proper order
-        expected = {
-            "boundingBox": {
-                "top": 0.2,  # min(y1,y2)/1000
-                "left": 0.1,  # min(x1,x2)/1000
-                "width": 0.2,  # (max(x)-min(x))/1000
-                "height": 0.2,  # (max(y)-min(y))/1000
-            },
-            "page": 2,
-        }
+        assert bbox.left == 0.1
+        assert bbox.top == 0.2
+        assert bbox.width == 0.2
+        assert bbox.height == 0.2
 
-        assert result == expected
+    def test_from_corners_clamps_to_valid_range(self):
+        """Test that values are clamped to 0-1 range."""
+        # Coordinates that would exceed bounds
+        bbox = BoundingBoxCoordinates.from_corners(
+            x1=-50,
+            y1=-50,
+            x2=1100,
+            y2=1100,
+            scale=1000.0,
+        )
 
-    def test_convert_bbox_to_geometry_invalid_coordinates(self):
+        # Should clamp to valid range
+        assert bbox.left >= 0.0
+        assert bbox.top >= 0.0
+        assert bbox.left + bbox.width <= 1.0
+        assert bbox.top + bbox.height <= 1.0
+
+    def test_from_corners_edge_coordinates(self):
+        """Test with coordinates at edges of document."""
+        # Full document bbox
+        bbox = BoundingBoxCoordinates.from_corners(
+            x1=0,
+            y1=0,
+            x2=1000,
+            y2=1000,
+            scale=1000.0,
+        )
+
+        assert bbox.left == 0.0
+        assert bbox.top == 0.0
+        assert bbox.width == 1.0
+        assert bbox.height == 1.0
+
+    def test_from_corners_small_region(self):
+        """Test with a small region."""
+        bbox = BoundingBoxCoordinates.from_corners(
+            x1=500,
+            y1=500,
+            x2=510,
+            y2=510,
+            scale=1000.0,
+        )
+
+        assert bbox.left == 0.5
+        assert bbox.top == 0.5
+        assert bbox.width == 0.01
+        assert bbox.height == 0.01
+
+
+class TestGeometry:
+    """Test Geometry model."""
+
+    def test_from_bbox_list_valid(self):
+        """Test creation from bbox list format."""
+        # LLM response format: [x1, y1, x2, y2] in 0-1000 scale
+        geom = Geometry.from_bbox_list([100, 200, 300, 400], page_num=1)
+
+        assert geom.page == 1
+        assert geom.boundingBox is not None
+        assert geom.boundingBox.left == 0.1  # 100/1000
+        assert geom.boundingBox.top == 0.2  # 200/1000
+
+    def test_from_bbox_list_different_page(self):
+        """Test creation with different page number."""
+        geom = Geometry.from_bbox_list([100, 200, 300, 400], page_num=3)
+
+        assert geom.page == 3
+        assert geom.boundingBox is not None
+
+    def test_from_bbox_list_invalid_length(self):
         """Test error handling for invalid coordinate count."""
-        service = AssessmentService()
-
-        # Test with wrong number of coordinates
-        bbox_coords = [100, 200, 300]  # Only 3 coordinates
-        page_num = 1
-
         with pytest.raises(ValueError, match="Expected 4 coordinates"):
-            service._convert_bbox_to_geometry(bbox_coords, page_num)
+            Geometry.from_bbox_list([100, 200, 300], page_num=1)
 
-    def test_extract_geometry_from_assessment_with_bbox_data(self):
-        """Test extraction of geometry data from assessment response."""
-        service = AssessmentService()
+    def test_to_ui_format(self):
+        """Test conversion to UI-compatible format."""
+        geom = Geometry.from_bbox_list([100, 200, 300, 400], page_num=2)
+        ui_format = geom.to_ui_format()
 
-        assessment_data = {
-            "account_number": {
-                "confidence": 0.95,
-                "confidence_reason": "Clear text with high OCR confidence",
-                "bbox": [100, 200, 300, 400],
-                "page": 1,
-            },
-            "account_balance": {
-                "confidence": 0.88,
-                "confidence_reason": "Good text quality",
-                "bbox": [400, 500, 600, 550],
-                "page": 1,
-            },
-        }
+        assert "boundingBox" in ui_format
+        assert "page" in ui_format
+        assert ui_format["page"] == 2
+        assert "top" in ui_format["boundingBox"]
+        assert "left" in ui_format["boundingBox"]
+        assert "width" in ui_format["boundingBox"]
+        assert "height" in ui_format["boundingBox"]
 
-        result = service._extract_geometry_from_assessment(assessment_data)
 
-        # Check that bbox/page data was converted to geometry format
-        assert "geometry" in result["account_number"]
-        assert "bbox" not in result["account_number"]
-        assert "page" not in result["account_number"]
+class TestFieldAssessmentData:
+    """Test FieldAssessmentData model."""
 
-        # Check geometry structure
-        geometry = result["account_number"]["geometry"][0]
-        assert "boundingBox" in geometry
-        assert "page" in geometry
-        assert geometry["page"] == 1
+    def test_from_llm_response_with_bbox(self):
+        """Test creation from LLM response with bounding box."""
+        assessment = FieldAssessmentData.from_llm_response(
+            confidence=0.95,
+            reasoning="Clear text with high OCR confidence",
+            confidence_threshold=0.8,
+            bbox_coords=[100, 200, 300, 400],
+            page_num=1,
+        )
 
-        # Check bounding box values
-        bbox = geometry["boundingBox"]
-        assert bbox["top"] == 0.2  # 200/1000
-        assert bbox["left"] == 0.1  # 100/1000
-        assert bbox["width"] == 0.2  # (300-100)/1000
-        assert bbox["height"] == 0.2  # (400-200)/1000
+        assert assessment.confidence == 0.95
+        assert assessment.reasoning == "Clear text with high OCR confidence"
+        assert assessment.geometry is not None
+        assert len(assessment.geometry) == 1
+        assert assessment.geometry[0].page == 1
 
-    def test_extract_geometry_from_assessment_without_bbox_data(self):
-        """Test that assessment data without bbox passes through unchanged."""
-        service = AssessmentService()
+    def test_from_llm_response_without_bbox(self):
+        """Test creation from LLM response without bounding box."""
+        assessment = FieldAssessmentData.from_llm_response(
+            confidence=0.85,
+            reasoning="Good text quality",
+            confidence_threshold=0.8,
+            bbox_coords=None,
+            page_num=None,
+        )
 
-        assessment_data = {
-            "account_number": {
-                "confidence": 0.95,
-                "confidence_reason": "Clear text with high OCR confidence",
-                # No bbox or page data
-            }
-        }
+        assert assessment.confidence == 0.85
+        assert assessment.geometry is None
 
-        result = service._extract_geometry_from_assessment(assessment_data)
+    def test_to_explainability_format(self):
+        """Test conversion to explainability format for frontend."""
+        assessment = FieldAssessmentData.from_llm_response(
+            confidence=0.95,
+            reasoning="Clear text",
+            confidence_threshold=0.8,
+            bbox_coords=[100, 200, 300, 400],
+            page_num=1,
+        )
 
-        # Should pass through unchanged
-        assert result == assessment_data
-        assert "geometry" not in result["account_number"]
+        result = assessment.to_explainability_format()
 
-    def test_extract_geometry_from_assessment_invalid_bbox_format(self):
-        """Test handling of invalid bbox format."""
-        service = AssessmentService()
-
-        assessment_data = {
-            "account_number": {
-                "confidence": 0.95,
-                "confidence_reason": "Clear text",
-                "bbox": "invalid_format",  # Invalid format
-                "page": 1,
-            }
-        }
-
-        result = service._extract_geometry_from_assessment(assessment_data)
-
-        # Should remove invalid bbox data but keep confidence info
-        assert "geometry" not in result["account_number"]
-        assert "bbox" not in result["account_number"]
-        assert "page" not in result["account_number"]
-        assert result["account_number"]["confidence"] == 0.95
-
-    def test_extract_geometry_from_assessment_missing_page(self):
-        """Test handling when bbox exists but page is missing."""
-        service = AssessmentService()
-
-        assessment_data = {
-            "account_number": {
-                "confidence": 0.95,
-                "confidence_reason": "Clear text",
-                "bbox": [100, 200, 300, 400],
-                # Missing page
-            }
-        }
-
-        result = service._extract_geometry_from_assessment(assessment_data)
-
-        # Should not create geometry without page info
-        assert "geometry" not in result["account_number"]
-        assert "bbox" not in result["account_number"]
-        assert result["account_number"]["confidence"] == 0.95
-
-    def test_extract_geometry_from_assessment_edge_coordinates(self):
-        """Test conversion with edge case coordinates."""
-        service = AssessmentService()
-
-        assessment_data = {
-            "top_left_field": {
-                "confidence": 0.9,
-                "confidence_reason": "Located at top-left",
-                "bbox": [0, 0, 100, 100],  # Top-left corner
-                "page": 1,
-            },
-            "bottom_right_field": {
-                "confidence": 0.85,
-                "confidence_reason": "Located at bottom-right",
-                "bbox": [900, 900, 1000, 1000],  # Bottom-right corner
-                "page": 2,
-            },
-        }
-
-        result = service._extract_geometry_from_assessment(assessment_data)
-
-        # Check top-left field
-        top_left_geometry = result["top_left_field"]["geometry"][0]
-        assert top_left_geometry["boundingBox"]["top"] == 0.0
-        assert top_left_geometry["boundingBox"]["left"] == 0.0
-        assert top_left_geometry["boundingBox"]["width"] == 0.1
-        assert top_left_geometry["boundingBox"]["height"] == 0.1
-        assert top_left_geometry["page"] == 1
-
-        # Check bottom-right field
-        bottom_right_geometry = result["bottom_right_field"]["geometry"][0]
-        assert bottom_right_geometry["boundingBox"]["top"] == 0.9
-        assert bottom_right_geometry["boundingBox"]["left"] == 0.9
-        assert bottom_right_geometry["boundingBox"]["width"] == 0.1
-        assert bottom_right_geometry["boundingBox"]["height"] == 0.1
-        assert bottom_right_geometry["page"] == 2
+        assert result["confidence"] == 0.95
+        assert result["confidence_reason"] == "Clear text"
+        assert result["confidence_threshold"] == 0.8
+        assert "geometry" in result
+        assert len(result["geometry"]) == 1
+        assert "boundingBox" in result["geometry"][0]
+        assert result["geometry"][0]["page"] == 1

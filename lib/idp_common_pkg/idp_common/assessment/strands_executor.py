@@ -40,7 +40,7 @@ async def execute_tasks_async(
     Args:
         tasks: List of assessment tasks to execute
         extraction_results: Full extraction results
-        page_images: List of page images (with grid overlay)
+        page_images: List of raw page images (ruler overlay added internally)
         sorted_page_ids: List of page IDs
         model_id: Model to use
         system_prompt: System prompt
@@ -166,7 +166,7 @@ def execute_assessment_tasks_parallel(
     Args:
         tasks: List of assessment tasks
         extraction_results: Full extraction results
-        page_images: List of page images (with grid overlay already applied)
+        page_images: List of raw page images (ruler overlay added internally)
         sorted_page_ids: List of page IDs in sorted order
         model_id: Model ID
         system_prompt: System prompt

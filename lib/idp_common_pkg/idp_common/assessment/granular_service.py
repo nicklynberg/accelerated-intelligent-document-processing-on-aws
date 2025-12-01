@@ -36,7 +36,6 @@ from idp_common.config.schema_constants import (
 from idp_common.extraction.models import ExtractionData
 from idp_common.models import Document, Status
 from idp_common.utils import check_token_limit
-from idp_common.utils.grid_overlay import add_ruler_edges
 
 logger = Logger(service="assessment", level=os.getenv("LOG_LEVEL", "INFO"))
 
@@ -845,16 +844,8 @@ class GranularAssessmentService:
                     f"Found {len(cached_task_results)} cached assessment task results, processing {len(tasks_to_process)} remaining tasks"
                 )
 
-                # Apply grid overlay to page images for assessment
-                grid_page_images = []
-                for idx, page_img in enumerate(page_images):
-                    grid_img = add_ruler_edges(page_img)
-                    logger.info(
-                        f"Added ruler overlay to page {idx}: {len(page_img):,} bytes -> {len(grid_img):,} bytes"
-                    )
-                    grid_page_images.append(grid_img)
-
                 # Execute tasks using Strands-based parallel executor
+                # Note: ruler overlay is added internally by strands_service/strands_tools
                 logger.info(
                     f"Processing {len(tasks_to_process)} assessment tasks with Strands executor (max_concurrent={self.max_workers})"
                 )
@@ -862,11 +853,12 @@ class GranularAssessmentService:
                 request_start_time = time.time()
 
                 # Call Strands executor - handles both parallel and sequential based on max_concurrent
+                # Pass raw page_images - ruler overlay is added internally when needed
                 task_results, task_metering, processing_time = (
                     execute_assessment_tasks_parallel(
                         tasks=tasks_to_process,
                         extraction_results=extraction_results,
-                        page_images=grid_page_images,
+                        page_images=page_images,
                         sorted_page_ids=sorted_page_ids,
                         model_id=self.config.assessment.model,
                         system_prompt=self.config.assessment.system_prompt,
