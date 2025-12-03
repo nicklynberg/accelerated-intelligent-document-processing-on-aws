@@ -6,6 +6,7 @@ with concurrency control via semaphores.
 """
 
 import asyncio
+import concurrent.futures
 import os
 import time
 from typing import Any, cast
@@ -188,53 +189,44 @@ def execute_assessment_tasks_parallel(
 
     start_time = time.time()
 
-    # Run async executor
-    # Use asyncio.run() for clean event loop management
-    try:
-        results, metering = asyncio.run(
-            execute_tasks_async(
-                tasks=tasks,
-                extraction_results=extraction_results,
-                page_images=page_images,
-                sorted_page_ids=sorted_page_ids,
-                model_id=model_id,
-                system_prompt=system_prompt,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                document_schema=document_schema,
-                max_concurrent=max_concurrent,
-                max_retries=max_retries,
-                connect_timeout=connect_timeout,
-                read_timeout=read_timeout,
-            )
+    # Define the async coroutine to run
+    async def _run() -> tuple[list[AssessmentResult], dict[str, Any]]:
+        return await execute_tasks_async(
+            tasks=tasks,
+            extraction_results=extraction_results,
+            page_images=page_images,
+            sorted_page_ids=sorted_page_ids,
+            model_id=model_id,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            document_schema=document_schema,
+            max_concurrent=max_concurrent,
+            max_retries=max_retries,
+            connect_timeout=connect_timeout,
+            read_timeout=read_timeout,
         )
-    except RuntimeError as e:
-        # Handle case where event loop already exists (shouldn't happen in Lambda)
-        if "There is no current event loop" in str(e) or "asyncio.run()" in str(e):
-            logger.warning(
-                "Event loop already exists, using get_event_loop",
-                extra={"error": str(e)},
-            )
-            loop = asyncio.get_event_loop()
-            results, metering = loop.run_until_complete(
-                execute_tasks_async(
-                    tasks=tasks,
-                    extraction_results=extraction_results,
-                    page_images=page_images,
-                    sorted_page_ids=sorted_page_ids,
-                    model_id=model_id,
-                    system_prompt=system_prompt,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    document_schema=document_schema,
-                    max_concurrent=max_concurrent,
-                    max_retries=max_retries,
-                    connect_timeout=connect_timeout,
-                    read_timeout=read_timeout,
-                )
-            )
-        else:
-            raise
+
+    # Check if there's already a running event loop
+    # This is more robust than catching exceptions with string matching
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None and loop.is_running():
+        # We're inside an async context (e.g., Jupyter, nested async call)
+        # Execute in a separate thread to avoid "cannot be called from a running event loop"
+        logger.warning(
+            "Event loop already running, executing in separate thread",
+            extra={"loop": str(loop)},
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(asyncio.run, _run())
+            results, metering = future.result()
+    else:
+        # No running loop - safe to use asyncio.run()
+        results, metering = asyncio.run(_run())
 
     duration = time.time() - start_time
 

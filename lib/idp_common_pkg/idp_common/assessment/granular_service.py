@@ -11,15 +11,19 @@ This module provides a scalable approach to assessment by:
 4. Maintaining assessment structure that mirrors extraction results
 """
 
+from __future__ import annotations
+
 import json
 import os
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from aws_lambda_powertools import Logger
-from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
 
 from idp_common import image, metrics, s3, utils
+
+if TYPE_CHECKING:
+    from mypy_boto3_dynamodb.service_resource import DynamoDBServiceResource
 from idp_common.assessment.models import AssessmentResult, AssessmentTask
 from idp_common.assessment.strands_executor import execute_assessment_tasks_parallel
 from idp_common.assessment.strands_service import _convert_field_path_to_string

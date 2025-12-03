@@ -172,7 +172,7 @@ def create_strands_tools(
     Create all tools needed for Strands-based assessment.
 
     Args:
-        page_images: List of page image bytes (with grid overlay already applied)
+        page_images: List of raw page image bytes (ruler overlay added on-demand by view_image tool)
         sorted_page_ids: List of page IDs in sorted order
 
     Returns:

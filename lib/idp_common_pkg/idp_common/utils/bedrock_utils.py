@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -7,19 +9,20 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import Unpack
+from typing import TYPE_CHECKING, Unpack
 
 import botocore.exceptions
-from mypy_boto3_bedrock_runtime import BedrockRuntimeClient
-from mypy_boto3_bedrock_runtime.type_defs import (
-    ConverseRequestTypeDef,
-    ConverseResponseTypeDef,
-    ConverseStreamRequestTypeDef,
-    ConverseStreamResponseTypeDef,
-    InvokeModelRequestTypeDef,
-    InvokeModelResponseTypeDef,
-)
-from strands.models.bedrock import ModelThrottledException
+
+if TYPE_CHECKING:
+    from mypy_boto3_bedrock_runtime import BedrockRuntimeClient
+    from mypy_boto3_bedrock_runtime.type_defs import (
+        ConverseRequestTypeDef,
+        ConverseResponseTypeDef,
+        ConverseStreamRequestTypeDef,
+        ConverseStreamResponseTypeDef,
+        InvokeModelRequestTypeDef,
+        InvokeModelResponseTypeDef,
+    )
 
 # Optional import for strands-agents (may not be installed in all environments)
 try:

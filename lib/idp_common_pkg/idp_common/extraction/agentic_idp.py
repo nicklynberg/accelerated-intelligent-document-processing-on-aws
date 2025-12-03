@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import os
+import re
 import threading
 from pathlib import Path
 from typing import (
@@ -21,6 +22,7 @@ from typing import (
 
 import jsonpatch
 from aws_lambda_powertools import Logger
+from botocore.config import Config
 from PIL import Image
 from pydantic import BaseModel, Field
 from strands import Agent, tool
@@ -36,6 +38,8 @@ from strands.types.media import (
 
 from idp_common.bedrock import (
     build_model_config,
+    supports_prompt_caching,
+    supports_tool_caching,
 )
 from idp_common.config.models import IDPConfig
 from idp_common.utils.bedrock_utils import (

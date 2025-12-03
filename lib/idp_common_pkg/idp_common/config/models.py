@@ -141,14 +141,6 @@ class ExtractionConfig(BaseModel):
 
         return self
 
-    @model_validator(mode="after")
-    def set_default_review_agent_model(self) -> Self:
-        """Set review_agent_model to extraction model if not specified."""
-        if not self.agentic.review_agent_model:
-            self.agentic.review_agent_model = self.model
-
-        return self
-
 
 class ClassificationConfig(BaseModel):
     """Document classification configuration"""
