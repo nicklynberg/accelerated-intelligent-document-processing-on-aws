@@ -826,6 +826,9 @@ def _prepare_prompt_content(
             )
         )
 
+    prompt_content = [
+        x for x in prompt_content if x.get("cachePoint", {}).get("type") != "default"
+    ]
     prompt_content += [
         ContentBlock(text="end of your main task description"),
         ContentBlock(cachePoint=CachePoint(type="default")),
