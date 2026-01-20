@@ -37,3 +37,6 @@ def aws_credentials():
     os.environ["AWS_SECURITY_TOKEN"] = "testing"
     os.environ["AWS_SESSION_TOKEN"] = "testing"
     os.environ["AWS_DEFAULT_REGION"] = "us-east-1"
+    os.environ["AWS_REGION"] = (
+        "us-east-1"  # Also set AWS_REGION for code that checks this variable
+    )
