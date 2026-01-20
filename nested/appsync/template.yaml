@@ -700,8 +700,10 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref AgentTableName
-        - LambdaInvokePolicy:
-            FunctionName: !Ref AgentProcessorFunctionArn
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Ref AgentProcessorFunctionArn
         - Statement:
             - Effect: Allow
               Action:
