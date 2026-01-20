@@ -883,6 +883,14 @@ Resources:
                 enum: ["disabled", "page", "llm_determined"]
                 default: "llm_determined"
                 order: 3.5
+              contextPagesCount:
+                type: integer
+                description: "Number of surrounding pages to include as context for multi-modal page-level classification. Value of 0 means no additional context (default). Value of 1 includes 1 page before and after. Value of 2 includes 2 pages before and after. Only applies to multimodalPageLevelClassification method."
+                minimum: 0
+                maximum: 5
+                default: 0
+                order: 3.6
+                dependsOn: { field: "classificationMethod", value: "multimodalPageLevelClassification" }
               temperature:
                 type: number
                 minimum: 0

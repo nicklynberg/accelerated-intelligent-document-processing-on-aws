@@ -168,6 +168,11 @@ class ClassificationConfig(BaseModel):
         default="llm_determined",
         description="Section splitting strategy: 'disabled' (entire doc as one section), 'page' (one section per page), 'llm_determined' (use LLM boundary detection)",
     )
+    contextPagesCount: int = Field(
+        default=0,
+        description="Number of pages before/after target page to include as context for multimodalPageLevelClassification. "
+        "0=no context (default), 1=include 1 page on each side, 2=include 2 pages on each side.",
+    )
     image: ImageConfig = Field(default_factory=ImageConfig)
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
@@ -215,6 +220,17 @@ class ClassificationConfig(BaseModel):
             )
             return "llm_determined"
         return v
+
+    @field_validator("contextPagesCount", mode="before")
+    @classmethod
+    def parse_context_pages_count(cls, v: Any) -> int:
+        """Parse contextPagesCount from string or number, ensuring non-negative value"""
+        if isinstance(v, str):
+            v = int(v) if v else 0
+        result = int(v)
+        if result < 0:
+            return 0
+        return result
 
 
 class GranularAssessmentConfig(BaseModel):

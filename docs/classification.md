@@ -66,6 +66,69 @@ Page 6: type="invoice", boundary="continue"   → Section 3 (Invoice #2)
 
 The system automatically creates three sections, properly separating the two invoices despite them having the same document type.
 
+##### Page Context for Classification
+
+The multimodal page-level classification supports including surrounding pages as context to improve classification accuracy. This is particularly useful when a single page doesn't contain enough information to determine its document type or boundary status.
+
+**Configuration:**
+
+```yaml
+classification:
+  classificationMethod: multimodalPageLevelClassification
+  contextPagesCount: 1  # Include 1 page before and 1 page after as context
+  # contextPagesCount: 0  # Default: no additional context (current behavior)
+  # contextPagesCount: 2  # Include 2 pages before and 2 pages after
+```
+
+**How It Works:**
+
+When `contextPagesCount` is set to a value greater than 0, the classification prompt includes surrounding pages as additional context:
+
+- **`contextPagesCount: 1`**: Includes 1 page before and 1 page after the target page
+- **`contextPagesCount: 2`**: Includes 2 pages before and 2 pages after the target page
+- **Edge handling**: At document boundaries, only available pages are included (e.g., first page has no "before" pages)
+
+**Enhanced Prompt Structure:**
+
+The system replaces the standard `{DOCUMENT_TEXT}` and `{DOCUMENT_IMAGE}` placeholders with context-aware versions:
+
+```xml
+<!-- Text context for page 3 with contextPagesCount=1 -->
+<document-ocr-data-page-before page="2">
+[OCR text from page 2]
+</document-ocr-data-page-before>
+
+<document-ocr-data page="3">
+[OCR text from page 3 - the page being classified]
+</document-ocr-data>
+
+<document-ocr-data-page-after page="4">
+[OCR text from page 4]
+</document-ocr-data-page-after>
+
+<!-- Images follow the same pattern with before/after tags -->
+```
+
+**Benefits:**
+
+- **Improved Boundary Detection**: Context helps the LLM identify document transitions
+- **Better Classification Accuracy**: Surrounding pages provide additional clues
+- **Handles Ambiguous Pages**: Pages that look similar can be distinguished by context
+- **Flexible Configuration**: Adjust context size based on document complexity
+
+**Use Cases:**
+
+- Documents where headers/footers span multiple pages
+- Multi-page forms where individual pages look similar
+- Document packages with varying page layouts
+- Cases where LLM boundary detection has been unreliable
+
+**Considerations:**
+
+- Increases token usage proportionally to the number of context pages
+- May increase latency due to larger prompts
+- Works best when surrounding pages provide meaningful classification hints
+
 **Configuration for Boundary Detection:**
 
 The boundary detection is automatically included in the classification results. No special configuration is needed - the system will populate the `document_boundary` field in the metadata for each page:

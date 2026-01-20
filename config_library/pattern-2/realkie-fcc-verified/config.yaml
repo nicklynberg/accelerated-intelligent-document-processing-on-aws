@@ -55,6 +55,7 @@ classification:
   maxPagesForClassification: 0
   classificationMethod: multimodalPageLevelClassification
   sectionSplitting: llm_determined
+  contextPagesCount: 0
   image:
     target_width: null
     target_height: null

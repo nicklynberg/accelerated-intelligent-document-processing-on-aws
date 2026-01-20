@@ -2,6 +2,11 @@
 
 ## Current Work Focus
 
+### GitHub Issue #150 - Implemented ✅
+**Issue:** Add Previous/Next Page Context Support for Multimodal Classification
+**Reporter:** Behrad-Gh (Dec 4, 2025)
+**Status:** Implementation complete
+
 ### GitHub Issue #166 - Fixed ✅
 **Issue:** Missing Bedrock Model access does not fail Step Function execution
 **Reporter:** nicklynberg (Jan 15, 2026)
