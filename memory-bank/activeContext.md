@@ -1,89 +1,84 @@
 # Active Context
 
-## Current Focus
-Scripts directory cleanup and idp-cli enhancement completed.
+## Current Work Focus
 
-## Recent Changes (January 2026)
+### GitHub Issue #166 - Fixed ✅
+**Issue:** Missing Bedrock Model access does not fail Step Function execution
+**Reporter:** nicklynberg (Jan 15, 2026)
+**Environment:** us-gov-west-2, Pattern 2, Version 0.4.10
 
-### Scripts Directory Reorganization
-1. **Created `scripts/setup/` subdirectory** - Moved all development environment setup scripts:
-   - `mac_setup.sh`
-   - `dev_setup_ubuntu.sh`
-   - `dev_setup_al2023.sh`
-   - `wsl_setup.sh`
-   - Added `README.md` documenting each script
+## Recent Changes (January 20, 2026)
 
-2. **Removed obsolete scripts**:
-   - `add_lambda_layers.py` - One-time migration script, already executed
-   - `test_layer_build.py` - Build testing no longer needed
-   - `test_pip_extras.py` - Pip extras testing completed
+### Fix Applied to Summarization Service
+Fixed the issue where Bedrock `AccessDeniedException` errors were silently swallowed in the summarization service, causing Step Functions to complete successfully instead of failing.
 
-3. **Created `scripts/README.md`** - Comprehensive documentation of all scripts and their purposes
+**File Modified:** `lib/idp_common_pkg/idp_common/summarization/service.py`
 
-4. **Moved `dynamic_schedule.csv`** to `idp_cli/examples/load-test-schedule.csv`
+**Changes Made:**
+1. **`process_document_section` method**: Changed from returning silently on exceptions to re-raising them
+   - Before: `return document, {}` after catching exception
+   - After: `raise` to propagate exception to caller
 
-### New IDP CLI Commands
-Added three new operational commands to the CLI:
+2. **`process_document` method**: Added exception tracking for parallel section processing
+   - Added `section_exceptions = {}` to track failed sections
+   - After parallel processing completes, checks if any sections failed
+   - Re-raises the first exception to ensure proper workflow failure
+   - Added detailed logging for debugging
 
-1. **`idp-cli stop-workflows`** - Stop running workflows
-   - Purges SQS queue
-   - Stops Step Function executions
-   - Options: `--skip-purge`, `--skip-stop`
+### Root Cause Analysis
 
-2. **`idp-cli load-test`** - Load testing utility
-   - Copies files to input bucket at specified rates
-   - Supports constant rate or scheduled rates
-   - Options: `--rate`, `--duration`, `--schedule`
+The bug was **specific to the Summarization service only**. Analysis of all Pattern 2 services:
 
-3. **`idp-cli cleanup-orphaned`** - Clean up orphaned resources
-   - Delegates to existing `cleanup_orphaned_resources.py`
-   - Options: `--dry-run`, `--profile`
+| Service | Re-raises Exceptions? | Workflow Fails Properly? |
+|---------|----------------------|--------------------------|
+| Classification | ✅ Yes | ✅ Yes |
+| Extraction | ✅ Yes | ✅ Yes |
+| Assessment | ✅ Yes | ✅ Yes |
+| **Summarization** | ❌ No (was broken) | ❌ No (was broken) |
 
-### Documentation Updates
-- Updated `docs/idp-cli.md` with new commands documentation
-- Updated `scripts/README.md` with complete directory documentation
-- Added `scripts/setup/README.md` for setup scripts
-
-## Current Scripts Directory Structure
+### Error Flow (After Fix)
 ```
-scripts/
-├── setup/                     # Dev environment setup
-│   ├── README.md
-│   ├── dev_setup_al2023.sh
-│   ├── dev_setup_ubuntu.sh
-│   ├── mac_setup.sh
-│   └── wsl_setup.sh
-├── benchmark_utils/           # Benchmark utilities
-├── dsr/                       # DSR security scanning
-├── sdlc/                      # SDLC CI/CD templates
-├── README.md                  # Main documentation
-├── build_rvl_cdip_nmp_testset.py
-├── cleanup_orphaned_resources.py  # Used by CLI
-├── codebuild_deployment.py
-├── compare_json_files.py
-├── generate_govcloud_template.py
-├── integration_test_deployment.py
-├── lookup_file_status.sh      # Legacy (use idp-cli status)
-├── simulate_load.py           # Legacy (use idp-cli load-test)
-├── simulate_dynamic_load.py   # Legacy (use idp-cli load-test)
-├── stop_workflows.sh          # Legacy (use idp-cli stop-workflows)
-├── typecheck_pr_changes.py
-├── validate_buildspec.py
-├── README_validate_buildspec.md
-└── validate_service_role_permissions.py
+Bedrock AccessDeniedException
+    ↓
+process_text() - raises
+    ↓
+process_document_section() - NOW re-raises
+    ↓
+process_document() - NOW collects and re-raises section exceptions
+    ↓
+Lambda handler outer except - sets status to FAILED
+    ↓
+Lambda handler status check - raises Exception
+    ↓
+Step Functions - workflow FAILS ✅
 ```
 
 ## Next Steps
-- Consider fully porting `cleanup_orphaned_resources.py` logic to CLI module
-- Remove legacy shell scripts once CLI commands are validated in production
-- Update setup documentation to reference new `scripts/setup/` location
 
-## Important Patterns
-- CLI commands delegate to existing scripts where complex logic already exists
-- New CLI modules follow existing patterns (StackInfo, BatchProcessor)
-- Rich console output for user-friendly CLI experience
+1. **Unit Tests**: Add tests for `AccessDeniedException` propagation in summarization service
+2. **Integration Test**: Deploy and verify fix in test environment
+3. **PR**: Create pull request referencing GitHub Issue #166
 
-## Decisions Made
-- Keep legacy scripts temporarily as CLI wrappers (gradual migration)
-- Setup scripts grouped together for discoverability
-- Load test schedule moved to CLI examples for easy access
+## Important Patterns and Preferences
+
+### Error Handling Pattern for Bedrock Services
+All services that use Bedrock should follow this pattern:
+- Catch exceptions for logging and error tracking (add to `document.errors`)
+- **Always re-raise exceptions** to propagate them to the Lambda handler
+- The Lambda handler checks `document.status == Status.FAILED` and raises
+- Step Functions sees Lambda error and properly fails the workflow
+
+### Pattern 2 Service Structure
+- **OCR** → **Classification** → **Extraction/Assessment (parallel per section)** → **Process Results** → **Summarization** → **Evaluation**
+- Each step has its own Lambda function
+- Step Functions has retry logic for transient errors, but not for `AccessDeniedException`
+
+## Learnings and Project Insights
+
+1. **Silent error swallowing is dangerous**: The summarization service was catching exceptions to handle partial failures gracefully, but this meant critical errors like `AccessDeniedException` were never visible to users.
+
+2. **Consistent error handling is important**: Classification, Extraction, and Assessment services all correctly re-raise exceptions, but Summarization didn't follow the same pattern.
+
+3. **Parallel processing complicates error handling**: When using `ThreadPoolExecutor`, exceptions from worker threads must be explicitly collected and re-raised after all workers complete.
+
+4. **Step Functions rely on Lambda errors**: The workflow only fails if the Lambda function raises an exception. Returning a document with `status=FAILED` is not enough if the Lambda doesn't subsequently raise.
