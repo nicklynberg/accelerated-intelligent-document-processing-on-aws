@@ -1658,7 +1658,17 @@ class ClassificationService:
         self, document: Document, page_results: List[PageClassification]
     ) -> Document:
         """
-        Create single section containing all pages with first detected class.
+        Create single section containing all pages using majority voting.
+
+        Uses voting/mode strategy to determine the document classification:
+        - Counts occurrences of each classification across all pages
+        - Selects the most common classification (mode)
+        - If tied, uses the first page's classification for determinism
+        - Excludes unclassifiable/blank pages from voting to prevent them
+          from dominating when they complete processing first
+
+        This addresses GitHub Issue #167 where blank pages could incorrectly
+        determine the document classification.
 
         Args:
             document: Document to update
@@ -1667,11 +1677,57 @@ class ClassificationService:
         Returns:
             Document with single section containing all pages
         """
+        from collections import Counter
+
         if not page_results:
             return document
 
-        # Use first page's classification for entire document
-        first_classification = page_results[0].classification.doc_type
+        # Sort results by page ID for consistent ordering
+        sorted_results = self._sort_page_results(page_results)
+
+        # Only include classifications that match valid document types from config
+        # This automatically excludes any classification not defined in the config:
+        # - blank pages (unclassifiable_blank_page, blank, etc.)
+        # - errors (error (backoff/retry), unclassified)
+        # - LLM hallucinations or typos
+        votable_classifications = [
+            r.classification.doc_type
+            for r in sorted_results
+            if r.classification.doc_type in self.valid_doc_types
+        ]
+
+        if votable_classifications:
+            # Use voting: most common classification wins
+            classification_counts = Counter(votable_classifications)
+            most_common = classification_counts.most_common()
+
+            # Check for ties - if tied, use the classification from the earliest page
+            top_count = most_common[0][1]
+            tied_classes = [cls for cls, count in most_common if count == top_count]
+
+            if len(tied_classes) > 1:
+                # Tie-breaker: use first occurrence in page order
+                for result in sorted_results:
+                    if result.classification.doc_type in tied_classes:
+                        first_classification = result.classification.doc_type
+                        logger.info(
+                            f"Classification tie detected ({tied_classes}), using first page's class: '{first_classification}'"
+                        )
+                        break
+                else:
+                    first_classification = most_common[0][0]
+            else:
+                first_classification = most_common[0][0]
+
+            logger.info(
+                f"Classification voting results: {dict(classification_counts)} -> selected '{first_classification}'"
+            )
+        else:
+            # All pages are unclassifiable, use first page's classification
+            first_classification = sorted_results[0].classification.doc_type
+            logger.warning(
+                f"All pages are unclassifiable types, using first page's class: '{first_classification}'"
+            )
 
         # Set all pages to this classification
         for page_id in document.pages:

@@ -26,6 +26,20 @@ SPDX-License-Identifier: MIT-0
   - Moved CI/CD scripts (`codebuild_deployment.py`, `integration_test_deployment.py`, `validate_buildspec.py`, `typecheck_pr_changes.py`, `validate_service_role_permissions.py`) into `scripts/sdlc/` subdirectory
   - Updated all references in `.gitlab-ci.yml`, `Makefile`, and documentation
 
+### Fixed
+
+- **Fixed sectionSplitting=disabled Incorrectly Classifying Documents Based on Blank Pages - [GitHub Issue #167](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/167)**
+  - Fixed bug where documents with blank pages could be incorrectly classified as `"unclassifiable_blank_page"` when using `sectionSplitting: disabled`
+  - **Root Cause**: Page classification results arrive in completion order (not page order) from ThreadPoolExecutor, so blank/simple pages that finish processing first would end up at index 0 and incorrectly determine the document classification
+  - **Solution**: Implemented majority voting strategy that:
+    - Uses config-defined classes to determine voting eligibility (only pages matching valid document types from configuration can vote)
+    - Automatically excludes any classification not in the config (blank pages, errors, LLM hallucinations)
+    - Uses majority voting - most common valid classification wins
+    - Uses first page's classification as tie-breaker for determinism
+    - Falls back to first page's classification when all pages are unclassifiable
+  - **Benefits**: Config-driven approach automatically adapts to any defined document classes without hardcoding exclusion lists
+  - Updated documentation in `docs/classification.md` explaining the voting behavior
+
 ### Removed
 
 - **Obsolete Scripts Migrated to IDP CLI**

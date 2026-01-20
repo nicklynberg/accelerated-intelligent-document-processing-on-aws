@@ -158,13 +158,16 @@ The `sectionSplitting` configuration controls how classified pages are grouped i
 
 **Behavior:**
 - All pages are assigned to a single section
-- Uses the first detected document class for the entire document
+- Uses **majority voting** to determine the document class (most common classification wins)
+- Excludes unclassifiable/blank pages from voting to prevent them from affecting the result
+- If there's a tie, uses the first page's classification for determinism
 - Ignores any page-level classification boundaries
 
 **Use Cases:**
 - Documents known to be single-type with no internal divisions
 - Simplified processing where granular section splitting isn't needed
 - When you want to force all pages to be treated as one cohesive document
+- **Documents with occasional blank or unclassifiable pages** (these won't affect the final classification)
 
 **Configuration Example:**
 ```yaml
@@ -175,7 +178,39 @@ classification:
 
 **Result:**
 - Document with 10 pages → 1 section containing all 10 pages
-- All pages assigned the first detected class
+- All pages assigned the most common (voted) class
+
+**Voting Behavior:**
+
+The `disabled` strategy uses majority voting to determine the document classification, which provides robust handling of edge cases:
+
+1. **Config-Driven Voting**: Only pages whose classification matches a valid document type defined in your configuration are eligible to vote. This automatically excludes:
+   - Blank pages (`unclassifiable_blank_page`, `blank`, etc.)
+   - Error states (`error (backoff/retry)`, `unclassified`)
+   - LLM hallucinations or typos that don't match any defined class
+
+2. **Majority Wins**: The classification that appears most frequently among votable pages becomes the document classification.
+
+3. **Tie-Breaking**: If multiple classifications have the same count, the classification from the earliest page (by page number) is used for determinism.
+
+4. **Fallback**: If no pages have valid classifications (all are unclassifiable types), the first page's classification is used.
+
+**Example:**
+```
+6-page document with classifications:
+- Page 1: DRILLING_PLAN_GEOLOGIC
+- Page 2: DRILLING_PLAN_GEOLOGIC  
+- Page 3: DRILLING_PLAN_GEOLOGIC
+- Page 4: DRILLING_PLAN_GEOLOGIC
+- Page 5: DRILLING_PLAN_GEOLOGIC
+- Page 6: unclassifiable_blank_page (excluded from voting)
+
+Voting result: DRILLING_PLAN_GEOLOGIC (5 votes)
+→ Entire document classified as DRILLING_PLAN_GEOLOGIC
+```
+
+**GitHub Issue Reference:**
+This voting behavior addresses [Issue #167](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/167) where documents with blank last pages were incorrectly classified as the blank page type.
 
 #### 2. `page` - Per-Page Splitting (Each Page = Own Section)
 
