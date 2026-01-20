@@ -3,19 +3,13 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  query GetConfigVersion($versionId: String!) {
-    getConfigVersion(versionId: $versionId) {
+  mutation SaveAsNewVersion($configuration: AWSJSON!, $description: String, $setAsActive: Boolean) {
+    saveAsNewVersion(configuration: $configuration, description: $description, setAsActive: $setAsActive) {
       success
-      Schema
-      Configuration
+      message
       error {
         type
         message
-        validationErrors {
-          field
-          message
-          type
-        }
       }
     }
   }

@@ -3,19 +3,18 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  query GetConfigVersion($versionId: String!) {
-    getConfigVersion(versionId: $versionId) {
+  query GetConfigVersions {
+    getConfigVersions {
       success
-      Schema
-      Configuration
+      versions {
+        versionId
+        isActive
+        createdAt
+        description
+      }
       error {
         type
         message
-        validationErrors {
-          field
-          message
-          type
-        }
       }
     }
   }

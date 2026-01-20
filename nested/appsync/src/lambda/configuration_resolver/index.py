@@ -55,18 +55,27 @@ def handler(event, context):
     manager = ConfigurationManager()
 
     try:
-        if operation == "getConfiguration":
-            return handle_get_configuration(manager)
+        if operation == "getConfigVersions":
+            return handle_get_config_versions(manager)
+        elif operation == "getConfigVersion":
+            args = event["arguments"]
+            version_id = args.get("versionId")
+            return handle_get_config_version(manager, version_id)
         elif operation == "updateConfiguration":
             args = event["arguments"]
+            version_id = args.get("versionId")
             custom_config = args.get("customConfig")
-            success = manager.handle_update_custom_configuration(custom_config)
-            return {
-                "success": success,
-                "message": "Configuration updated successfully"
-                if success
-                else "Configuration update failed",
-            }
+            return handle_update_configuration(manager, version_id, custom_config)
+        elif operation == "setActiveVersion":
+            args = event["arguments"]
+            version_id = args.get("versionId")
+            return handle_set_active_version(manager, version_id)
+        elif operation == "saveAsNewVersion":
+            args = event["arguments"]
+            configuration = args.get("configuration")
+            description = args.get("description")
+            set_as_active = args.get("setAsActive", False)
+            return handle_save_as_new_version(manager, configuration, description, set_as_active)
         elif operation == "getPricing":
             return handle_get_pricing(manager)
         elif operation == "updatePricing":
@@ -557,5 +566,305 @@ def handle_restore_default_pricing(manager):
             "error": {
                 "type": "Error",
                 "message": f"Failed to restore default pricing: {str(e)}",
+            },
+        }
+
+
+def handle_get_config_versions(manager):
+    """
+    Handle the getConfigVersions GraphQL query
+    Returns list of all available configuration versions
+    """
+    try:
+        versions = []
+        
+        # Get all configuration items from DynamoDB
+        response = manager.table.scan(
+            ProjectionExpression="Configuration, CreatedAt, Description, IsActive"
+        )
+        
+        for item in response.get('Items', []):
+            config_key = item.get('Configuration', {}).get('S', '')
+            
+            # Skip non-version items (Schema, pricing, etc.)
+            if config_key in ['Schema', 'DefaultPricing', 'CustomPricing']:
+                continue
+                
+            # Handle versioned configurations (v0, v1, v2, etc.)
+            if config_key.startswith('v') and config_key[1:].isdigit():
+                versions.append({
+                    "versionId": config_key,
+                    "isActive": item.get('IsActive', {}).get('BOOL', False),
+                    "createdAt": item.get('CreatedAt', {}).get('S'),
+                    "description": item.get('Description', {}).get('S', f"Configuration version {config_key}")
+                })
+            # Handle legacy Default/Custom (fallback for incomplete migrations)
+            elif config_key == 'Default':
+                versions.append({
+                    "versionId": "v0",
+                    "isActive": item.get('IsActive', {}).get('BOOL', True),
+                    "createdAt": item.get('CreatedAt', {}).get('S'),
+                    "description": "System default configuration (v0)"
+                })
+            elif config_key == 'Custom':
+                versions.append({
+                    "versionId": "v1", 
+                    "isActive": item.get('IsActive', {}).get('BOOL', False),
+                    "createdAt": item.get('CreatedAt', {}).get('S'),
+                    "description": "User customized configuration (v1)"
+                })
+        
+        return {
+            "success": True,
+            "versions": versions
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in getConfigVersions: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to get configuration versions: {str(e)}",
+            },
+        }
+
+
+def handle_get_config_version(manager, version_id):
+    """
+    Handle the getConfigVersion GraphQL query
+    Returns a specific configuration version
+    """
+    try:
+        if not version_id:
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "versionId is required",
+                },
+            }
+        
+        # Get schema (same for all versions)
+        schema_config = manager.get_configuration(CONFIG_TYPE_SCHEMA)
+        if schema_config:
+            schema_dict = schema_config.model_dump(mode="python", exclude={"config_type"})
+        else:
+            schema_dict = {}
+        
+        # Get the requested version directly
+        config = manager.get_configuration(version_id)
+        
+        if not config:
+            return {
+                "success": False,
+                "error": {
+                    "type": "NotFoundError",
+                    "message": f"Configuration version '{version_id}' not found",
+                },
+            }
+        
+        if isinstance(config, IDPConfig):
+            config_dict = config.model_dump(mode="python", exclude={"config_type"})
+        else:
+            config_dict = {}
+        
+        return {
+            "success": True,
+            "Schema": schema_dict,
+            "Configuration": config_dict
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in getConfigVersion: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to get configuration version: {str(e)}",
+            },
+        }
+
+
+def handle_update_configuration(manager, version_id, custom_config):
+    """
+    Handle the updateConfiguration GraphQL mutation
+    Updates a specific configuration version
+    """
+    try:
+        if not version_id:
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "versionId is required",
+                },
+            }
+        
+        # Update the specific version
+        success = manager.handle_update_custom_configuration(custom_config, version_id)
+        
+        return {
+            "success": success,
+            "message": f"Configuration version {version_id} updated successfully"
+            if success
+            else f"Failed to update configuration version {version_id}",
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in updateConfiguration: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to update configuration: {str(e)}",
+            },
+        }
+
+
+def handle_set_active_version(manager, version_id):
+    """
+    Handle the setActiveVersion GraphQL mutation
+    Sets a specific version as active and deactivates others
+    """
+    try:
+        if not version_id:
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "versionId is required",
+                },
+            }
+        
+        # Check if the version exists
+        config = manager.get_configuration(version_id)
+        if not config:
+            return {
+                "success": False,
+                "error": {
+                    "type": "NotFoundError",
+                    "message": f"Configuration version '{version_id}' not found",
+                },
+            }
+        
+        # Get all versions and update IsActive flags
+        response = manager.table.scan(
+            ProjectionExpression="Configuration"
+        )
+        
+        for item in response.get('Items', []):
+            config_key = item.get('Configuration', {}).get('S', '')
+            
+            # Skip non-version items
+            if config_key in ['Schema', 'DefaultPricing', 'CustomPricing']:
+                continue
+                
+            # Update IsActive flag
+            is_active = (config_key == version_id)
+            manager.table.update_item(
+                Key={'Configuration': config_key},
+                UpdateExpression='SET IsActive = :active',
+                ExpressionAttributeValues={':active': is_active}
+            )
+        
+        return {
+            "success": True,
+            "message": f"Configuration version {version_id} set as active",
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in setActiveVersion: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to set active version: {str(e)}",
+            },
+        }
+
+
+def handle_save_as_new_version(manager, configuration, description, set_as_active):
+    """
+    Handle the saveAsNewVersion GraphQL mutation
+    Creates a new version with auto-incremented version ID
+    """
+    try:
+        import json
+        import datetime
+        
+        if not configuration:
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "configuration is required",
+                },
+            }
+        
+        # Get all existing versions to find the next version number
+        response = manager.table.scan(
+            ProjectionExpression="Configuration"
+        )
+        
+        max_version = -1
+        for item in response.get('Items', []):
+            config_key = item.get('Configuration', {}).get('S', '')
+            
+            # Check for versioned configurations (v0, v1, v2, etc.)
+            if config_key.startswith('v') and config_key[1:].isdigit():
+                version_num = int(config_key[1:])
+                max_version = max(max_version, version_num)
+        
+        # Generate next version ID
+        next_version = f"v{max_version + 1}"
+        timestamp = datetime.datetime.utcnow().isoformat() + "Z"
+        
+        # Parse configuration
+        if isinstance(configuration, str):
+            config_data = json.loads(configuration)
+        else:
+            config_data = configuration
+        
+        # Add versioning metadata
+        versioned_config = {
+            **config_data,
+            "IsActive": set_as_active,
+            "CreatedAt": timestamp,
+            "Description": description or f"Configuration version {next_version}"
+        }
+        
+        # Save new version
+        manager.save_configuration(next_version, versioned_config)
+        
+        # If setting as active, deactivate other versions
+        if set_as_active:
+            for item in response.get('Items', []):
+                config_key = item.get('Configuration', {}).get('S', '')
+                
+                # Skip non-version items and the new version
+                if config_key in ['Schema', 'DefaultPricing', 'CustomPricing'] or config_key == next_version:
+                    continue
+                    
+                # Deactivate other versions
+                manager.table.update_item(
+                    Key={'Configuration': config_key},
+                    UpdateExpression='SET IsActive = :active',
+                    ExpressionAttributeValues={':active': False}
+                )
+        
+        return {
+            "success": True,
+            "message": f"Configuration saved as {next_version}" + 
+                      (" and set as active" if set_as_active else ""),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in saveAsNewVersion: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to save new version: {str(e)}",
             },
         }

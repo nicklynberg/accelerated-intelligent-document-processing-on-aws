@@ -73,6 +73,18 @@ Parameters:
       An initial temporary password is automatically sent to this user via email.
     AllowedPattern: '^[\w.+-]+@([\w-]+\.)+[\w-]{2,6}$'
 
+  # Legacy parameters for backward compatibility
+  ExistingPrivateWorkforceArn:
+    Type: String
+    Default: ""
+    Description: "Legacy parameter for backward compatibility"
+
+  EnableHITL:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: "Legacy parameter for backward compatibility"
+
   AllowedSignUpEmailDomain:
     Type: String
     Default: ""

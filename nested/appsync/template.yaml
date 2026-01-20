@@ -987,16 +987,6 @@ Resources:
   ##########################################################################
   # GetConfigurationResolver
   ##########################################################################
-  GetConfigurationResolver:
-    Type: AWS::AppSync::Resolver
-    DependsOn: GraphQLSchema
-    Properties:
-      ApiId: !Ref GraphQLApiId
-      DataSourceName: !GetAtt ConfigurationDataSource.Name
-      TypeName: Query
-      FieldName: getConfiguration
-
-
   ##########################################################################
   # UpdateConfigurationResolver
   ##########################################################################
@@ -1008,6 +998,57 @@ Resources:
       DataSourceName: !GetAtt ConfigurationDataSource.Name
       TypeName: Mutation
       FieldName: updateConfiguration
+
+
+  ##########################################################################
+  # SetActiveVersionResolver
+  ##########################################################################
+  SetActiveVersionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ConfigurationDataSource.Name
+      TypeName: Mutation
+      FieldName: setActiveVersion
+
+  ##########################################################################
+  # SaveAsNewVersionResolver
+  ##########################################################################
+  SaveAsNewVersionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ConfigurationDataSource.Name
+      TypeName: Mutation
+      FieldName: saveAsNewVersion
+
+
+  ##########################################################################
+  # GetConfigVersionsResolver
+  ##########################################################################
+  GetConfigVersionsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ConfigurationDataSource.Name
+      TypeName: Query
+      FieldName: getConfigVersions
+
+
+  ##########################################################################
+  # GetConfigVersionResolver
+  ##########################################################################
+  GetConfigVersionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ConfigurationDataSource.Name
+      TypeName: Query
+      FieldName: getConfigVersion
 
 
   ##########################################################################

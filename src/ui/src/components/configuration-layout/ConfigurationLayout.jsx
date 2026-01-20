@@ -26,8 +26,10 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import useConfiguration from '../../hooks/use-configuration';
 import useConfigurationLibrary from '../../hooks/use-configuration-library';
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import useSettingsContext from '../../contexts/settings';
 import ConfigBuilder from './ConfigBuilder';
+import ConfigurationVersionsTable from './ConfigurationVersionsTable';
 import { deepMerge } from '../../utils/configUtils';
 import syncBdaIdpMutation from '../../graphql/queries/syncBdaIdp';
 
@@ -88,6 +90,7 @@ const ConfigurationLayout = () => {
   // Hooks for configuration library
   const { listConfigurations, getFile } = useConfigurationLibrary();
   const { settings } = useSettingsContext();
+  const { versions, loading: versionsLoading, fetchVersion } = useConfigurationVersions();
 
   // Helper function to map IDPPattern to directory name
   const getPatternDirectory = (idpPattern) => {
@@ -1172,6 +1175,36 @@ const ConfigurationLayout = () => {
     }
   };
 
+  const handleVersionSelect = async (versionId) => {
+    try {
+      const versionData = await fetchVersion(versionId);
+      // Load the selected version's configuration
+      if (versionData.configuration) {
+        const config = typeof versionData.configuration === 'string' ? JSON.parse(versionData.configuration) : versionData.configuration;
+
+        setFormValues(config);
+        if (config.classes) {
+          setExtractionSchema(config.classes);
+        }
+
+        // Update editor content
+        const jsonString = JSON.stringify(config, null, 2);
+        setJsonContent(jsonString);
+
+        try {
+          const yamlString = yaml.dump(config);
+          setYamlContent(yamlString);
+        } catch (e) {
+          console.error('Error converting to YAML:', e);
+          setYamlContent('# Error converting to YAML');
+        }
+      }
+    } catch (err) {
+      console.error('Error loading version:', err);
+      // Could add error state here
+    }
+  };
+
   if (loading) {
     return (
       <Container header={<Header variant="h2">Configuration</Header>}>
@@ -1219,6 +1252,8 @@ const ConfigurationLayout = () => {
 
   return (
     <>
+      <ConfigurationVersionsTable versions={versions} loading={versionsLoading} onVersionSelect={handleVersionSelect} />
+
       <Modal
         visible={showResetModal}
         onDismiss={() => setShowResetModal(false)}
