@@ -423,6 +423,22 @@ Parameters:
     AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}(,\s*([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2})*$'
     ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
 
+  # Jobs API VPC Configuration
+  VpcId:
+    Type: String
+    Default: ""
+    Description: Optional - Existing VPC ID for Jobs API deployment (leave blank to skip Jobs API deployment)
+
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Optional - Comma-separated list of at least 2 private subnet IDs in different AZs (required if VpcId is provided)
+
+  VpcEndpointId:
+    Type: String
+    Default: ""
+    Description: Optional - Existing VPC Endpoint ID for execute-api service (required if VpcId is provided)
+
 Rules:
   Pattern3UDOPModelArtifactPath:
     RuleCondition:
@@ -435,6 +451,8 @@ Rules:
         AssertDescription: UDOP Model Artifact Path is required when IDPPattern is 'Pattern1'
 
 Conditions:
+  DeployJobsApi: !Not [!Equals [!Ref VpcId, ""]]
+  
   IsPattern1:
     !Equals [
       !Ref IDPPattern,
@@ -689,6 +707,165 @@ Resources:
       ServiceToken: !GetAtt StacknameCheckFunction.Arn
       InputString: !Ref "AWS::StackName"
       MaxLength: 25
+
+  JobsApiSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: DeployJobsApi
+    Properties:
+      GroupDescription: Security group for Jobs API Lambda
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-JobsApiSG
+
+  JobsApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: DeployJobsApi
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  JobsApiFunction:
+    Type: AWS::Serverless::Function
+    Condition: DeployJobsApi
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W92
+            reason: Reserved concurrency not required
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      CodeUri: src/lambda/jobs_api/
+      Handler: index.handler
+      Runtime: python3.12
+      MemorySize: 512
+      Timeout: 30
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref JobsApiSecurityGroup
+        SubnetIds: !Ref PrivateSubnetIds
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE_NAME: !Ref TrackingTable
+          INPUT_BUCKET_NAME: !Ref InputBucket
+      LoggingConfig:
+        LogGroup: !Ref JobsApiLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - S3CrudPolicy:
+            BucketName: !Ref InputBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  JobsApi:
+    Type: AWS::ApiGateway::RestApi
+    Condition: DeployJobsApi
+    Properties:
+      Name: !Sub ${AWS::StackName}-JobsApi
+      EndpointConfiguration:
+        Types:
+          - PRIVATE
+        VpcEndpointIds:
+          - !Ref VpcEndpointId
+      Policy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Deny
+            Principal: '*'
+            Action: execute-api:Invoke
+            Resource: '*'
+            Condition:
+              StringNotEquals:
+                aws:SourceVpce: !Ref VpcEndpointId
+          - Effect: Allow
+            Principal: '*'
+            Action: execute-api:Invoke
+            Resource: '*'
+
+  JobsApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Condition: DeployJobsApi
+    DependsOn:
+      - JobsApiPostMethod
+      - JobsApiGetMethod
+    Properties:
+      RestApiId: !Ref JobsApi
+
+  JobsApiStage:
+    Type: AWS::ApiGateway::Stage
+    Condition: DeployJobsApi
+    Properties:
+      RestApiId: !Ref JobsApi
+      DeploymentId: !Ref JobsApiDeployment
+      StageName: prod
+
+  JobsApiResource:
+    Type: AWS::ApiGateway::Resource
+    Condition: DeployJobsApi
+    Properties:
+      RestApiId: !Ref JobsApi
+      ParentId: !GetAtt JobsApi.RootResourceId
+      PathPart: jobs
+
+  JobsApiJobIdResource:
+    Type: AWS::ApiGateway::Resource
+    Condition: DeployJobsApi
+    Properties:
+      RestApiId: !Ref JobsApi
+      ParentId: !Ref JobsApiResource
+      PathPart: '{job_id}'
+
+  JobsApiPostMethod:
+    Type: AWS::ApiGateway::Method
+    Condition: DeployJobsApi
+    Properties:
+      RestApiId: !Ref JobsApi
+      ResourceId: !Ref JobsApiResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${JobsApiFunction.Arn}/invocations
+
+  JobsApiGetMethod:
+    Type: AWS::ApiGateway::Method
+    Condition: DeployJobsApi
+    Properties:
+      RestApiId: !Ref JobsApi
+      ResourceId: !Ref JobsApiJobIdResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${JobsApiFunction.Arn}/invocations
+
+  JobsApiLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Condition: DeployJobsApi
+    Properties:
+      FunctionName: !Ref JobsApiFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${JobsApi}/*
 
   ConfigurationCopyFunction:
     Type: AWS::Serverless::Function
@@ -6979,3 +7156,7 @@ Outputs:
     Condition: CreateAgentCoreLambda
     Description: MCP Authorization URL
     Value: !Sub "https://${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
+  JobsApiEndpoint:
+    Condition: DeployJobsApi
+    Description: Jobs API endpoint URL
+    Value: !Sub "https://${JobsApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/prod"
