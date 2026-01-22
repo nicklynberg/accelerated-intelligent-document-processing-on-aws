@@ -1,3 +1,2 @@
-fastapi
-mangum
-pydantic
+aws-lambda-powertools[pydantic]
+boto3
