@@ -1173,6 +1173,9 @@ Examples:
     # Always skip validation in publish.py since we validate the GovCloud template separately
     publish_args.append('--no-validate')
     
+    # Skip cfn-lint since it will fail on GovCloud-incompatible resources in main template
+    publish_args.extend(['--lint', 'off'])
+    
     # Add any unknown arguments
     publish_args.extend(unknown)
     

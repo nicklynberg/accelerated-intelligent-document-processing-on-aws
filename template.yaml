@@ -439,6 +439,11 @@ Parameters:
     Default: ""
     Description: Optional - Existing VPC Endpoint ID for execute-api service (required if VpcId is provided)
 
+  SecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Optional - Existing Security Group ID for Jobs API Lambda (required if VpcId is provided)
+
 Rules:
   Pattern3UDOPModelArtifactPath:
     RuleCondition:
@@ -708,19 +713,6 @@ Resources:
       InputString: !Ref "AWS::StackName"
       MaxLength: 25
 
-  JobsApiSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Condition: DeployJobsApi
-    Properties:
-      GroupDescription: Security group for Jobs API Lambda
-      VpcId: !Ref VpcId
-      SecurityGroupEgress:
-        - IpProtocol: -1
-          CidrIp: 0.0.0.0/0
-      Tags:
-        - Key: Name
-          Value: !Sub ${AWS::StackName}-JobsApiSG
-
   JobsApiLogGroup:
     Type: AWS::Logs::LogGroup
     Condition: DeployJobsApi
@@ -750,7 +742,7 @@ Resources:
       Timeout: 30
       VpcConfig:
         SecurityGroupIds:
-          - !Ref JobsApiSecurityGroup
+          - !Ref SecurityGroupId
         SubnetIds: !Ref PrivateSubnetIds
       Environment:
         Variables:
