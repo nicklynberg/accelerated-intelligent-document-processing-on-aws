@@ -434,12 +434,12 @@ Parameters:
     Default: ""
     Description: Optional - Comma-separated list of at least 2 private subnet IDs in different AZs (required if VpcId is provided)
 
-  VpcEndpointId:
+  ApiGatewayVpcEndpointId:
     Type: String
     Default: ""
     Description: Optional - Existing VPC Endpoint ID for execute-api service (required if VpcId is provided)
 
-  SecurityGroupId:
+  ApiHandlerSecurityGroupId:
     Type: String
     Default: ""
     Description: Optional - Existing Security Group ID for Jobs API Lambda (required if VpcId is provided)
@@ -456,7 +456,7 @@ Rules:
         AssertDescription: UDOP Model Artifact Path is required when IDPPattern is 'Pattern1'
 
 Conditions:
-  DeployJobsApi: !Not [!Equals [!Ref VpcId, ""]]
+  DeployApiHandler: !Not [!Equals [!Ref VpcId, ""]]
   
   IsPattern1:
     !Equals [
@@ -713,16 +713,40 @@ Resources:
       InputString: !Ref "AWS::StackName"
       MaxLength: 25
 
-  JobsApiLogGroup:
+  ApiHandlerLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: DeployJobsApi
+    Condition: DeployApiHandler
     Properties:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
       RetentionInDays: !Ref LogRetentionDays
 
-  JobsApiFunction:
+  ApiHandler:
+    Type: AWS::Serverless::Api
+    Condition: DeployApiHandler
+    Properties:
+      StageName: prod
+      EndpointConfiguration:
+        Type: PRIVATE
+        VPCEndpointIds:
+          - !Ref ApiGatewayVpcEndpointId
+      Auth:
+        ResourcePolicy:
+          CustomStatements:
+            - Effect: Deny
+              Principal: '*'
+              Action: execute-api:Invoke
+              Resource: execute-api:/*
+              Condition:
+                StringNotEquals:
+                  aws:SourceVpce: !Ref ApiGatewayVpcEndpointId
+            - Effect: Allow
+              Principal: '*'
+              Action: execute-api:Invoke
+              Resource: execute-api:/*
+
+  ApiHandlerFunction:
     Type: AWS::Serverless::Function
-    Condition: DeployJobsApi
+    Condition: DeployApiHandler
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -735,14 +759,14 @@ Resources:
           !Ref PermissionsBoundaryArn,
           !Ref AWS::NoValue,
         ]
-      CodeUri: src/lambda/jobs_api/
+      CodeUri: src/lambda/api_handler/
       Handler: index.handler
       Runtime: python3.12
       MemorySize: 512
       Timeout: 30
       VpcConfig:
         SecurityGroupIds:
-          - !Ref SecurityGroupId
+          - !Ref ApiHandlerSecurityGroupId
         SubnetIds: !Ref PrivateSubnetIds
       Environment:
         Variables:
@@ -750,11 +774,24 @@ Resources:
           TRACKING_TABLE_NAME: !Ref TrackingTable
           INPUT_BUCKET_NAME: !Ref InputBucket
       LoggingConfig:
-        LogGroup: !Ref JobsApiLogGroup
+        LogGroup: !Ref ApiHandlerLogGroup
+      Events:
+        PostJob:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiHandler
+            Path: /jobs
+            Method: POST
+        GetJob:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiHandler
+            Path: /jobs/{job_id}
+            Method: GET
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
-        - S3CrudPolicy:
+        - S3WritePolicy:
             BucketName: !Ref InputBucket
         - Statement:
             - Effect: Allow
@@ -765,99 +802,6 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
-
-  JobsApi:
-    Type: AWS::ApiGateway::RestApi
-    Condition: DeployJobsApi
-    Properties:
-      Name: !Sub ${AWS::StackName}-JobsApi
-      EndpointConfiguration:
-        Types:
-          - PRIVATE
-        VpcEndpointIds:
-          - !Ref VpcEndpointId
-      Policy:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Deny
-            Principal: '*'
-            Action: execute-api:Invoke
-            Resource: '*'
-            Condition:
-              StringNotEquals:
-                aws:SourceVpce: !Ref VpcEndpointId
-          - Effect: Allow
-            Principal: '*'
-            Action: execute-api:Invoke
-            Resource: '*'
-
-  JobsApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    Condition: DeployJobsApi
-    DependsOn:
-      - JobsApiPostMethod
-      - JobsApiGetMethod
-    Properties:
-      RestApiId: !Ref JobsApi
-
-  JobsApiStage:
-    Type: AWS::ApiGateway::Stage
-    Condition: DeployJobsApi
-    Properties:
-      RestApiId: !Ref JobsApi
-      DeploymentId: !Ref JobsApiDeployment
-      StageName: prod
-
-  JobsApiResource:
-    Type: AWS::ApiGateway::Resource
-    Condition: DeployJobsApi
-    Properties:
-      RestApiId: !Ref JobsApi
-      ParentId: !GetAtt JobsApi.RootResourceId
-      PathPart: jobs
-
-  JobsApiJobIdResource:
-    Type: AWS::ApiGateway::Resource
-    Condition: DeployJobsApi
-    Properties:
-      RestApiId: !Ref JobsApi
-      ParentId: !Ref JobsApiResource
-      PathPart: '{job_id}'
-
-  JobsApiPostMethod:
-    Type: AWS::ApiGateway::Method
-    Condition: DeployJobsApi
-    Properties:
-      RestApiId: !Ref JobsApi
-      ResourceId: !Ref JobsApiResource
-      HttpMethod: POST
-      AuthorizationType: NONE
-      Integration:
-        Type: AWS_PROXY
-        IntegrationHttpMethod: POST
-        Uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${JobsApiFunction.Arn}/invocations
-
-  JobsApiGetMethod:
-    Type: AWS::ApiGateway::Method
-    Condition: DeployJobsApi
-    Properties:
-      RestApiId: !Ref JobsApi
-      ResourceId: !Ref JobsApiJobIdResource
-      HttpMethod: GET
-      AuthorizationType: NONE
-      Integration:
-        Type: AWS_PROXY
-        IntegrationHttpMethod: POST
-        Uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${JobsApiFunction.Arn}/invocations
-
-  JobsApiLambdaPermission:
-    Type: AWS::Lambda::Permission
-    Condition: DeployJobsApi
-    Properties:
-      FunctionName: !Ref JobsApiFunction
-      Action: lambda:InvokeFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${JobsApi}/*
 
   ConfigurationCopyFunction:
     Type: AWS::Serverless::Function
@@ -7158,7 +7102,7 @@ Outputs:
     Condition: CreateAgentCoreLambda
     Description: MCP Authorization URL
     Value: !Sub "https://${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
-  JobsApiEndpoint:
-    Condition: DeployJobsApi
+  ApiHandlerEndpoint:
+    Condition: DeployApiHandler
     Description: Jobs API endpoint URL
-    Value: !Sub "https://${JobsApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/prod"
+    Value: !Sub "https://${ApiHandler}.execute-api.${AWS::Region}.${AWS::URLSuffix}/prod"
