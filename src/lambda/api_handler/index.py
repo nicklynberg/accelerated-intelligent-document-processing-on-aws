@@ -1,68 +1,27 @@
 import os
-from typing import Dict, Any, Optional
+import uuid
+from datetime import datetime, timedelta, timezone
+
+import boto3
+from aws_lambda_powertools import Logger
 from aws_lambda_powertools.event_handler import APIGatewayRestResolver
 from aws_lambda_powertools.utilities.typing import LambdaContext
-from aws_lambda_powertools import Logger
-from pydantic import BaseModel
+from botocore.exceptions import ClientError
+
+from models import (
+    GetJobResponse,
+    PostJobRequest,
+    PostJobResponse,
+    Progress,
+    Timestamps,
+    UploadInfo,
+)
 
 logger = Logger()
 app = APIGatewayRestResolver(enable_validation=True)
 
 
 # Request/Response Models
-class Metadata(BaseModel):
-    source: str
-
-
-class Files(BaseModel):
-    pdfFileName: str
-    jsonFileName: str
-
-
-class PostJobRequest(BaseModel):
-    documentType: str
-    metadata: Metadata
-    files: Files
-
-
-class UploadInfo(BaseModel):
-    bucket: str
-    keyPrefix: str
-    uploadUrl: str
-    expiresInSeconds: int
-    requiredHeaders: Dict[str, str]
-
-
-class PostJobResponse(BaseModel):
-    jobId: str
-    upload: UploadInfo
-
-
-class Timestamps(BaseModel):
-    createdAt: str
-    updatedAt: str
-
-
-class Progress(BaseModel):
-    stage: str
-    percent: int
-
-
-class Result(BaseModel):
-    bucket: str
-    key: str
-    downloadUrl: str
-    expiresInSeconds: int
-
-
-class GetJobResponse(BaseModel):
-    jobId: str
-    status: str
-    timestamps: Timestamps
-    progress: Progress
-    result: Optional[Result] = None
-    error: Optional[str] = None
-
 
 @app.post("/jobs")
 def create_job(job: PostJobRequest) -> PostJobResponse:
