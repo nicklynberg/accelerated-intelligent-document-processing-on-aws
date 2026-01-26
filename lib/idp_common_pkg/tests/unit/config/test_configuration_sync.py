@@ -263,7 +263,9 @@ class TestConfigurationManagerSync:
         dynamodb.create_table(  # type: ignore[attr-defined]
             TableName=table_name,
             KeySchema=[{"AttributeName": "Configuration", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "Configuration", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "Configuration", "AttributeType": "S"}
+            ],
             BillingMode="PAY_PER_REQUEST",
         )
 
@@ -288,7 +290,7 @@ class TestConfigurationManagerSync:
             # Verify it was saved as Config#v0
             call_args = mock_write.call_args_list[0]
             saved_record = call_args[0][0]  # First argument is the ConfigurationRecord
-            
+
             # Verify the new Default was saved with correct temperature
             assert saved_record.config.extraction.temperature == 0.5
 
@@ -302,7 +304,9 @@ class TestConfigurationManagerSync:
         dynamodb.create_table(  # type: ignore[attr-defined]
             TableName=table_name,
             KeySchema=[{"AttributeName": "Configuration", "KeyType": "HASH"}],
-            AttributeDefinitions=[{"AttributeName": "Configuration", "AttributeType": "S"}],
+            AttributeDefinitions=[
+                {"AttributeName": "Configuration", "AttributeType": "S"}
+            ],
             BillingMode="PAY_PER_REQUEST",
         )
 
