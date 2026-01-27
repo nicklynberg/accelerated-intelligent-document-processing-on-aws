@@ -4,6 +4,7 @@
 import json
 import logging
 import os
+from datetime import datetime
 from typing import Any, Dict, Union
 
 import boto3
@@ -427,6 +428,7 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                 logger.info(f"Applied model swapping for {region_type} region to all configurations")
 
             # Save all configurations (no activation changes)
+            current_time = datetime.utcnow().isoformat() + "Z"
             for config_name, config_data in configurations.items():
                 if config_name.startswith("v") and config_name[1:].isdigit():
                     # Save versioned configuration
@@ -437,17 +439,49 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                     elif version_id == "v1":
                         description = "User customized configuration (v1)"
                     
-                    manager.save_configuration("Config", config_data, version=version_id, description=description)
+                    # Check if this version already exists
+                    existing_config = None
+                    try:
+                        existing_config = manager.get_configuration("Config", version_id)
+                    except:
+                        pass
+                    
+                    if existing_config:
+                        # Update existing - only set updated_at
+                        metadata = {"updated_at": current_time}
+                    else:
+                        # Create new - set both created_at and updated_at
+                        metadata = {"created_at": current_time, "updated_at": current_time}
+                    
+                    manager.save_configuration("Config", config_data, version=version_id, description=description, metadata=metadata)
                     logger.info(f"Saved Config {version_id}")
                 else:
                     # Save non-versioned configurations (Schema, DefaultPricing)
-                    manager.save_configuration(config_name, config_data)
+                    # Check if this config already exists
+                    existing_config = None
+                    try:
+                        existing_config = manager.get_configuration(config_name)
+                    except:
+                        pass
+                    
+                    if existing_config:
+                        # Update existing - only set updated_at
+                        metadata = {"updated_at": current_time}
+                    else:
+                        # Create new - set both created_at and updated_at
+                        metadata = {"created_at": current_time, "updated_at": current_time}
+                    
+                    manager.save_configuration(config_name, config_data, metadata=metadata)
                     logger.info(f"Updated {config_name} configuration")
 
-            # For Create: Activate v0 (Default)
-            if request_type == "Create" and "v0" in configurations:
-                manager.activate_version("v0")
-                logger.info("Activated v0 (Create operation)")
+            # For Create: Activate v1 if Custom was provided, otherwise v0 if Default provided
+            if request_type == "Create":
+                if "Custom" in properties and "v1" in configurations:  # Custom was provided
+                    manager.activate_version("v1")
+                    logger.info("Activated v1 (Custom configuration)")
+                elif "v0" in configurations:  # Only Default provided (or Custom filtered out)
+                    manager.activate_version("v0")
+                    logger.info("Activated v0 (Default configuration)")
 
             cfnresponse.send(
                 event,

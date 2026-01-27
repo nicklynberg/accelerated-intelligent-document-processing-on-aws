@@ -76,6 +76,10 @@ def handler(event, context):
             description = args.get("description")
             set_as_active = args.get("setAsActive", False)
             return handle_save_as_new_version(manager, configuration, description, set_as_active)
+        elif operation == "deleteConfigVersion":
+            args = event["arguments"]
+            version_id = args.get("versionId")
+            return handle_delete_config_version(manager, version_id)
         elif operation == "getPricing":
             return handle_get_pricing(manager)
         elif operation == "updatePricing":
@@ -612,7 +616,7 @@ def handle_get_config_version(manager, version_id):
             schema_dict = {}
         
         # Get the requested version directly
-        config = manager.get_configuration(version_id)
+        config = manager.get_configuration("Config", version_id)
         
         if not config:
             return {
@@ -697,7 +701,7 @@ def handle_set_active_version(manager, version_id):
             }
         
         # Check if the version exists
-        config = manager.get_configuration(version_id)
+        config = manager.get_configuration("Config", version_id)
         if not config:
             return {
                 "success": False,
@@ -708,21 +712,12 @@ def handle_set_active_version(manager, version_id):
             }
         
         # Set the version as active
-        success = manager.set_active_version(version_id)
+        manager.activate_version(version_id)
         
-        if success:
-            return {
-                "success": True,
-                "message": f"Configuration version {version_id} set as active",
-            }
-        else:
-            return {
-                "success": False,
-                "error": {
-                    "type": "Error",
-                    "message": f"Failed to set version {version_id} as active",
-                },
-            }
+        return {
+            "success": True,
+            "message": f"Configuration version {version_id} set as active",
+        }
         
     except Exception as e:
         logger.error(f"Error in setActiveVersion: {str(e)}")
@@ -765,17 +760,16 @@ def handle_save_as_new_version(manager, configuration, description, set_as_activ
         
         # Prepare metadata
         metadata = {
-            "is_active": set_as_active,
             "created_at": timestamp,
-            "description": description or f"Configuration version {next_version}"
+            "updated_at": timestamp,
         }
         
         # Save new version
-        manager.save_configuration(next_version, config_data, metadata=metadata)
+        manager.save_configuration("Config", config_data, version=next_version, description=description or f"Configuration version {next_version}", metadata=metadata)
         
-        # If setting as active, deactivate other versions
+        # If setting as active, activate the version
         if set_as_active:
-            manager.set_active_version(next_version)
+            manager.activate_version(next_version)
         
         return {
             "success": True,
@@ -785,10 +779,69 @@ def handle_save_as_new_version(manager, configuration, description, set_as_activ
         
     except Exception as e:
         logger.error(f"Error in saveAsNewVersion: {str(e)}")
+def handle_delete_config_version(manager, version_id):
+    """
+    Handle the deleteConfigVersion GraphQL mutation
+    Deletes a specific configuration version
+    """
+    try:
+        if not version_id:
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "versionId is required",
+                },
+            }
+        
+        # Prevent deletion of v0 (system default)
+        if version_id == "v0":
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "Cannot delete system default version v0",
+                },
+            }
+        
+        # Check if the version exists
+        config = manager.get_configuration("Config", version_id)
+        if not config:
+            return {
+                "success": False,
+                "error": {
+                    "type": "NotFoundError",
+                    "message": f"Configuration version '{version_id}' not found",
+                },
+            }
+        
+        # Check if this is the active version
+        versions = manager.list_config_versions()
+        active_version = next((v for v in versions if v.get("isActive")), None)
+        
+        if active_version and active_version.get("versionId") == version_id:
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "Cannot delete the active configuration version",
+                },
+            }
+        
+        # Delete the version
+        manager.delete_configuration("Config", version_id)
+        
+        return {
+            "success": True,
+            "message": f"Configuration version {version_id} deleted successfully",
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in deleteConfigVersion: {str(e)}")
         return {
             "success": False,
             "error": {
                 "type": "Error",
-                "message": f"Failed to save new version: {str(e)}",
+                "message": f"Failed to delete configuration version: {str(e)}",
             },
         }

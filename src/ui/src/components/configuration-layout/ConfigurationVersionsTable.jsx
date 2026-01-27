@@ -4,8 +4,13 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import { Table, Box, SpaceBetween, Badge, Link } from '@cloudscape-design/components';
+import { useCollection } from '@cloudscape-design/collection-hooks';
 
 const ConfigurationVersionsTable = ({ versions = [], loading = false, onVersionSelect }) => {
+  // Log the versions data to console for debugging
+  console.log('ConfigurationVersionsTable - versions data:', versions);
+  console.log('ConfigurationVersionsTable - loading:', loading);
+
   const columnDefinitions = [
     {
       id: 'versionId',
@@ -36,19 +41,35 @@ const ConfigurationVersionsTable = ({ versions = [], loading = false, onVersionS
       sortingField: 'createdAt',
     },
     {
+      id: 'updatedAt',
+      header: 'Updated',
+      cell: (item) => (item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '-'),
+      sortingField: 'updatedAt',
+    },
+    {
       id: 'description',
       header: 'Description',
       cell: (item) => item.description || '-',
     },
   ];
 
+  const { items, collectionProps } = useCollection(versions, {
+    pagination: { pageSize: 10 },
+    sorting: {
+      defaultState: {
+        sortingColumn: columnDefinitions[0],
+        isDescending: true,
+      },
+    },
+  });
+
   return (
     <Table
+      {...collectionProps}
       columnDefinitions={columnDefinitions}
-      items={versions}
+      items={items}
       loading={loading}
       loadingText="Loading versions..."
-      sortingDisabled={loading}
       empty={
         <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
           <SpaceBetween size="m">
@@ -59,7 +80,7 @@ const ConfigurationVersionsTable = ({ versions = [], loading = false, onVersionS
           </SpaceBetween>
         </Box>
       }
-      header={<Box variant="h2">Configuration Versions</Box>}
+      header={<Box variant="h2">Configuration Versions ({versions.length})</Box>}
     />
   );
 };
@@ -70,6 +91,7 @@ ConfigurationVersionsTable.propTypes = {
       versionId: PropTypes.string.isRequired,
       isActive: PropTypes.bool,
       createdAt: PropTypes.string,
+      updatedAt: PropTypes.string,
       description: PropTypes.string,
     }),
   ),

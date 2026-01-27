@@ -3,16 +3,10 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  query GetConfigVersions {
-    getConfigVersions {
+  mutation DeleteConfigVersion($versionId: String!) {
+    deleteConfigVersion(versionId: $versionId) {
       success
-      versions {
-        versionId
-        isActive
-        createdAt
-        updatedAt
-        description
-      }
+      message
       error {
         type
         message

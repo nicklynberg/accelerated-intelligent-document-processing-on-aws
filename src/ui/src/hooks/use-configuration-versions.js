@@ -9,6 +9,7 @@ import getConfigVersionQuery from '../graphql/queries/getConfigVersion';
 import updateConfigurationMutation from '../graphql/queries/updateConfiguration';
 import setActiveVersionMutation from '../graphql/queries/setActiveVersion';
 import saveAsNewVersionMutation from '../graphql/queries/saveAsNewVersion';
+import deleteConfigVersionMutation from '../graphql/queries/deleteConfigVersion';
 
 const client = generateClient();
 const logger = new ConsoleLogger('useConfigurationVersions');
@@ -33,6 +34,13 @@ const useConfigurationVersions = () => {
       setVersions(response.versions || []);
     } catch (err) {
       logger.error('Error fetching configuration versions:', err);
+      console.error('Full error object:', err);
+      if (err.errors) {
+        console.error('GraphQL errors:', err.errors);
+        err.errors.forEach((gqlError, index) => {
+          console.error(`Error ${index + 1}:`, gqlError.message);
+        });
+      }
       setError(err.message || 'Failed to fetch versions');
     } finally {
       setLoading(false);
@@ -131,6 +139,28 @@ const useConfigurationVersions = () => {
     }
   };
 
+  const deleteVersion = async (versionId) => {
+    try {
+      const result = await client.graphql({
+        query: deleteConfigVersionMutation,
+        variables: { versionId },
+      });
+      const response = result.data.deleteConfigVersion;
+
+      if (!response.success) {
+        throw new Error(response.error?.message || 'Failed to delete version');
+      }
+
+      // Refresh versions list after deleting
+      await fetchVersions();
+
+      return response;
+    } catch (err) {
+      logger.error('Error deleting version:', err);
+      throw err;
+    }
+  };
+
   useEffect(() => {
     fetchVersions();
   }, []);
@@ -144,6 +174,7 @@ const useConfigurationVersions = () => {
     updateVersion,
     setActiveVersion,
     saveAsNewVersion,
+    deleteVersion,
   };
 };
 
