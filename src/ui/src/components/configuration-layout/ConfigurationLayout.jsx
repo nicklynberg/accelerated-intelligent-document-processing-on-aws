@@ -61,6 +61,7 @@ const ConfigurationLayout = () => {
   const {
     versions,
     loading: versionsLoading,
+    fetchVersions,
     fetchVersion,
     saveAsNewVersion,
     setActiveVersion,
@@ -258,7 +259,7 @@ const ConfigurationLayout = () => {
       setSaveSuccess(true);
       setShowActivateModal(false);
       // Refresh versions list to update active status
-      await loadVersions();
+      await fetchVersions();
       // Update version data to reflect active status
       setSelectedVersionData((prev) => ({ ...prev, isActive: true }));
     } catch (error) {
@@ -277,13 +278,91 @@ const ConfigurationLayout = () => {
     try {
       await deleteVersion(selectedVersion);
       setShowDeleteModal(false);
-      handleBackToVersions(); // Go back to versions list
+      setSaveSuccess(true);
+      // Clear the selected version since it was deleted
+      setSelectedVersion(null);
+      setSelectedVersionData(null);
     } catch (error) {
       console.error('Delete error:', error);
       setSaveError(error.message || 'Failed to delete version');
     } finally {
       setIsSaving(false);
     }
+  };
+
+  // Handle export
+  const handleExport = () => {
+    try {
+      let content;
+      let mimeType;
+      let fileExtension;
+
+      if (exportFormat === 'yaml') {
+        content = yamlContent;
+        mimeType = 'text/yaml';
+        fileExtension = 'yaml';
+      } else {
+        content = jsonContent;
+        mimeType = 'application/json';
+        fileExtension = 'json';
+      }
+
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${exportFileName}.${fileExtension}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setShowExportModal(false);
+    } catch (err) {
+      setSaveError(`Export failed: ${err.message}`);
+    }
+  };
+
+  // Handle import
+  const handleImport = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        setImportError(null);
+        const content = e.target.result;
+
+        const importedConfig = file.name.endsWith('.yaml') || file.name.endsWith('.yml') ? yaml.load(content) : JSON.parse(content);
+
+        if (importedConfig && typeof importedConfig === 'object') {
+          setFormValues(importedConfig);
+          setJsonContent(JSON.stringify(importedConfig, null, 2));
+          setYamlContent(yaml.dump(importedConfig));
+          if (importedConfig.classes) {
+            setExtractionSchema(importedConfig.classes);
+          }
+          setImportSuccess(true);
+        } else {
+          setImportError('Invalid configuration file format');
+        }
+      } catch (err) {
+        setImportError(`Import failed: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
+  // Handler for Import button click
+  const handleImportClick = () => {
+    setShowImportSourceModal(true);
+  };
+
+  // Handler for local file import
+  const handleLocalFileImport = () => {
+    setShowImportSourceModal(false);
+    document.getElementById('import-file').click();
   };
 
   // Handle reset to default
@@ -438,7 +517,8 @@ const ConfigurationLayout = () => {
                       ]}
                     />
                     <Button onClick={() => setShowExportModal(true)}>Export</Button>
-                    <Button onClick={() => setShowImportSourceModal(true)}>Import</Button>
+                    <Button onClick={handleImportClick}>Import</Button>
+                    <input id="import-file" type="file" accept=".json,.yaml,.yml" style={{ display: 'none' }} onChange={handleImport} />
                     <Button onClick={() => window.location.reload()}>Refresh</Button>
                     <Button onClick={() => setShowActivateModal(true)} disabled={!selectedVersion || selectedVersionData?.isActive}>
                       Activate
@@ -674,6 +754,61 @@ const ConfigurationLayout = () => {
         <Box variant="span">
           Are you sure you want to reset version {selectedVersion} to default values? This will overwrite all current settings.
         </Box>
+      </Modal>
+
+      {/* Export Modal */}
+      <Modal
+        visible={showExportModal}
+        onDismiss={() => setShowExportModal(false)}
+        header="Export Configuration"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setShowExportModal(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleExport}>
+                Export
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween direction="vertical" size="l">
+          <FormField label="File format">
+            <RadioGroup
+              value={exportFormat}
+              onChange={({ detail }) => setExportFormat(detail.value)}
+              items={[
+                { value: 'json', label: 'JSON' },
+                { value: 'yaml', label: 'YAML' },
+              ]}
+            />
+          </FormField>
+          <FormField label="File name">
+            <Input value={exportFileName} onChange={({ detail }) => setExportFileName(detail.value)} placeholder="configuration" />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+
+      {/* Import Source Selection Modal */}
+      <Modal
+        visible={showImportSourceModal}
+        onDismiss={() => setShowImportSourceModal(false)}
+        header="Choose Import Source"
+        footer={
+          <Box float="right">
+            <Button variant="link" onClick={() => setShowImportSourceModal(false)}>
+              Cancel
+            </Button>
+          </Box>
+        }
+      >
+        <SpaceBetween size="l">
+          <Button variant="primary" onClick={handleLocalFileImport} iconName="upload" fullWidth>
+            Import from Local File
+          </Button>
+        </SpaceBetween>
       </Modal>
     </>
   );

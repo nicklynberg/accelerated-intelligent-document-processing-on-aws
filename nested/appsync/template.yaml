@@ -1026,6 +1026,17 @@ Resources:
       TypeName: Mutation
       FieldName: saveAsNewVersion
 
+  ##########################################################################
+  # DeleteConfigVersionResolver
+  ##########################################################################
+  DeleteConfigVersionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt ConfigurationDataSource.Name
+      TypeName: Mutation
+      FieldName: deleteConfigVersion
 
   ##########################################################################
   # GetConfigVersionsResolver

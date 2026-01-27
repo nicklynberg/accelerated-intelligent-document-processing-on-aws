@@ -27,6 +27,11 @@ const useConfigurationVersions = () => {
       const result = await client.graphql({ query: getConfigVersionsQuery });
       const response = result.data.getConfigVersions;
 
+      // Handle null response
+      if (!response) {
+        throw new Error('No response received from fetch versions operation');
+      }
+
       if (!response.success) {
         throw new Error(response.error?.message || 'Failed to fetch versions');
       }
@@ -145,7 +150,11 @@ const useConfigurationVersions = () => {
         query: deleteConfigVersionMutation,
         variables: { versionId },
       });
-      const response = result.data.deleteConfigVersion;
+      const response = result.data?.deleteConfigVersion;
+
+      if (!response) {
+        throw new Error('No response received from delete operation');
+      }
 
       if (!response.success) {
         throw new Error(response.error?.message || 'Failed to delete version');
