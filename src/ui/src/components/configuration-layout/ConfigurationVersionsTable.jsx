@@ -3,7 +3,7 @@
 
 import React, { useState } from 'react';
 import PropTypes from 'prop-types';
-import { Table, Box, SpaceBetween, Badge, Link, Button, Header } from '@cloudscape-design/components';
+import { Table, Box, SpaceBetween, Badge, Link, Button, Header, Pagination, TextFilter } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 
 const ConfigurationVersionsTable = ({
@@ -96,13 +96,35 @@ const ConfigurationVersionsTable = ({
     },
   ];
 
-  const { items, collectionProps } = useCollection(versions, {
-    pagination: { pageSize: 10 },
+  const { items, collectionProps, paginationProps, filteredItemsCount, filterProps } = useCollection(versions, {
+    pagination: { pageSize: 5 },
     sorting: {
       defaultState: {
-        sortingColumn: columnDefinitions[0],
+        sortingColumn: columnDefinitions[1], // Sort by versionId by default
         isDescending: true,
       },
+    },
+    filtering: {
+      empty: (
+        <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
+          <SpaceBetween size="m">
+            <b>No matches</b>
+            <Box variant="p" color="inherit">
+              We can&apos;t find a match.
+            </Box>
+          </SpaceBetween>
+        </Box>
+      ),
+      noMatch: (
+        <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
+          <SpaceBetween size="m">
+            <b>No matches</b>
+            <Box variant="p" color="inherit">
+              We can&apos;t find a match.
+            </Box>
+          </SpaceBetween>
+        </Box>
+      ),
     },
   });
 
@@ -113,6 +135,8 @@ const ConfigurationVersionsTable = ({
       items={items}
       loading={loading}
       loadingText="Loading versions..."
+      resizableColumns
+      stripedRows
       empty={
         <Box margin={{ vertical: 'xs' }} textAlign="center" color="inherit">
           <SpaceBetween size="m">
@@ -153,9 +177,11 @@ const ConfigurationVersionsTable = ({
             </SpaceBetween>
           }
         >
-          Configuration Versions ({versions.length})
+          Configuration Versions ({filteredItemsCount})
         </Header>
       }
+      filter={<TextFilter {...filterProps} placeholder="Search versions..." />}
+      pagination={<Pagination {...paginationProps} />}
     />
   );
 };
