@@ -85,10 +85,14 @@ class ConfigurationManager:
             # Handle versioned Config type
             if config_type == "Config":
                 if version:
-                    # Get specific version
-                    record = self._read_record("Config", version)
+                    # For non-v0 versions, merge with v0 baseline for automatic inheritance
+                    if version != "v0":
+                        return self._get_merged_version_config(version)
+                    else:
+                        # Get v0 directly
+                        record = self._read_record("Config", version)
                 else:
-                    # Get active version
+                    # Get active version (merging handled in _get_active_config_version)
                     record = self._get_active_config_version()
             else:
                 # For all other types, pass config_type directly
@@ -175,52 +179,6 @@ class ConfigurationManager:
         except ClientError as e:
             logger.error(f"Error saving raw configuration {config_type}: {e}")
             raise
-
-    def get_merged_configuration(self) -> Optional[IDPConfig]:
-        """
-        Get merged Default + Custom configuration for runtime processing.
-        
-        This is THE method to use for all runtime document processing.
-        It properly merges the stack Default with user Custom deltas.
-        
-        Design Pattern:
-        - Default = complete stack baseline (from deployment)
-        - Custom = sparse user deltas ONLY
-        - Merged = Default deep-updated with Custom = final runtime config
-        
-        Returns:
-            Merged IDPConfig ready for runtime use, or None if Default doesn't exist
-            
-        Raises:
-            ClientError: If DynamoDB operation fails
-        """
-        from copy import deepcopy
-        
-        # Get the full Default configuration (Pydantic validated - this is correct)
-        default_config = self.get_configuration("Default")
-        if default_config is None:
-            logger.warning("Default configuration not found - cannot create merged config")
-            return None
-            
-        if not isinstance(default_config, IDPConfig):
-            logger.error(f"Default config is not IDPConfig: {type(default_config)}")
-            return None
-        
-        # Get Custom as RAW dict (no Pydantic defaults!)
-        custom_dict = self.get_raw_configuration("Custom")
-        
-        # If no Custom, return Default as-is
-        if not custom_dict:
-            logger.info("No Custom configuration, returning Default")
-            return default_config
-        
-        # Merge: Start with Default, deep update with Custom deltas
-        default_dict = default_config.model_dump(mode="python")
-        merged_dict = deepcopy(default_dict)
-        deep_update(merged_dict, custom_dict)
-        
-        logger.info("Merged Default + Custom configurations for runtime")
-        return IDPConfig(**merged_dict)
 
     def sync_custom_with_new_default(
         self, old_default: IDPConfig, new_default: IDPConfig, old_custom: IDPConfig
@@ -763,6 +721,7 @@ class ConfigurationManager:
     def _get_active_config_version(self) -> Optional[ConfigurationRecord]:
         """
         Get the active Config version (where is_active=True).
+        For non-v0 active versions, merges with v0 baseline for automatic inheritance.
         
         Returns:
             ConfigurationRecord with is_active=True, or None if not found
@@ -785,12 +744,61 @@ class ConfigurationManager:
             if len(items) > 1:
                 logger.warning(f"Multiple active Config versions found: {len(items)}")
             
-            # Return the first active version found
-            return ConfigurationRecord.from_dynamodb_item(items[0])
+            # Get the first active version found
+            active_record = ConfigurationRecord.from_dynamodb_item(items[0])
+            
+            # If active version is not v0, merge with v0 baseline
+            if active_record.version != "v0":
+                merged_config = self._get_merged_version_config(active_record.version)
+                if merged_config:
+                    # Return record with merged config
+                    active_record.config = merged_config
+            
+            return active_record
             
         except ClientError as e:
             logger.error(f"Error scanning for active Config version: {e}")
             return None
+
+    def _get_merged_version_config(self, version: str) -> Optional[IDPConfig]:
+        """
+        Get version config merged with v0 baseline for automatic inheritance.
+        
+        Args:
+            version: Version identifier (v1, v2, etc.)
+            
+        Returns:
+            Merged IDPConfig with v0 baseline + version customizations, or None if not found
+        """
+        try:
+            # Get v0 baseline
+            v0_record = self._read_record("Config", "v0")
+            if not v0_record:
+                logger.warning("No v0 baseline found for merging")
+                # Fallback to version config only
+                version_record = self._read_record("Config", version)
+                return version_record.config if version_record else None
+            
+            # Get version config
+            version_record = self._read_record("Config", version)
+            if not version_record:
+                logger.info(f"Version {version} not found, returning v0 baseline")
+                return v0_record.config
+            
+            # Merge v0 baseline with version customizations
+            from copy import deepcopy
+            v0_dict = v0_record.config.model_dump(mode="python")
+            version_dict = version_record.config.model_dump(mode="python")
+            
+            # Start with v0 baseline and apply version customizations
+            merged_dict = deepcopy(v0_dict)
+            deep_update(merged_dict, version_dict)
+            
+            return IDPConfig(**merged_dict)
+            
+        except ClientError as e:
+            logger.error(f"Error merging version {version} with v0: {e}")
+            raise
 
     def _read_record(self, configuration_type: str, version: str = "") -> Optional[ConfigurationRecord]:
         """

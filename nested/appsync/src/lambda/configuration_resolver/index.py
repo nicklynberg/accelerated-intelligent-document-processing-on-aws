@@ -151,7 +151,7 @@ def handle_get_configuration(manager):
     - Default: Full stack baseline (Pydantic validated)
     - Custom: SPARSE DELTAS ONLY (raw from DynamoDB, NO Pydantic defaults!)
     - Frontend merges Default + Custom for display
-    - Runtime uses get_merged_configuration() for processing
+    - Runtime uses get_configuration() for processing
     
     This design allows:
     - Stack upgrades to safely update Default without losing user customizations

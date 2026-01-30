@@ -1431,6 +1431,49 @@ def run_inference(
             stack_name=stack_name, config_path=config, region=region
         )
 
+        # Validate config_version if specified
+        if config_version:
+            console.print(
+                f"[blue]Validating configuration version: {config_version}[/blue]"
+            )
+            try:
+                import os
+
+                from idp_common.config.configuration_manager import ConfigurationManager
+
+                # Get the configuration table name from processor resources
+                config_table = processor.resources.get("ConfigurationTable")
+                if not config_table:
+                    console.print(
+                        "[red]✗ Could not find ConfigurationTable in stack resources[/red]"
+                    )
+                    sys.exit(1)
+
+                # Set env var and check if version exists
+                os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+                manager = ConfigurationManager()
+                existing_config = manager.get_configuration(
+                    "Config", version=config_version
+                )
+
+                if not existing_config:
+                    console.print(
+                        f"[red]✗ Configuration version '{config_version}' does not exist[/red]"
+                    )
+                    console.print(
+                        f"Use 'idp-cli config-download --stack-name {stack_name}' to see available versions"
+                    )
+                    sys.exit(1)
+
+                console.print(
+                    f"[green]✓ Configuration version '{config_version}' validated[/green]"
+                )
+            except Exception as e:
+                console.print(
+                    f"[red]✗ Failed to validate configuration version: {e}[/red]"
+                )
+                sys.exit(1)
+
         # Process batch based on source type
         with console.status("[bold green]Processing batch..."):
             if test_set:
@@ -3252,12 +3295,17 @@ def config_validate(
     type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
     help="Pattern for validation (auto-detected if not specified)",
 )
+@click.option(
+    "--config-version",
+    help="Configuration version to update (e.g., v1, v2). Must exist. If not specified, updates active version.",
+)
 @click.option("--region", help="AWS region (optional)")
 def config_upload(
     stack_name: str,
     config_file: str,
     validate: bool,
     pattern: Optional[str],
+    config_version: Optional[str],
     region: Optional[str],
 ):
     """
@@ -3376,10 +3424,31 @@ def config_upload(
 
             manager = ConfigurationManager()
 
+            # If config_version specified, validate it exists
+            if config_version:
+                existing_config = manager.get_configuration(
+                    "Config", version=config_version
+                )
+                if not existing_config:
+                    console.print(
+                        f"[red]✗ Configuration version '{config_version}' does not exist[/red]"
+                    )
+                    console.print(
+                        "Use 'idp-cli config-download --stack-name {stack_name}' to see available versions"
+                    )
+                    sys.exit(1)
+                console.print(
+                    f"[blue]Updating configuration version: {config_version}[/blue]"
+                )
+            else:
+                console.print("[blue]Updating active configuration version[/blue]")
+
             # Convert to JSON string (the method expects JSON string or dict)
             config_json = json.dumps(user_config)
 
-            success = manager.handle_update_custom_configuration(config_json)
+            success = manager.handle_update_custom_configuration(
+                config_json, version_id=config_version
+            )
 
             if success:
                 console.print("[green]✓ Configuration uploaded successfully[/green]")
@@ -3426,12 +3495,17 @@ def config_upload(
     type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
     help="Pattern for minimal diff (auto-detected if not specified)",
 )
+@click.option(
+    "--config-version",
+    help="Configuration version to download (e.g., v1, v2). If not specified, downloads active version.",
+)
 @click.option("--region", help="AWS region (optional)")
 def config_download(
     stack_name: str,
     output: Optional[str],
     output_format: str,
     pattern: Optional[str],
+    config_version: Optional[str],
     region: Optional[str],
 ):
     """
@@ -3487,7 +3561,9 @@ def config_download(
             from idp_common.config import ConfigurationReader
 
             reader = ConfigurationReader(table_name=config_table)
-            config_data = reader.get_merged_configuration(as_model=False)
+            config_data = reader.get_configuration(
+                "Config", version=config_version, as_model=False
+            )
             console.print("[green]✓ Configuration retrieved[/green]")
 
         except ImportError:

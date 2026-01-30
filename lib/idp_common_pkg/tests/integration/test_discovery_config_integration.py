@@ -128,7 +128,7 @@ discovery:
             mock_reader_instance = mock_config_reader.return_value
             # Convert dict to IDPConfig model
             idp_config = IDPConfig(**self.config_dict)
-            mock_reader_instance.get_merged_configuration.return_value = idp_config
+            mock_reader_instance.get_configuration.return_value = idp_config
 
             with patch.dict("os.environ", {"CONFIGURATION_TABLE_NAME": "test-table"}):
                 # Initialize ClassesDiscovery with YAML config
@@ -243,7 +243,7 @@ discovery:
             mock_reader_instance = mock_config_reader.return_value
             # Convert dict to IDPConfig model
             idp_config = IDPConfig(**self.config_dict)
-            mock_reader_instance.get_merged_configuration.return_value = idp_config
+            mock_reader_instance.get_configuration.return_value = idp_config
 
             with patch.dict("os.environ", {"CONFIGURATION_TABLE_NAME": "test-table"}):
                 # Initialize ClassesDiscovery with YAML config
@@ -325,7 +325,7 @@ discovery:
             mock_reader_instance = mock_config_reader.return_value
             # Convert dict to IDPConfig model - this will apply defaults
             idp_config = IDPConfig.model_validate(incomplete_config)
-            mock_reader_instance.get_merged_configuration.return_value = idp_config
+            mock_reader_instance.get_configuration.return_value = idp_config
 
             with patch.dict("os.environ", {"CONFIGURATION_TABLE_NAME": "test-table"}):
                 # Initialize with incomplete config

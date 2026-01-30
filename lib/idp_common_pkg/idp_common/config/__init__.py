@@ -105,58 +105,6 @@ class ConfigurationReader:
         merged = deepcopy(default)
         return deep_update(merged, custom)
 
-    @overload
-    def get_merged_configuration(self, *, as_model: Literal[True]) -> IDPConfig: ...
-
-    @overload
-    def get_merged_configuration(
-        self, *, as_model: Literal[False]
-    ) -> Dict[str, Any]: ...
-
-    def get_merged_configuration(
-        self, *, as_model: bool = False, version: Optional[str] = None
-    ) -> Union[IDPConfig, Dict[str, Any]]:
-        """
-        Get configuration for runtime processing.
-
-        Args:
-            as_model: If True, return IDPConfig Pydantic model. If False (default), return dict.
-            version: Optional version to load. If None, uses active version (Default + Custom merge).
-
-        Returns:
-            Configuration as IDPConfig or dictionary
-        """
-        try:
-            if version:
-                # Load specific version directly
-                versioned_config = self.manager.get_configuration("Config", version)
-                if not versioned_config:
-                    raise ValueError(f"Configuration version {version} not found")
-                
-                logger.info(f"Using configuration version: {version}")
-                
-                if as_model:
-                    return versioned_config
-                else:
-                    return versioned_config.model_dump(mode="python")
-            
-            # No version specified - use active version
-            active_config = self.manager.get_configuration("Config")
-            if not active_config:
-                raise ValueError("Active configuration not found")
-            
-            logger.info("Using active configuration version")
-            
-            if as_model:
-                return active_config
-            else:
-                return active_config.model_dump(mode="python")
-
-        except Exception as e:
-            logger.error(f"Error getting configuration: {str(e)}")
-            raise
-
-
 @overload
 def get_config(
     *, table_name: Optional[str] = None, as_model: Literal[True]
@@ -194,4 +142,4 @@ def get_config(
         Merged configuration as IDPConfig (with .to_dict() helper) or mutable dictionary.
     """
     reader = ConfigurationReader(table_name)
-    return reader.get_merged_configuration(as_model=as_model, version=version)
+    return reader.get_configuration("Config", as_model=as_model, version=version)

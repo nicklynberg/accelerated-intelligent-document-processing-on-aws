@@ -174,7 +174,7 @@ class TestClassesDiscoveryIntegration:
                 )
             )
             mock_reader_instance = mock_config_reader.return_value
-            mock_reader_instance.get_merged_configuration.return_value = mock_config
+            mock_reader_instance.get_configuration.return_value = mock_config
 
             service = ClassesDiscovery(
                 input_bucket="test-discovery-bucket",
@@ -212,6 +212,19 @@ class TestClassesDiscoveryIntegration:
 
         # Mock existing configuration (empty initially)
         service_with_mocks._mock_table.get_item.return_value = {}
+
+        # Mock scan for active config version
+        service_with_mocks._mock_table.scan.return_value = {
+            "Items": [
+                {
+                    "Configuration": "Config#v1",
+                    "IsActive": True,
+                    "CreatedAt": "2024-01-01T00:00:00Z",
+                    "UpdatedAt": "2024-01-01T00:00:00Z",
+                    "classes": [],
+                }
+            ]
+        }
 
         # Execute the discovery workflow
         result = service_with_mocks.discovery_classes_with_document(
@@ -298,6 +311,19 @@ class TestClassesDiscoveryIntegration:
 
         # Mock existing configuration
         service_with_mocks._mock_table.get_item.return_value = {}
+
+        # Mock scan for active config version
+        service_with_mocks._mock_table.scan.return_value = {
+            "Items": [
+                {
+                    "Configuration": "Config#v1",
+                    "IsActive": True,
+                    "CreatedAt": "2024-01-01T00:00:00Z",
+                    "UpdatedAt": "2024-01-01T00:00:00Z",
+                    "classes": [],
+                }
+            ]
+        }
 
         # Execute the discovery workflow with ground truth
         result = service_with_mocks.discovery_classes_with_document_and_ground_truth(
@@ -460,6 +486,19 @@ class TestClassesDiscoveryIntegration:
                 "metering": {"tokens": 300},
             }
             service_with_mocks._mock_table.get_item.return_value = {}
+
+            # Mock scan for active config version
+            service_with_mocks._mock_table.scan.return_value = {
+                "Items": [
+                    {
+                        "Configuration": "Config#v1",
+                        "IsActive": True,
+                        "CreatedAt": "2024-01-01T00:00:00Z",
+                        "UpdatedAt": "2024-01-01T00:00:00Z",
+                        "classes": [],
+                    }
+                ]
+            }
 
             # Mock the image preparation
             mock_prepare_image.return_value = {

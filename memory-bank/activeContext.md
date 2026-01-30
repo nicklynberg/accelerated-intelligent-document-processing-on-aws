@@ -35,7 +35,7 @@ flowchart TD
     subgraph "Runtime Processing"
         D --> RM{Merge}
         C --> RM
-        RM --> RT[get_merged_configuration]
+        RM --> RT[get_configuration]
     end
 ```
 
@@ -61,7 +61,7 @@ flowchart TD
    - **Save as default**: Save merged → Default, then empty Custom
 
 4. **Runtime Processing**:
-   - Always use `get_merged_configuration()` for actual processing
+   - Always use `get_configuration()` for actual processing
    - Never use raw Custom (it's incomplete)
 
 5. **getConfiguration API Response**:

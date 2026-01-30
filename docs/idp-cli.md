@@ -1716,13 +1716,17 @@ idp-cli config-download [OPTIONS]
 - `--output`, `-o`: Output file path (default: stdout)
 - `--format`: Output format - `full` (default) or `minimal` (only differences from defaults)
 - `--pattern`: Pattern for minimal diff (auto-detected if not specified)
+- `--config-version`: Configuration version to download (e.g., v1, v2). If not specified, downloads active version
 - `--region`: AWS region (optional)
 
 **Examples:**
 
 ```bash
-# Download full config
+# Download full config from active version
 idp-cli config-download --stack-name my-stack --output config.yaml
+
+# Download specific version
+idp-cli config-download --stack-name my-stack --config-version v2 --output config.yaml
 
 # Download minimal config (only customizations)
 idp-cli config-download --stack-name my-stack --format minimal --output config.yaml
@@ -1747,13 +1751,17 @@ idp-cli config-upload [OPTIONS]
 - `--config-file`, `-f` (required): Path to configuration file (YAML or JSON)
 - `--validate/--no-validate`: Validate config before uploading (default: validate)
 - `--pattern`: Pattern for validation (auto-detected if not specified)
+- `--config-version`: Configuration version to update (e.g., v1, v2). Must exist. If not specified, updates active version
 - `--region`: AWS region (optional)
 
 **Examples:**
 
 ```bash
-# Upload config with validation
+# Upload config to active version
 idp-cli config-upload --stack-name my-stack --config-file ./config.yaml
+
+# Upload to specific existing version
+idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --config-version v2
 
 # Skip validation (use with caution)
 idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --no-validate

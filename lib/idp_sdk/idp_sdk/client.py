@@ -1312,7 +1312,7 @@ class IDPClient:
         from idp_common.config import ConfigurationReader
 
         reader = ConfigurationReader(table_name=config_table)
-        config_data = reader.get_merged_configuration(as_model=False)
+        config_data = reader.get_configuration("Config", as_model=False)
 
         # For minimal format, compute diff
         if format == "minimal":

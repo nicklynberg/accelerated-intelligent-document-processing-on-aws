@@ -837,18 +837,18 @@ class BdaBlueprintService:
         logger.info("Creating blueprint for document ")
 
         try:
-            config_item = self.config_manager.get_configuration(config_type="Custom")
+            config_item = self.config_manager.get_configuration(config_type="Config")
 
-            # Type check: Custom configuration should return IDPConfig which has classes attribute
+            # Type check: Config configuration should return IDPConfig which has classes attribute
             if not config_item:
-                logger.info("No Custom configuration to process")
+                logger.info("No Config configuration to process")
                 return {"status": "success", "message": "No classes to process"}
 
             # Use getattr to safely access classes attribute
             classess = getattr(config_item, "classes", None)
 
             if not classess or len(classess) == 0:
-                logger.info("No Custom configuration to process")
+                logger.info("No Config configuration to process")
                 return {"status": "success", "message": "No classes to process"}
 
             # At this point, classess is guaranteed to be non-None and non-empty

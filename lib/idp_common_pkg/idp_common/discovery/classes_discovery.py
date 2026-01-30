@@ -32,7 +32,7 @@ class ClassesDiscovery:
             self.config_reader = ConfigurationReader()
             self.config_manager = ConfigurationManager()
             self.config: IDPConfig = cast(
-                IDPConfig, self.config_reader.get_merged_configuration(as_model=True)
+                IDPConfig, self.config_reader.get_configuration("Config", as_model=True)
             )
         except Exception as e:
             logger.error(f"Failed to load configuration from DynamoDB: {e}")
@@ -94,11 +94,11 @@ class ClassesDiscovery:
             # No need to transform - it's already in the right format
             current_class = model_response
 
-            custom_item_raw = self.config_manager.get_configuration("Custom")
-            custom_item = cast(Optional[IDPConfig], custom_item_raw)
+            current_config = self.config_manager.get_configuration("Config")
+            current_config = cast(IDPConfig, current_config)
             classes = []
-            if custom_item and custom_item.classes:
-                classes = list(custom_item.classes)
+            if current_config and current_config.classes:
+                classes = list(current_config.classes)
                 # Check for existing class by $id or x-aws-idp-document-type
                 class_id = current_class.get("$id") or current_class.get(
                     "x-aws-idp-document-type"
@@ -117,14 +117,13 @@ class ClassesDiscovery:
 
             # Update configuration with new classes
             # Load existing custom config to preserve all other fields
-            if not custom_item:
+            if not current_config:
                 # If no custom config exists, get default as base
-                default_raw = self.config_manager.get_configuration("Default")
-                custom_item = cast(Optional[IDPConfig], default_raw) or IDPConfig()
+                current_config = IDPConfig()
 
             # Update only the classes field, preserving all other config
-            custom_item.classes = classes
-            self.config_manager.save_configuration("Custom", custom_item)
+            current_config.classes = classes
+            self.config_manager.save_configuration("Config", current_config)
 
             return {"status": "SUCCESS"}
 
@@ -175,11 +174,11 @@ class ClassesDiscovery:
             # No need to transform - it's already in the right format
             current_class = model_response
 
-            custom_item_raw = self.config_manager.get_configuration("Custom")
-            custom_item = cast(Optional[IDPConfig], custom_item_raw)
+            current_config = self.config_manager.get_configuration("Config")
+            current_config = cast(IDPConfig, current_config)
             classes = []
-            if custom_item and custom_item.classes:
-                classes = list(custom_item.classes)
+            if current_config and current_config.classes:
+                classes = list(current_config.classes)
                 # Check for existing class by $id or x-aws-idp-document-type
                 class_id = current_class.get("$id") or current_class.get(
                     "x-aws-idp-document-type"
@@ -198,14 +197,13 @@ class ClassesDiscovery:
 
             # Update configuration with new classes
             # Load existing custom config to preserve all other fields
-            if not custom_item:
+            if not current_config:
                 # If no custom config exists, get default as base
-                default_raw = self.config_manager.get_configuration("Default")
-                custom_item = cast(Optional[IDPConfig], default_raw) or IDPConfig()
+                current_config = IDPConfig()
 
             # Update only the classes field, preserving all other config
-            custom_item.classes = classes
-            self.config_manager.save_configuration("Custom", custom_item)
+            current_config.classes = classes
+            self.config_manager.save_configuration("Config", current_config)
 
             return {"status": "SUCCESS"}
 
