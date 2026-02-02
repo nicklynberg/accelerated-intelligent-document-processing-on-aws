@@ -55,13 +55,16 @@ def handler(event, context):
     # Calculate expiry date
     expires_after = int((datetime.now(timezone.utc) + timedelta(days=retentionDays)).timestamp())
 
-    # Create document in DynamoDB via document service
-    logger.info(f"Creating document via document service: {document.input_key}")
-    
-    # Create document in document service with TTL
-    created_key = document_service.create_document(document, expires_after=expires_after)
-    logger.info(f"Document created with key: {created_key}")
-    
+    if object_key.startswith("api-requests/"):
+        # API-initiated request - document record already exists
+        logger.info(f"API request detected, updating existing document: {object_key}")
+        document_service.update_document(document)
+        document_service.create_list_item(object_key, current_time, expires_after)
+    else:
+        # S3 upload (UI or direct) - create new document
+        logger.info(f"Creating document via document service: {document.input_key}")
+        document_service.create_document(document, expires_after=expires_after)
+
     # Send serialized document to SQS queue
     doc_json = document.to_json()
     message = {
