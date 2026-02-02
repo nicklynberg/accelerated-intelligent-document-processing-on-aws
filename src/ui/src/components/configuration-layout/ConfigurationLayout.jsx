@@ -1046,31 +1046,31 @@ const ConfigurationLayout = () => {
         const importedConfig = yaml.load(configFile.content);
 
         if (importedConfig && typeof importedConfig === 'object') {
-          // Ensure v0 is loaded for merging
-          let v0Data = defaultVersionData;
-          if (!v0Data) {
+          // Ensure default is loaded for merging
+          let defaultData = defaultVersionData;
+          if (!defaultData) {
             try {
-              const v0Response = await fetchVersion('v0');
-              if (v0Response && v0Response.configuration) {
-                let v0Config;
-                if (typeof v0Response.configuration === 'string') {
-                  v0Config = JSON.parse(v0Response.configuration);
+              const defaultResponse = await fetchVersion('default');
+              if (defaultResponse && defaultResponse.configuration) {
+                let defaultConfig;
+                if (typeof defaultResponse.configuration === 'string') {
+                  defaultConfig = JSON.parse(defaultResponse.configuration);
                 } else {
-                  v0Config = v0Response.configuration;
+                  defaultConfig = defaultResponse.configuration;
                 }
-                v0Data = { ...v0Response, configuration: v0Config };
-                setDefaultVersionData(v0Data);
+                defaultData = { ...defaultResponse, configuration: defaultConfig };
+                setDefaultVersionData(defaultData);
               }
             } catch (error) {
-              console.warn('Could not load v0 for merging:', error);
+              console.warn('Could not load default for merging:', error);
             }
           }
 
-          // Merge with v0 defaults to fill missing fields
+          // Merge with default defaults to fill missing fields
           let configToImport = importedConfig;
-          if (v0Data && v0Data.configuration) {
+          if (defaultData && defaultData.configuration) {
             configToImport = {
-              ...v0Data.configuration,
+              ...defaultData.configuration,
               ...importedConfig,
             };
           }
@@ -1115,14 +1115,14 @@ const ConfigurationLayout = () => {
         const importedConfig = yaml.load(configFile.content);
 
         if (importedConfig && typeof importedConfig === 'object') {
-          // Ensure v0 is loaded for merging
-          const v0Data = await ensureV0Loaded();
+          // Ensure default is loaded for merging
+          const defaultData = await ensureDefaultLoaded();
 
-          // Merge with v0 defaults to fill in missing fields
+          // Merge with default defaults to fill in missing fields
           let configToImport = importedConfig;
-          if (v0Data && v0Data.configuration) {
+          if (defaultData && defaultData.configuration) {
             configToImport = {
-              ...v0Data.configuration,
+              ...defaultData.configuration,
               ...importedConfig,
             };
           }
