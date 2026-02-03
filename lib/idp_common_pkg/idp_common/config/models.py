@@ -1144,8 +1144,7 @@ class ConfigurationRecord(BaseModel):
     """
 
     configuration_type: str = Field(description="Configuration type (Config, Schema, Pricing)")
-    version: str = Field(default="", description="Version identifier (slugified name for Config; '' for Schema/Pricing)")
-    version_name: Optional[str] = Field(default=None, description="Human-readable version name")
+    version: str = Field(default="", description="Version identifier (slugified name for Config; '' for Schema/Pricing). Also used as display name.")
     is_active: Optional[bool] = Field(default=None, description="Whether this version is active")
     description: Optional[str] = Field(default=None, description="Version description")
     config: Annotated[
@@ -1196,8 +1195,6 @@ class ConfigurationRecord(BaseModel):
             item["IsActive"] = self.is_active
         if self.description is not None:
             item["Description"] = self.description
-        if self.version_name is not None:
-            item["VersionName"] = self.version_name
         
         # Add metadata fields as separate DynamoDB columns
         if self.metadata:
@@ -1250,11 +1247,10 @@ class ConfigurationRecord(BaseModel):
         # Extract record-level fields
         is_active = item.get("IsActive")
         description = item.get("Description")
-        version_name = item.get("VersionName")
 
         # Remove DynamoDB keys and metadata
         config_data = {k: v for k, v in item.items() 
-                      if k not in ("Configuration", "IsActive", "CreatedAt", "UpdatedAt", "Description", "VersionName")}
+                      if k not in ("Configuration", "IsActive", "CreatedAt", "UpdatedAt", "Description")}
 
         # Set config_type discriminator based on configuration type
         if config_type in ("Default", "Custom"):
@@ -1311,7 +1307,6 @@ class ConfigurationRecord(BaseModel):
         return cls(
             configuration_type=config_type,
             version=version,
-            version_name=version_name,
             is_active=is_active,
             description=description,
             config=config,

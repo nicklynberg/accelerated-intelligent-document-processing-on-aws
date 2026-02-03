@@ -3,8 +3,8 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  mutation UpdateConfiguration($versionId: String!, $customConfig: AWSJSON!, $description: String, $versionName: String) {
-    updateConfiguration(versionId: $versionId, customConfig: $customConfig, description: $description, versionName: $versionName) {
+  mutation UpdateConfiguration($versionName: String!, $customConfig: AWSJSON!, $description: String, $versionName: String) {
+    updateConfiguration(versionName: $versionName, customConfig: $customConfig, description: $description, versionName: $versionName) {
       success
       message
       error {

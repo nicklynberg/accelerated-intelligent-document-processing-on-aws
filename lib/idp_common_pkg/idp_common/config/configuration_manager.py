@@ -232,7 +232,6 @@ class ConfigurationManager:
         config: Union[SchemaConfig, IDPConfig, PricingConfig, Dict[str, Any]],
         version: Optional[str] = None,
         description: Optional[str] = None,
-        version_name: Optional[str] = None,
         skip_sync: bool = False,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -327,7 +326,6 @@ class ConfigurationManager:
         record = ConfigurationRecord(
             configuration_type=configuration_type,
             version=version,
-            version_name=version_name,
             is_active=is_active_status,  # Preserve existing active status or None for new
             description=description,
             config=config,
@@ -391,21 +389,20 @@ class ConfigurationManager:
             response = self.table.scan(
                 FilterExpression="begins_with(Configuration, :config_prefix)",
                 ExpressionAttributeValues={":config_prefix": "Config#"},
-                ProjectionExpression="Configuration, IsActive, CreatedAt, UpdatedAt, Description, VersionName"
+                ProjectionExpression="Configuration, IsActive, CreatedAt, UpdatedAt, Description"
             )
             
             versions = []
             for item in response.get('Items', []):
                 config_key = item.get('Configuration', '')
                 if "#" in config_key:
-                    _, version_id = config_key.split("#", 1)
+                    _, version = config_key.split("#", 1)
                     versions.append({
-                        "versionId": version_id,
-                        "versionName": item.get('VersionName'),
+                        "versionName": version,
                         "isActive": item.get('IsActive'),  # Can be None, True, or False
                         "createdAt": item.get('CreatedAt'),
                         "updatedAt": item.get('UpdatedAt'),
-                        "description": item.get('Description', f"Configuration version {version_id}")
+                        "description": item.get('Description', f"Configuration version {version}")
                     })
             
             return versions
@@ -558,7 +555,7 @@ class ConfigurationManager:
             raise
 
     def handle_update_custom_configuration(
-        self, custom_config: Union[str, Dict[str, Any], IDPConfig], version_id: Optional[str] = None, description: Optional[str] = None, version_name: Optional[str] = None
+        self, custom_config: Union[str, Dict[str, Any], IDPConfig], version: Optional[str] = None, description: Optional[str] = None
     ) -> bool:
         """
         Handle the updateConfiguration GraphQL mutation.
@@ -571,7 +568,7 @@ class ConfigurationManager:
         
         Args:
             custom_config: Configuration as JSON string, dict, or IDPConfig
-            version_id: Version to update (default, production-config, test-config, etc.). If None, updates active version.
+            version: Version to update (default, production-config, test-config, etc.). If None, updates active version.
 
         Returns:
             True on success
@@ -599,7 +596,7 @@ class ConfigurationManager:
         
         # Handle reset to default - copy default config to specified version
         if reset_to_default:
-            logger.info(f"Resetting version {version_id} to default")
+            logger.info(f"Resetting version {version} to default")
             
             # Get default configuration
             default_config = self.get_configuration("Config", "default")
@@ -607,8 +604,8 @@ class ConfigurationManager:
                 raise Exception("Cannot reset to default: default configuration not found")
             
             # Save default config to the specified version (no activation change)
-            self.save_configuration("Config", default_config, version=version_id)
-            logger.info(f"Reset version {version_id} to match default")
+            self.save_configuration("Config", default_config, version=version)
+            logger.info(f"Reset version {version} to match default")
             return True
 
         # Additional validation: reject if parsed config is empty dict
@@ -625,10 +622,10 @@ class ConfigurationManager:
         config = IDPConfig(**config_dict)
 
         # Get existing configuration to merge with
-        existing_config = self.get_configuration("Config", version_id)
+        existing_config = self.get_configuration("Config", version)
         if not existing_config or not isinstance(existing_config, IDPConfig):
             # Fallback: If version doesn't exist, use default as base
-            logger.warning(f"Version {version_id} not found, using default as base")
+            logger.warning(f"Version {version} not found, using default as base")
             existing_config = self.get_configuration("Config", "default") or IDPConfig()
 
         # Apply the diff to existing config (deep update to handle nested objects)
@@ -637,32 +634,29 @@ class ConfigurationManager:
         deep_update(existing_dict, update_dict)
         merged_config = IDPConfig(**existing_dict)
 
-        # Handle version name changes - recalculate version ID
-        if version_name:
-            from idp_common.config.merge_utils import slugify
-            new_version_id = slugify(version_name)
-            
-            # If version ID changed, we need to create new version and delete old one
-            if new_version_id != version_id:
-                logger.info(f"Version name changed: moving from {version_id} to {new_version_id}")
+        # Handle version name changes - check if version changed in update
+        if 'version_name' in update_dict:
+            new_version = update_dict['version_name']
+            if new_version != version:
+                logger.info(f"Version name changed: moving from {version} to {new_version}")
                 
-                # Check if new version ID already exists
-                existing_new_version = self.get_configuration("Config", new_version_id)
+                # Check if new version already exists
+                existing_new_version = self.get_configuration("Config", new_version)
                 if existing_new_version:
-                    raise Exception(f"Cannot rename: version '{new_version_id}' already exists")
+                    raise Exception(f"Cannot rename: version '{new_version}' already exists")
                 
-                # Save to new version ID
-                self.save_configuration("Config", merged_config, version=new_version_id, description=description, version_name=version_name)
+                # Save to new version
+                self.save_configuration("Config", merged_config, version=new_version, description=description)
                 
                 # Delete old version
-                self.delete_configuration("Config", version_id)
+                self.delete_configuration("Config", version)
                 
-                logger.info(f"Successfully moved version from {version_id} to {new_version_id}")
+                logger.info(f"Successfully moved version from {version} to {new_version}")
                 return True
         
-        # Save updated configuration (same version ID)
-        self.save_configuration("Config", merged_config, version=version_id, description=description, version_name=version_name)
-        logger.info(f"Updated Config version {version_id or 'active'} by merging diff")
+        # Save updated configuration (same version)
+        self.save_configuration("Config", merged_config, version=version, description=description)
+        logger.info(f"Updated Config version {version or 'active'} by merging diff")
 
         return True
 

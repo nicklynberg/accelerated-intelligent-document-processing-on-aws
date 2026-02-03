@@ -14,12 +14,29 @@ from pydantic import ValidationError
 import os
 import json
 import logging
+import re
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 logging.getLogger("idp_common.bedrock.client").setLevel(
     os.environ.get("BEDROCK_LOG_LEVEL", "INFO")
 )
+
+
+def validate_version_name(name):
+    """Validate version name: alphanumeric, hyphens, underscores only, max 50 chars"""
+    if not name or not isinstance(name, str):
+        return False
+    return re.match(r'^[a-zA-Z0-9-_]+$', name) and len(name) <= 50
+
+
+def validate_description(description):
+    """Validate description: max 200 chars only"""
+    if description is None or description == "":
+        return True  # Optional field
+    if not isinstance(description, str):
+        return False
+    return len(description) <= 200
 
 
 def handler(event, context):
@@ -59,19 +76,18 @@ def handler(event, context):
             return handle_get_config_versions(manager)
         elif operation == "getConfigVersion":
             args = event["arguments"]
-            version_id = args.get("versionId")
-            return handle_get_config_version(manager, version_id)
+            version = args.get("versionName")
+            return handle_get_config_version(manager, version)
         elif operation == "updateConfiguration":
             args = event["arguments"]
-            version_id = args.get("versionId")
+            version = args.get("versionName")
             custom_config = args.get("customConfig")
             description = args.get("description")
-            version_name = args.get("versionName")
-            return handle_update_configuration(manager, version_id, custom_config, description, version_name)
+            return handle_update_configuration(manager, custom_config, version, description)
         elif operation == "setActiveVersion":
             args = event["arguments"]
-            version_id = args.get("versionId")
-            return handle_set_active_version(manager, version_id)
+            version = args.get("versionName")
+            return handle_set_active_version(manager, version)
         elif operation == "saveAsNewVersion":
             args = event["arguments"]
             configuration = args.get("configuration")
@@ -80,8 +96,8 @@ def handler(event, context):
             return handle_save_as_new_version(manager, configuration, version_name, description)
         elif operation == "deleteConfigVersion":
             args = event["arguments"]
-            version_id = args.get("versionId")
-            return handle_delete_config_version(manager, version_id)
+            version = args.get("versionName")
+            return handle_delete_config_version(manager, version)
         elif operation == "getPricing":
             return handle_get_pricing(manager)
         elif operation == "updatePricing":
@@ -595,13 +611,13 @@ def handle_get_config_versions(manager):
         }
 
 
-def handle_get_config_version(manager, version_id):
+def handle_get_config_version(manager, version):
     """
     Handle the getConfigVersion GraphQL query
     Returns a specific configuration version
     """
     try:
-        if not version_id:
+        if not version:
             return {
                 "success": False,
                 "error": {
@@ -618,14 +634,14 @@ def handle_get_config_version(manager, version_id):
             schema_dict = {}
         
         # Get the requested version directly
-        config = manager.get_configuration("Config", version_id)
+        config = manager.get_configuration("Config", version)
         
         if not config:
             return {
                 "success": False,
                 "error": {
                     "type": "NotFoundError",
-                    "message": f"Configuration version '{version_id}' not found",
+                    "message": f"Configuration version '{version}' not found",
                 },
             }
         
@@ -651,13 +667,13 @@ def handle_get_config_version(manager, version_id):
         }
 
 
-def handle_update_configuration(manager, version_id, custom_config, description=None, version_name=None):
+def handle_update_configuration(manager, custom_config, version, description=None):
     """
     Handle the updateConfiguration GraphQL mutation
     Updates a specific configuration version
     """
     try:
-        if not version_id:
+        if not version:
             return {
                 "success": False,
                 "error": {
@@ -666,14 +682,34 @@ def handle_update_configuration(manager, version_id, custom_config, description=
                 },
             }
         
+        # Validate version name if provided
+        if version_name and not validate_version_name(version_name):
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "Version name can only contain letters, numbers, hyphens, and underscores (max 50 characters)",
+                },
+            }
+        
+        # Validate description if provided
+        if description and not validate_description(description):
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "Description cannot exceed 200 characters",
+                },
+            }
+        
         # Update the specific version
-        success = manager.handle_update_custom_configuration(custom_config, version_id, description, version_name)
+        success = manager.handle_update_custom_configuration(custom_config, version, description, version_name)
         
         return {
             "success": success,
-            "message": f"Configuration version {version_id} updated successfully"
+            "message": f"Configuration version {version} updated successfully"
             if success
-            else f"Failed to update configuration version {version_id}",
+            else f"Failed to update configuration version {version}",
         }
         
     except Exception as e:
@@ -687,13 +723,13 @@ def handle_update_configuration(manager, version_id, custom_config, description=
         }
 
 
-def handle_set_active_version(manager, version_id):
+def handle_set_active_version(manager, version):
     """
     Handle the setActiveVersion GraphQL mutation
     Sets a specific version as active and deactivates others
     """
     try:
-        if not version_id:
+        if not version:
             return {
                 "success": False,
                 "error": {
@@ -703,22 +739,22 @@ def handle_set_active_version(manager, version_id):
             }
         
         # Check if the version exists
-        config = manager.get_configuration("Config", version_id)
+        config = manager.get_configuration("Config", version)
         if not config:
             return {
                 "success": False,
                 "error": {
                     "type": "NotFoundError",
-                    "message": f"Configuration version '{version_id}' not found",
+                    "message": f"Configuration version '{version}' not found",
                 },
             }
         
         # Set the version as active
-        manager.activate_version(version_id)
+        manager.activate_version(version)
         
         return {
             "success": True,
-            "message": f"Configuration version {version_id} set as active",
+            "message": f"Configuration version {version} set as active",
         }
         
     except Exception as e:
@@ -740,7 +776,6 @@ def handle_save_as_new_version(manager, configuration, version_name, description
     try:
         import json
         import datetime
-        from idp_common.config.merge_utils import slugify
         
         if not configuration:
             return {
@@ -760,8 +795,28 @@ def handle_save_as_new_version(manager, configuration, version_name, description
                 },
             }
         
-        # Generate version ID from version name
-        version_id = slugify(version_name)
+        # Validate version name
+        if not validate_version_name(version_name):
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "Version name can only contain letters, numbers, hyphens, and underscores (max 50 characters)",
+                },
+            }
+        
+        # Validate description if provided
+        if description and not validate_description(description):
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "Description cannot exceed 200 characters",
+                },
+            }
+        
+        # Use version name directly as the version identifier
+        version = version_name
         timestamp = datetime.datetime.utcnow().isoformat() + "Z"
         
         # Parse configuration
@@ -777,12 +832,12 @@ def handle_save_as_new_version(manager, configuration, version_name, description
         }
         
         # Save new version (no activation)
-        manager.save_configuration("Config", config_data, version=version_id, description=description or f"Configuration: {version_name}", version_name=version_name, metadata=metadata)
+        manager.save_configuration("Config", config_data, version=version, description=description or f"Configuration: {version_name}", metadata=metadata)
         
         return {
             "success": True,
-            "message": f"Configuration saved as {version_name} ({version_id})",
-            "versionId": version_id,
+            "message": f"Configuration saved as {version_name}",
+            "versionName": version,
         }
         
     except Exception as e:
@@ -794,13 +849,13 @@ def handle_save_as_new_version(manager, configuration, version_name, description
                 "message": str(e),
             },
         }
-def handle_delete_config_version(manager, version_id):
+def handle_delete_config_version(manager, version):
     """
     Handle the deleteConfigVersion GraphQL mutation
     Deletes a specific configuration version
     """
     try:
-        if not version_id:
+        if not version:
             return {
                 "success": False,
                 "error": {
@@ -810,7 +865,7 @@ def handle_delete_config_version(manager, version_id):
             }
         
         # Prevent deletion of system default version
-        if version_id == "default":
+        if version == "default":
             return {
                 "success": False,
                 "error": {
@@ -820,13 +875,13 @@ def handle_delete_config_version(manager, version_id):
             }
         
         # Check if the version exists
-        config = manager.get_configuration("Config", version_id)
+        config = manager.get_configuration("Config", version)
         if not config:
             return {
                 "success": False,
                 "error": {
                     "type": "NotFoundError",
-                    "message": f"Configuration version '{version_id}' not found",
+                    "message": f"Configuration version '{version}' not found",
                 },
             }
         
@@ -834,7 +889,7 @@ def handle_delete_config_version(manager, version_id):
         versions = manager.list_config_versions()
         active_version = next((v for v in versions if v.get("isActive")), None)
         
-        if active_version and active_version.get("versionId") == version_id:
+        if active_version and active_version.get("versionId") == version:
             return {
                 "success": False,
                 "error": {
@@ -844,11 +899,11 @@ def handle_delete_config_version(manager, version_id):
             }
         
         # Delete the version
-        manager.delete_configuration("Config", version_id)
+        manager.delete_configuration("Config", version)
         
         return {
             "success": True,
-            "message": f"Configuration version {version_id} deleted successfully",
+            "message": f"Configuration version {version} deleted successfully",
         }
         
     except Exception as e:

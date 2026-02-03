@@ -3,8 +3,8 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  mutation SetActiveVersion($versionId: String!) {
-    setActiveVersion(versionId: $versionId) {
+  mutation SetActiveVersion($versionName: String!) {
+    setActiveVersion(versionName: $versionName) {
       success
       message
       error {

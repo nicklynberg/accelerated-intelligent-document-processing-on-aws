@@ -74,9 +74,10 @@ def handler(event, context):
             {'Content-Type': content_type}
         ]
         
-        # Add version as metadata instead of filename suffix
+        # Add version as metadata
         if version:
             fields['x-amz-meta-config-version'] = version
+            conditions.append({'x-amz-meta-config-version': version})
         
         presigned_post = s3_client.generate_presigned_post(
             Bucket=bucket_name,

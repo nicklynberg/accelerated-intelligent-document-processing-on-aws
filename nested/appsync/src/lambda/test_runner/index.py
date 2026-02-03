@@ -22,6 +22,11 @@ def handler(event, context):
         input_data = event['arguments']['input']
         test_set_id = input_data['testSetId']
         test_context = input_data.get('context', '')
+        
+        # Validate context length
+        if test_context and len(test_context) > 500:
+            raise Exception("Context cannot exceed 500 characters")
+        
         number_of_files = input_data.get('numberOfFiles')
         config_version = input_data.get('configVersion')
         tracking_table = os.environ['TRACKING_TABLE']

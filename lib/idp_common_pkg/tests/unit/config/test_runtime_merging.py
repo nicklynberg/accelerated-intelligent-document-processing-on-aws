@@ -16,14 +16,14 @@ def test_get_configuration_calls_merge_for_non_v0():
 
     # Mock the DynamoDB response properly
     mock_table.get_item.return_value = {
-        'Item': {
-            'Configuration': 'Config#v1',
-            'VersionName': 'test-version',
-            'IsActive': False,
-            'Description': 'Test description',
-            'Config': {'notes': 'test-config'},
-            'CreatedAt': '2024-01-01T00:00:00Z',
-            'UpdatedAt': '2024-01-01T00:00:00Z'
+        "Item": {
+            "Configuration": "Config#v1",
+            "VersionName": "test-version",
+            "IsActive": False,
+            "Description": "Test description",
+            "Config": {"notes": "test-config"},
+            "CreatedAt": "2024-01-01T00:00:00Z",
+            "UpdatedAt": "2024-01-01T00:00:00Z",
         }
     }
 

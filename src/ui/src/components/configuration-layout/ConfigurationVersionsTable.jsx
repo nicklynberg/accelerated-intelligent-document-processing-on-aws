@@ -33,16 +33,16 @@ const ConfigurationVersionsTable = ({
           onChange={(e) => {
             if (e.target.checked) {
               // Select all versions
-              const allVersionIds = versions.map((v) => v.versionId);
-              allVersionIds.forEach((versionId) => {
-                if (!selectedVersionsForCompare.includes(versionId)) {
-                  onVersionSelectForCompare?.(versionId, true);
+              const allVersionNames = versions.map((v) => v.versionName);
+              allVersionNames.forEach((versionName) => {
+                if (!selectedVersionsForCompare.includes(versionName)) {
+                  onVersionSelectForCompare?.(versionName, true);
                 }
               });
             } else {
               // Deselect all versions
-              selectedVersionsForCompare.forEach((versionId) => {
-                onVersionSelectForCompare?.(versionId, false);
+              selectedVersionsForCompare.forEach((versionName) => {
+                onVersionSelectForCompare?.(versionName, false);
               });
             }
           }}
@@ -52,58 +52,54 @@ const ConfigurationVersionsTable = ({
       cell: (item) => (
         <input
           type="checkbox"
-          checked={selectedVersionsForCompare.includes(item.versionId)}
-          onChange={(e) => onVersionSelectForCompare?.(item.versionId, e.target.checked)}
+          checked={selectedVersionsForCompare.includes(item.versionName)}
+          onChange={(e) => onVersionSelectForCompare?.(item.versionName, e.target.checked)}
         />
       ),
       width: 80,
-    },
-    {
-      id: 'versionId',
-      header: 'Version ID',
-      cell: (item) => (
-        <Link
-          href="#"
-          onFollow={(event) => {
-            event.preventDefault();
-            onVersionSelect?.(item.versionId);
-          }}
-        >
-          {item.versionId}
-        </Link>
-      ),
-      sortingField: 'versionId',
     },
     {
       id: 'versionName',
       header: 'Version Name',
       cell: (item) => (
         <Box
-          fontWeight={item.isActive || item.versionId === currentlyOpenVersion ? 'bold' : 'normal'}
-          color={item.isActive ? 'text-status-success' : item.versionId === currentlyOpenVersion ? 'text-status-info' : 'inherit'}
+          fontWeight={item.isActive || item.versionName === currentlyOpenVersion ? 'bold' : 'normal'}
+          color={item.isActive ? 'text-status-success' : item.versionName === currentlyOpenVersion ? 'text-status-info' : 'inherit'}
         >
-          {item.versionName || item.versionId}
+          <Link
+            href="#"
+            onFollow={(event) => {
+              event.preventDefault();
+              onVersionSelect?.(item.versionName);
+            }}
+          >
+            {item.versionName}
+          </Link>
           {item.isActive && ' (Active)'}
         </Box>
       ),
       sortingField: 'versionName',
+      width: '25%',
     },
     {
       id: 'description',
       header: 'Description',
       cell: (item) => item.description || '-',
+      width: '25%',
     },
     {
       id: 'createdAt',
       header: 'Created',
       cell: (item) => (item.createdAt ? new Date(item.createdAt).toLocaleString() : '-'),
       sortingField: 'createdAt',
+      width: '25%',
     },
     {
       id: 'updatedAt',
       header: 'Updated',
       cell: (item) => (item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '-'),
       sortingField: 'updatedAt',
+      width: '25%',
     },
   ];
 
@@ -111,7 +107,7 @@ const ConfigurationVersionsTable = ({
     pagination: { pageSize: 5 },
     sorting: {
       defaultState: {
-        sortingColumn: columnDefinitions[3], // Sort by updatedAt by default
+        sortingColumn: columnDefinitions.find((col) => col.header === 'Updated'),
         isDescending: true,
       },
     },
@@ -169,14 +165,14 @@ const ConfigurationVersionsTable = ({
               <Button
                 onClick={() => onActivateVersion?.(selectedVersionsForCompare[0])}
                 disabled={
-                  selectedVersionsForCompare.length !== 1 || versions.find((v) => v.versionId === selectedVersionsForCompare[0])?.isActive
+                  selectedVersionsForCompare.length !== 1 || versions.find((v) => v.versionName === selectedVersionsForCompare[0])?.isActive
                 }
               >
                 Activate
               </Button>
               <Button
                 onClick={() => {
-                  const selectedVersion = versions.find((v) => v.versionId === selectedVersionsForCompare[0]);
+                  const selectedVersion = versions.find((v) => v.versionName === selectedVersionsForCompare[0]);
                   onEditVersion?.(selectedVersion);
                 }}
                 disabled={selectedVersionsForCompare.length !== 1}
@@ -192,7 +188,7 @@ const ConfigurationVersionsTable = ({
                 disabled={
                   selectedVersionsForCompare.length === 0 ||
                   selectedVersionsForCompare.some((vId) => {
-                    const version = versions.find((v) => v.versionId === vId);
+                    const version = versions.find((v) => v.versionName === vId);
                     return version?.isActive || vId === 'default';
                   })
                 }
@@ -214,8 +210,7 @@ const ConfigurationVersionsTable = ({
 ConfigurationVersionsTable.propTypes = {
   versions: PropTypes.arrayOf(
     PropTypes.shape({
-      versionId: PropTypes.string.isRequired,
-      versionName: PropTypes.string,
+      versionName: PropTypes.string.isRequired,
       isActive: PropTypes.bool,
       createdAt: PropTypes.string,
       updatedAt: PropTypes.string,

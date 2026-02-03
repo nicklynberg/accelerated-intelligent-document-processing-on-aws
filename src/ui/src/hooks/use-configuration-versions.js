@@ -52,11 +52,11 @@ const useConfigurationVersions = () => {
     }
   };
 
-  const fetchVersion = async (versionId) => {
+  const fetchVersion = async (versionName) => {
     try {
       const result = await client.graphql({
         query: getConfigVersionQuery,
-        variables: { versionId },
+        variables: { versionName },
       });
       const response = result.data.getConfigVersion;
 
@@ -98,11 +98,11 @@ const useConfigurationVersions = () => {
     }
   };
 
-  const setActiveVersion = async (versionId) => {
+  const setActiveVersion = async (versionName) => {
     try {
       const result = await client.graphql({
         query: setActiveVersionMutation,
-        variables: { versionId },
+        variables: { versionName },
       });
       const response = result.data.setActiveVersion;
 
@@ -146,11 +146,11 @@ const useConfigurationVersions = () => {
     }
   };
 
-  const deleteVersion = async (versionId, skipRefresh = false) => {
+  const deleteVersion = async (versionName, skipRefresh = false) => {
     try {
       const result = await client.graphql({
         query: deleteConfigVersionMutation,
-        variables: { versionId },
+        variables: { versionName },
       });
       const response = result.data?.deleteConfigVersion;
 

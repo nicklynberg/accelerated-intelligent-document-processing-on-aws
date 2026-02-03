@@ -57,15 +57,15 @@ const CompareVersionsContent = ({ selectedVersions, versions }) => {
       const data = {};
 
       try {
-        for (const versionId of selectedVersions) {
+        for (const versionName of selectedVersions) {
           const result = await client.graphql({
             query: getConfigVersionQuery,
-            variables: { versionId },
+            variables: { versionName },
           });
 
           if (result.data.getConfigVersion.success) {
-            const versionInfo = versions.find((v) => v.versionId === versionId);
-            data[versionId] = {
+            const versionInfo = versions.find((v) => v.versionName === versionName);
+            data[versionName] = {
               configuration: JSON.parse(result.data.getConfigVersion.Configuration || '{}'),
               isActive: versionInfo?.isActive || false,
             };
@@ -115,8 +115,8 @@ const CompareVersionsContent = ({ selectedVersions, versions }) => {
       });
     };
 
-    selectedVersions.forEach((versionId) => {
-      getAllPaths(versionData[versionId]?.configuration);
+    selectedVersions.forEach((versionName) => {
+      getAllPaths(versionData[versionName]?.configuration);
     });
 
     // Filter out parent paths if child paths exist
@@ -129,9 +129,9 @@ const CompareVersionsContent = ({ selectedVersions, versions }) => {
     filteredPaths.forEach((path) => {
       const values = {};
 
-      selectedVersions.forEach((versionId) => {
-        const value = getValueByPath(versionData[versionId]?.configuration, path);
-        values[versionId] = value;
+      selectedVersions.forEach((versionName) => {
+        const value = getValueByPath(versionData[versionName]?.configuration, path);
+        values[versionName] = value;
       });
 
       // Check if values are different
@@ -175,11 +175,11 @@ const CompareVersionsContent = ({ selectedVersions, versions }) => {
         isRowHeader: true,
         width: `${columnWidth}%`,
       },
-      ...selectedVersions.map((versionId) => ({
-        id: versionId,
-        header: `${versionId} ${versionData[versionId]?.isActive ? '(Active)' : ''}`,
+      ...selectedVersions.map((versionName) => ({
+        id: versionName,
+        header: `${versionName} ${versionData[versionName]?.isActive ? '(Active)' : ''}`,
         cell: (item) => {
-          const value = item.values[versionId];
+          const value = item.values[versionName];
           return (
             <Box variant="code" fontSize="body-s">
               {value === undefined ? '(undefined)' : JSON.stringify(value)}
@@ -227,7 +227,7 @@ CompareVersionsContent.propTypes = {
   selectedVersions: PropTypes.arrayOf(PropTypes.string).isRequired,
   versions: PropTypes.arrayOf(
     PropTypes.shape({
-      versionId: PropTypes.string.isRequired,
+      versionName: PropTypes.string.isRequired,
       isActive: PropTypes.bool,
     }),
   ).isRequired,
@@ -345,8 +345,8 @@ const ConfigurationLayout = () => {
   const isPattern2 = settings?.IDPPattern?.includes('Pattern2');
 
   // Validation functions
-  const validateVersionName = (name) => /^[a-zA-Z0-9-_]+$/.test(name);
-  const validateDescription = (desc) => /^[a-zA-Z0-9\s-_:]*$/.test(desc);
+  const validateVersionName = (name) => /^[a-zA-Z0-9-_]+$/.test(name) && name.length <= 50;
+  const validateDescription = (desc) => desc.length <= 200;
 
   // Validate the current content based on view mode
   const validateCurrentContent = () => {
@@ -466,13 +466,13 @@ const ConfigurationLayout = () => {
   };
 
   // Handle version selection
-  const handleVersionSelect = async (versionId) => {
+  const handleVersionSelect = async (versionName) => {
     try {
       setLoadingVersion(true);
       setSaveError(null); // Clear any previous errors
-      console.log('Loading version:', versionId);
+      console.log('Loading version:', versionName);
 
-      const versionData = await fetchVersion(versionId);
+      const versionData = await fetchVersion(versionName);
       console.log('Version data received:', versionData);
 
       if (versionData && versionData.configuration) {
@@ -492,9 +492,9 @@ const ConfigurationLayout = () => {
 
         console.log('Parsed config:', config);
 
-        setSelectedVersion(versionId);
+        setSelectedVersion(versionName);
         // Get the version data with isActive status from the versions list
-        const versionFromList = versions.find((v) => v.versionId === versionId);
+        const versionFromList = versions.find((v) => v.versionName === versionName);
         const versionDataWithStatus = { ...versionData, isActive: versionFromList?.isActive };
         setSelectedVersionData(versionDataWithStatus);
         setFormValues(config);
@@ -504,7 +504,7 @@ const ConfigurationLayout = () => {
         setSaveError(null);
 
         // Load default for comparison if not already loaded and not selecting default
-        if (versionId !== 'default' && !defaultVersionData) {
+        if (versionName !== 'default' && !defaultVersionData) {
           try {
             const defaultData = await fetchVersion('default');
             if (defaultData && defaultData.configuration) {
@@ -521,7 +521,7 @@ const ConfigurationLayout = () => {
           }
         }
 
-        console.log('State set - selectedVersion:', versionId);
+        console.log('State set - selectedVersion:', versionName);
         console.log('State set - formValues:', config);
 
         if (config.classes) {
@@ -574,7 +574,7 @@ const ConfigurationLayout = () => {
 
       if (versionParam && versions.length > 0) {
         // Check if the version exists in the versions list
-        const versionExists = versions.find((v) => v.versionId === versionParam);
+        const versionExists = versions.find((v) => v.versionName === versionParam);
         if (versionExists) {
           console.log('Auto-selecting version from URL:', versionParam);
           // Auto-select the version from URL parameter
@@ -585,8 +585,8 @@ const ConfigurationLayout = () => {
       // Auto-open active version when no URL parameter is provided
       const activeVersion = versions.find((v) => v.isActive);
       if (activeVersion) {
-        console.log('Auto-opening active version:', activeVersion.versionId);
-        handleVersionSelect(activeVersion.versionId);
+        console.log('Auto-opening active version:', activeVersion.versionName);
+        handleVersionSelect(activeVersion.versionName);
       }
     }
   }, [versions]);
@@ -605,8 +605,8 @@ const ConfigurationLayout = () => {
   };
 
   // Handle bulk activate version
-  const handleBulkActivateVersion = async (versionId) => {
-    setVersionToActivate(versionId);
+  const handleBulkActivateVersion = async (versionName) => {
+    setVersionToActivate(versionName);
     setShowActivateModal(true);
   };
 
@@ -697,7 +697,7 @@ const ConfigurationLayout = () => {
       setSaveSuccess(true);
       setShowVersionConfirmationModal(true);
       setConfirmationModalType('import');
-      setNewlyCreatedVersionId(result?.versionId || 'Unknown');
+      setNewlyCreatedVersionId(result?.versionName || 'Unknown');
       await fetchVersions();
     } catch (error) {
       console.error('Create version error:', error);
@@ -727,11 +727,11 @@ const ConfigurationLayout = () => {
   };
 
   // Handle edit version
-  const handleEditVersion = (selectedVersion) => {
-    const versionToEdit = versions.find((v) => v.versionId === selectedVersion.versionId);
-    setEditingVersionId(selectedVersion.versionId);
+  const handleEditVersion = (versionToEdit) => {
+    const version = versions.find((v) => v.versionName === versionToEdit.versionName);
+    setEditingVersionId(versionToEdit.versionName);
     setEditingDescription('');
-    setEditingVersionName(selectedVersion.versionName || selectedVersion.versionId);
+    setEditingVersionName(versionToEdit.versionName);
     setEditingError(null); // Clear any previous errors
     setShowEditDescriptionModal(true);
   };
@@ -748,7 +748,7 @@ const ConfigurationLayout = () => {
       console.log('Current versions in memory:', versions);
       console.log(
         'Selected version being edited:',
-        versions.find((v) => v.versionId === editingVersionId),
+        versions.find((v) => v.versionName === editingVersionId),
       );
       console.log('===============================');
 
@@ -767,8 +767,8 @@ const ConfigurationLayout = () => {
   };
 
   // Handle bulk delete versions - show confirmation dialog
-  const handleBulkDeleteVersions = async (versionIds) => {
-    setVersionsToDelete(versionIds);
+  const handleBulkDeleteVersions = async (versionNames) => {
+    setVersionsToDelete(versionNames);
     setShowBulkDeleteModal(true);
   };
 
@@ -778,8 +778,8 @@ const ConfigurationLayout = () => {
       // Format deleted versions for display
       const deletedVersionsWithDesc = versionsToDelete;
 
-      for (const versionId of versionsToDelete) {
-        await deleteVersion(versionId, true); // Skip refresh for each delete
+      for (const versionName of versionsToDelete) {
+        await deleteVersion(versionName, true); // Skip refresh for each delete
       }
 
       // Refresh once after all deletions
@@ -817,11 +817,11 @@ const ConfigurationLayout = () => {
   };
 
   // Handle version selection for comparison
-  const handleVersionSelectForCompare = (versionId, selected) => {
+  const handleVersionSelectForCompare = (versionName, selected) => {
     if (selected) {
-      setSelectedVersionsForCompare((prev) => [...prev, versionId]);
+      setSelectedVersionsForCompare((prev) => [...prev, versionName]);
     } else {
-      setSelectedVersionsForCompare((prev) => prev.filter((v) => v !== versionId));
+      setSelectedVersionsForCompare((prev) => prev.filter((v) => v !== versionName));
     }
   };
 
@@ -869,7 +869,7 @@ const ConfigurationLayout = () => {
       setShowVersionConfirmationModal(true);
       setConfirmationModalType('save');
       // Store the new version ID and description for the confirmation dialog
-      setNewlyCreatedVersionId(result?.versionId || 'Unknown');
+      setNewlyCreatedVersionId(result?.versionName || 'Unknown');
       // Refresh versions list
       await fetchVersions();
     } catch (error) {
@@ -1317,21 +1317,19 @@ const ConfigurationLayout = () => {
       <SpaceBetween size="l">
         {/* Versions Table - Collapsed by default */}
         <ExpandableSection headerText="Configuration Versions" defaultExpanded={false}>
-          <Container>
-            <ConfigurationVersionsTable
-              versions={versions}
-              loading={versionsLoading}
-              onVersionSelect={handleVersionSelect}
-              selectedVersionsForCompare={selectedVersionsForCompare}
-              currentlyOpenVersion={selectedVersion}
-              onVersionSelectForCompare={handleVersionSelectForCompare}
-              onCompareVersions={handleCompareVersions}
-              onActivateVersion={handleBulkActivateVersion}
-              onDeleteVersions={handleBulkDeleteVersions}
-              onImportAsNewVersion={handleImportAsNewVersion}
-              onEditVersion={handleEditVersion}
-            />
-          </Container>
+          <ConfigurationVersionsTable
+            versions={versions}
+            loading={versionsLoading}
+            onVersionSelect={handleVersionSelect}
+            selectedVersionsForCompare={selectedVersionsForCompare}
+            currentlyOpenVersion={selectedVersion}
+            onVersionSelectForCompare={handleVersionSelectForCompare}
+            onCompareVersions={handleCompareVersions}
+            onActivateVersion={handleBulkActivateVersion}
+            onDeleteVersions={handleBulkDeleteVersions}
+            onImportAsNewVersion={handleImportAsNewVersion}
+            onEditVersion={handleEditVersion}
+          />
         </ExpandableSection>
 
         {/* Loading state for selected version */}
@@ -1375,11 +1373,11 @@ const ConfigurationLayout = () => {
                       onClick={() => {
                         // Set default filename based on selected version
                         if (selectedVersionData) {
-                          const versionId = selectedVersionData.versionId || selectedVersion;
+                          const versionName = selectedVersionData.versionName || selectedVersion;
                           // Get description from versions array, not selectedVersionData
-                          const versionFromList = versions.find((v) => v.versionId === versionId);
+                          const versionFromList = versions.find((v) => v.versionName === versionName);
                           const description = versionFromList?.description;
-                          let filename = description ? `${versionId}_${description}` : versionId;
+                          let filename = description ? `${versionName}_${description}` : versionName;
                           // Sanitize filename: remove/replace special characters and spaces, clean up multiple underscores
                           filename = filename
                             .replace(/[^a-zA-Z0-9._]/g, '_') // Replace special chars with underscore
@@ -1409,8 +1407,8 @@ const ConfigurationLayout = () => {
                     </Button>
                     <Button
                       onClick={() => {
-                        const currentVersionData = versions.find((v) => v.versionId === selectedVersion);
-                        const currentVersionName = currentVersionData?.versionName || currentVersionData?.versionId;
+                        const currentVersionData = versions.find((v) => v.versionName === selectedVersion);
+                        const currentVersionName = currentVersionData?.versionName || currentVersionData?.versionName;
                         const defaultVersionName = currentVersionName ? `${currentVersionName} - Copy` : `${selectedVersion} - Copy`;
                         setNewVersionName(defaultVersionName);
                         setShowSaveAsNewModal(true);
@@ -1431,7 +1429,7 @@ const ConfigurationLayout = () => {
               >
                 Configuration Version (
                 {(() => {
-                  const currentVersionData = versions.find((v) => v.versionId === selectedVersion);
+                  const currentVersionData = versions.find((v) => v.versionName === selectedVersion);
                   return currentVersionData?.versionName || selectedVersion;
                 })()}
                 )
@@ -1647,8 +1645,8 @@ const ConfigurationLayout = () => {
             value={newVersionName}
             onChange={({ detail }) => setNewVersionName(detail.value)}
             placeholder={(() => {
-              const currentVersionData = versions.find((v) => v.versionId === selectedVersion);
-              const currentVersionName = currentVersionData?.versionName || currentVersionData?.versionId;
+              const currentVersionData = versions.find((v) => v.versionName === selectedVersion);
+              const currentVersionName = currentVersionData?.versionName || currentVersionData?.versionName;
               return currentVersionName ? `${currentVersionName} - Copy` : `${selectedVersion} - Copy`;
             })()}
           />
@@ -1904,7 +1902,7 @@ const ConfigurationLayout = () => {
             label="Version Name"
             errorText={
               editingVersionName && !validateVersionName(editingVersionName)
-                ? 'Version name can only contain letters, numbers, hyphens, and underscores'
+                ? 'Version name can only contain letters, numbers, hyphens, and underscores (max 50 characters)'
                 : ''
             }
           >
@@ -1920,11 +1918,7 @@ const ConfigurationLayout = () => {
           </FormField>
           <FormField
             label="Description"
-            errorText={
-              editingDescription && !validateDescription(editingDescription)
-                ? 'Description can only contain letters, numbers, spaces, hyphens, underscores, and colons'
-                : ''
-            }
+            errorText={editingDescription && !validateDescription(editingDescription) ? 'Description cannot exceed 200 characters' : ''}
           >
             <Input
               value={editingDescription}
@@ -2005,7 +1999,7 @@ const ConfigurationLayout = () => {
             label="Version Name"
             errorText={
               newVersionName && !validateVersionName(newVersionName)
-                ? 'Version name can only contain letters, numbers, hyphens, and underscores'
+                ? 'Version name can only contain letters, numbers, hyphens, and underscores (max 50 characters)'
                 : ''
             }
           >
@@ -2020,9 +2014,7 @@ const ConfigurationLayout = () => {
           <FormField
             label="Version Description (Optional)"
             errorText={
-              newVersionDescription && !validateDescription(newVersionDescription)
-                ? 'Description can only contain letters, numbers, spaces, hyphens, underscores, and colons'
-                : ''
+              newVersionDescription && !validateDescription(newVersionDescription) ? 'Description cannot exceed 200 characters' : ''
             }
           >
             <Input

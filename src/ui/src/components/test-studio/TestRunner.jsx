@@ -30,8 +30,8 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
       const activeVersion = versions.find((v) => v.isActive);
       if (activeVersion) {
         const versionOption = {
-          label: `${activeVersion.versionName || activeVersion.versionId} (Active)`,
-          value: activeVersion.versionId,
+          label: `${activeVersion.versionName} (Active)`,
+          value: activeVersion.versionName,
         };
         setSelectedVersion(versionOption);
       }
@@ -42,11 +42,11 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
   React.useEffect(() => {
     if (selectedTestSet && selectedVersion) {
       const testSetName = selectedTestSet.label.split(' - ')[0]; // Extract name without file count
-      const versionId = selectedVersion.value; // Use value instead of label to avoid "(Active)"
+      const versionName = selectedVersion.value; // Use value instead of label to avoid "(Active)"
       const testSetData = testSets.find((ts) => ts.id === selectedTestSet.value);
       const totalFiles = testSetData?.fileCount || 0;
       const filesToProcess = numberOfFiles.trim() ? parseInt(numberOfFiles.trim(), 10) : totalFiles;
-      const defaultContext = `Test set: ${testSetName} using version (${versionId}) with ${filesToProcess} files`;
+      const defaultContext = `Test set: ${testSetName} using version (${versionName}) with ${filesToProcess} files`;
       setContext(defaultContext);
     }
   }, [selectedTestSet, selectedVersion, testSets, numberOfFiles]);
@@ -203,8 +203,8 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
             selectedOption={selectedVersion}
             onChange={({ detail }) => setSelectedVersion(detail.selectedOption)}
             options={versions.map((version) => ({
-              label: version.isActive ? `${version.versionName || version.versionId} (Active)` : version.versionName || version.versionId,
-              value: version.versionId,
+              label: version.isActive ? `${version.versionName} (Active)` : version.versionName,
+              value: version.versionName,
             }))}
             placeholder={versions.length === 0 ? 'Loading versions...' : 'Select configuration version'}
             disabled={loading || versions.length === 0}
@@ -253,12 +253,17 @@ const TestRunner = ({ onTestStart, onTestComplete, activeTestRuns }) => {
           />
         </FormField>
 
-        <FormField label="Context" description="Optional context information for this test run">
+        <FormField
+          label="Context"
+          description="Optional context information for this test run"
+          errorText={context && context.length > 500 ? 'Context cannot exceed 500 characters' : ''}
+        >
           <Textarea
             value={context}
             onChange={({ detail }) => setContext(detail.value)}
             placeholder="Enter context information..."
             rows={2}
+            invalid={context && context.length > 500}
           />
         </FormField>
       </SpaceBetween>

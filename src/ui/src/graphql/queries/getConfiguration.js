@@ -3,8 +3,8 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  query GetConfigVersion($versionId: String!) {
-    getConfigVersion(versionId: $versionId) {
+  query GetConfigVersion($versionName: String!) {
+    getConfigVersion(versionName: $versionName) {
       success
       Schema
       Configuration

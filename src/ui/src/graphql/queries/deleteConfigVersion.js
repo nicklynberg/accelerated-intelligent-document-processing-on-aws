@@ -3,8 +3,8 @@
 import gql from 'graphql-tag';
 
 export default gql`
-  mutation DeleteConfigVersion($versionId: String!) {
-    deleteConfigVersion(versionId: $versionId) {
+  mutation DeleteConfigVersion($versionName: String!) {
+    deleteConfigVersion(versionName: $versionName) {
       success
       message
       error {

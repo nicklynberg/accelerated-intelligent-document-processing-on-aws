@@ -7,7 +7,7 @@ export default gql`
     getConfigVersions {
       success
       versions {
-        versionId
+        versionName
         versionName
         isActive
         createdAt

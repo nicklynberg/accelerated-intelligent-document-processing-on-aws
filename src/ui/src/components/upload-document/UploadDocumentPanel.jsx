@@ -28,8 +28,8 @@ const UploadDocumentPanel = () => {
       const activeVersion = versions.find((v) => v.isActive);
       if (activeVersion) {
         const versionOption = {
-          label: `${activeVersion.versionName || activeVersion.versionId} (Active)`,
-          value: activeVersion.versionId,
+          label: `${activeVersion.versionName} (Active)`,
+          value: activeVersion.versionName,
         };
         setSelectedVersion(versionOption);
       }
@@ -173,8 +173,8 @@ const UploadDocumentPanel = () => {
             selectedOption={selectedVersion}
             onChange={({ detail }) => setSelectedVersion(detail.selectedOption)}
             options={versions.map((version) => ({
-              label: version.isActive ? `${version.versionName || version.versionId} (Active)` : version.versionName || version.versionId,
-              value: version.versionId,
+              label: version.isActive ? `${version.versionName} (Active)` : version.versionName,
+              value: version.versionName,
             }))}
             placeholder={versions.length === 0 ? 'Loading versions...' : 'Select configuration version'}
             disabled={isUploading || versions.length === 0}
