@@ -58,9 +58,24 @@ const ConfidenceAlertsCell = ({ item, mergedConfig }) => {
   return <StatusIndicator type="warning">{alertCount}</StatusIndicator>;
 };
 
-const ActionsCell = ({ item, pages, documentItem, mergedConfig, onReviewComplete, isSectionCompleted, isReviewerOnly }) => {
+const ActionsCell = ({
+  item,
+  pages,
+  documentItem,
+  mergedConfig,
+  onReviewComplete,
+  isSectionCompleted,
+  isReviewerOnly,
+  isEditModeEnabled,
+  // Section navigation props
+  allSections = [],
+  currentSectionIndex = 0,
+  onNavigateToSection,
+  onViewerOpen,
+  onViewerClose,
+  isViewerOpen = false,
+}) => {
   const [isDownloading, setIsDownloading] = React.useState(false);
-  const [isViewerOpen, setIsViewerOpen] = React.useState(false);
   const { settings } = useSettingsContext();
 
   // Disable View/Edit if:
@@ -204,12 +219,17 @@ const ActionsCell = ({ item, pages, documentItem, mergedConfig, onReviewComplete
       <FileViewer
         fileUri={item.OutputJSONUri}
         fileType="json"
-        buttonText="View/Edit Data"
+        buttonText={isEditModeEnabled ? 'Edit Data' : 'View Data'}
         sectionData={{ ...item, pages, documentItem, mergedConfig, isSectionCompleted, isReviewerOnly }}
-        onOpen={() => setIsViewerOpen(true)}
-        onClose={() => setIsViewerOpen(false)}
+        onOpen={onViewerOpen}
+        onClose={onViewerClose}
         onReviewComplete={isSectionCompleted ? null : onReviewComplete}
         disabled={shouldDisableViewEdit}
+        isReadOnly={!isEditModeEnabled}
+        allSections={allSections}
+        currentSectionIndex={currentSectionIndex}
+        onNavigateToSection={onNavigateToSection}
+        isExternallyOpen={isViewerOpen}
       />
       {!isViewerOpen && (
         <ButtonDropdown
@@ -319,14 +339,57 @@ const EditablePageIdsCell = ({ item, validationErrors, updateSection }) => {
   );
 };
 
-const EditableActionsCell = ({ item, deleteSection }) => (
-  <SpaceBetween direction="horizontal" size="xs">
-    <Button variant="icon" iconName="remove" ariaLabel="Delete section" onClick={() => deleteSection(item.Id)} />
-  </SpaceBetween>
-);
+const EditableActionsCell = ({
+  item,
+  deleteSection,
+  pages,
+  documentItem,
+  mergedConfig,
+  onReviewComplete,
+  // Navigation props for edit mode
+  allSections = [],
+  currentSectionIndex = 0,
+  onNavigateToSection,
+  onViewerOpen,
+  onViewerClose,
+  isViewerOpen = false,
+}) => {
+  return (
+    <SpaceBetween direction="horizontal" size="xs">
+      <FileViewer
+        fileUri={item.OutputJSONUri}
+        fileType="json"
+        buttonText="Edit Data"
+        sectionData={{ ...item, pages, documentItem, mergedConfig, isSectionCompleted: false, isReviewerOnly: false }}
+        onOpen={onViewerOpen}
+        onClose={onViewerClose}
+        onReviewComplete={onReviewComplete}
+        disabled={!item.OutputJSONUri}
+        isReadOnly={false}
+        allSections={allSections}
+        currentSectionIndex={currentSectionIndex}
+        onNavigateToSection={onNavigateToSection}
+        isExternallyOpen={isViewerOpen}
+      />
+      {!isViewerOpen && <Button variant="icon" iconName="remove" ariaLabel="Delete section" onClick={() => deleteSection(item.Id)} />}
+    </SpaceBetween>
+  );
+};
 
-// Column definitions
-const createColumnDefinitions = (pages, documentItem, mergedConfig, handleReviewComplete, isReviewerOnly) => {
+// Column definitions - now a factory that takes navigation params
+const createColumnDefinitions = (
+  pages,
+  documentItem,
+  mergedConfig,
+  handleReviewComplete,
+  isReviewerOnly,
+  isEditModeEnabled,
+  // Navigation params
+  allSections,
+  openViewerSectionIndex,
+  setOpenViewerSectionIndex,
+  onNavigateToSection,
+) => {
   // Get completed sections from documentItem
   const completedSections = documentItem?.hitlSectionsCompleted || [];
   const pendingSections = documentItem?.hitlSectionsPending || [];
@@ -430,17 +493,30 @@ const createColumnDefinitions = (pages, documentItem, mergedConfig, handleReview
     {
       id: 'actions',
       header: 'Actions',
-      cell: (item) => (
-        <ActionsCell
-          item={item}
-          pages={pages}
-          documentItem={documentItem}
-          mergedConfig={mergedConfig}
-          onReviewComplete={handleReviewComplete}
-          isSectionCompleted={completedSections.includes(item.Id)}
-          isReviewerOnly={isReviewerOnly}
-        />
-      ),
+      cell: (item) => {
+        // Find index of current item in allSections
+        const currentIndex = allSections?.findIndex((s) => s.Id === item.Id) ?? -1;
+        const isThisViewerOpen = openViewerSectionIndex === currentIndex;
+
+        return (
+          <ActionsCell
+            item={item}
+            pages={pages}
+            documentItem={documentItem}
+            mergedConfig={mergedConfig}
+            onReviewComplete={handleReviewComplete}
+            isSectionCompleted={completedSections.includes(item.Id)}
+            isReviewerOnly={isReviewerOnly}
+            isEditModeEnabled={isEditModeEnabled}
+            allSections={allSections}
+            currentSectionIndex={currentIndex}
+            onNavigateToSection={onNavigateToSection}
+            onViewerOpen={() => setOpenViewerSectionIndex(currentIndex)}
+            onViewerClose={() => setOpenViewerSectionIndex(null)}
+            isViewerOpen={isThisViewerOpen}
+          />
+        );
+      },
       minWidth: 400,
       width: 400,
       isResizable: true,
@@ -449,7 +525,22 @@ const createColumnDefinitions = (pages, documentItem, mergedConfig, handleReview
 };
 
 // Edit mode column definitions - expanded to use maximum available width
-const createEditColumnDefinitions = (validationErrors, updateSection, updateSectionId, getAvailableClasses, deleteSection) => [
+const createEditColumnDefinitions = (
+  validationErrors,
+  updateSection,
+  updateSectionId,
+  getAvailableClasses,
+  deleteSection,
+  pages,
+  documentItem,
+  mergedConfig,
+  handleReviewComplete,
+  // Navigation params
+  allSections,
+  openViewerSectionIndex,
+  setOpenViewerSectionIndex,
+  onNavigateToSection,
+) => [
   {
     id: 'id',
     header: 'Section ID',
@@ -484,9 +575,30 @@ const createEditColumnDefinitions = (validationErrors, updateSection, updateSect
   {
     id: 'actions',
     header: 'Actions',
-    cell: (item) => <EditableActionsCell item={item} deleteSection={deleteSection} />,
-    minWidth: 100,
-    width: 150,
+    cell: (item) => {
+      // Find index of current item in allSections
+      const currentIndex = allSections?.findIndex((s) => s.Id === item.Id) ?? -1;
+      const isThisViewerOpen = openViewerSectionIndex === currentIndex;
+
+      return (
+        <EditableActionsCell
+          item={item}
+          deleteSection={deleteSection}
+          pages={pages}
+          documentItem={documentItem}
+          mergedConfig={mergedConfig}
+          onReviewComplete={handleReviewComplete}
+          allSections={allSections}
+          currentSectionIndex={currentIndex}
+          onNavigateToSection={onNavigateToSection}
+          onViewerOpen={() => setOpenViewerSectionIndex(currentIndex)}
+          onViewerClose={() => setOpenViewerSectionIndex(null)}
+          isViewerOpen={isThisViewerOpen}
+        />
+      );
+    },
+    minWidth: 300,
+    width: 350,
     isResizable: true,
   },
 ];
@@ -500,6 +612,8 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   const [showSkipAllModal, setShowSkipAllModal] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSkipping, setIsSkipping] = useState(false);
+  // Track which section's viewer is open for navigation
+  const [openViewerSectionIndex, setOpenViewerSectionIndex] = useState(null);
   const { mergedConfig: configuration } = useConfiguration();
   const { settings } = useSettingsContext();
   const { isReviewer, isAdmin } = useUserRole();
@@ -623,6 +737,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
   useEffect(() => {
     if (isEditMode && sections) {
       const sectionsWithEditableFormat = sections.map((section) => ({
+        ...section, // Copy all properties including OutputJSONUri
         Id: section.Id,
         Class: section.Class,
         PageIds: section.PageIds ? [...section.PageIds] : [],
@@ -978,11 +1093,6 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
         throw new Error(response?.message || 'Failed to process changes - no response received');
       }
 
-      // Call the optional save handler for UI updates
-      if (onSaveChanges) {
-        await onSaveChanges(allChanges);
-      }
-
       // Exit edit mode
       setIsEditMode(false);
       setEditedSections([]);
@@ -1016,10 +1126,48 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
     setValidationErrors({});
   };
 
+  // Handle section navigation - just update the open section index
+  // The FileViewer will close current viewer and open the new one based on the new index
+  const handleNavigateToSection = (newIndex) => {
+    logger.info('Section navigation requested:', { from: openViewerSectionIndex, to: newIndex });
+    // Update the open viewer index - this triggers the FileViewer to close and re-open with new section
+    setOpenViewerSectionIndex(newIndex);
+  };
+
+  // Get all sections for navigation (use current view - edited or original)
+  const allSectionsForNav = isEditMode ? editedSections : sections || [];
+
   // Determine which columns and data to use
   const columnDefinitions = isEditMode
-    ? createEditColumnDefinitions(validationErrors, updateSection, updateSectionId, getAvailableClasses, deleteSection)
-    : createColumnDefinitions(pages, documentItem, mergedConfig, handleReviewComplete, isReviewerOnly);
+    ? createEditColumnDefinitions(
+        validationErrors,
+        updateSection,
+        updateSectionId,
+        getAvailableClasses,
+        deleteSection,
+        pages,
+        documentItem,
+        mergedConfig,
+        handleReviewComplete,
+        // Navigation params for edit mode
+        allSectionsForNav,
+        openViewerSectionIndex,
+        setOpenViewerSectionIndex,
+        handleNavigateToSection,
+      )
+    : createColumnDefinitions(
+        pages,
+        documentItem,
+        mergedConfig,
+        handleReviewComplete,
+        isReviewerOnly,
+        isEditMode,
+        // Navigation params
+        allSectionsForNav,
+        openViewerSectionIndex,
+        setOpenViewerSectionIndex,
+        handleNavigateToSection,
+      );
 
   const tableItems = isEditMode ? editedSections : sections || [];
 
@@ -1042,7 +1190,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
                       </Button>
                     )}
                     <Button variant="primary" iconName="edit" onClick={handleEditSectionsClick}>
-                      Edit Sections
+                      Edit Mode
                     </Button>
                   </>
                 ) : (
@@ -1060,7 +1208,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
                       disabled={hasValidationErrors || isProcessing}
                       loading={isProcessing}
                     >
-                      Save & Process Changes
+                      Process Changes
                     </Button>
                   </>
                 )}
@@ -1126,19 +1274,44 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
             </SpaceBetween>
           </Box>
         }
-        header="Confirm Section Changes"
+        header="Confirm Reprocessing"
       >
         <SpaceBetween size="s">
-          <Box>You are about to save changes to document sections and trigger selective reprocessing. This will:</Box>
-          <ul>
-            <li>Update section classifications and page assignments</li>
-            <li>Remove extraction data for modified sections</li>
-            <li>Reprocess only the changed sections (skipping OCR and classification steps)</li>
-          </ul>
-          <Box>
-            {/* eslint-disable-next-line max-len */}
-            For fine-grained section control, consider using <strong>Pattern-2</strong> or <strong>Pattern-3</strong> for future documents.
-          </Box>
+          {(() => {
+            // Calculate changes to determine modal content
+            const actuallyModifiedSections = editedSections.filter((section) => hasActualChanges(section, sections));
+            const deletedSectionIds =
+              sections?.filter((original) => !editedSections.find((edited) => edited.OriginalId === original.Id)) || [];
+            const hasStructuralChanges = actuallyModifiedSections.length > 0 || deletedSectionIds.length > 0;
+
+            if (hasStructuralChanges) {
+              return (
+                <>
+                  <Box>You are about to save changes to document sections and trigger selective reprocessing. This will:</Box>
+                  <ul>
+                    <li>Update section classifications and page assignments</li>
+                    <li>Remove extraction data for modified sections</li>
+                    <li>Reprocess only the changed sections (skipping OCR and classification steps)</li>
+                  </ul>
+                </>
+              );
+            }
+            return (
+              <>
+                <Box>
+                  No section structure changes detected. This will trigger <strong>evaluation and summarization</strong> reprocessing.
+                </Box>
+                <Box>Use this when you have edited extraction data (predictions or baseline) and want to:</Box>
+                <ul>
+                  <li>Re-run evaluation to compare predictions against baseline</li>
+                  <li>Update the document summary report</li>
+                </ul>
+                <Alert type="info">
+                  OCR, Classification, Extraction, and Assessment steps will be automatically skipped since existing data is preserved.
+                </Alert>
+              </>
+            );
+          })()}
         </SpaceBetween>
       </Modal>
 
@@ -1153,7 +1326,7 @@ const SectionsPanel = ({ sections, pages, documentItem, mergedConfig, onDocument
             </Button>
           </Box>
         }
-        header="Edit Sections - Pattern-1"
+        header="Edit Mode - Pattern-1"
       >
         <SpaceBetween size="m">
           <Alert type="info" header="Feature Not Available for Pattern-1">

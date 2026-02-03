@@ -684,22 +684,26 @@ Pattern 2's multimodal page-level classification supports few-shot example promp
 
 ### Few Shot Example Configuration
 
-In Pattern 2, few-shot examples are configured within document class definitions:
+In Pattern 2, few-shot examples are configured within document class definitions using JSON Schema format:
 
 ```yaml
 classes:
-  - name: letter
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: Letter
+    x-aws-idp-document-type: Letter
+    type: object
     description: "A formal written correspondence..."
-    attributes:
-      - name: sender_name
+    properties:
+      SenderName:
+        type: string
         description: "The name of the person who wrote the letter..."
-    examples:
-      - classPrompt: "This is an example of the class 'letter'"
+    x-aws-idp-examples:
+      - x-aws-idp-class-prompt: "This is an example of the class 'Letter'"
         name: "Letter1"
-        imagePath: "config_library/pattern-2/your_config/example-images/letter1.jpg"
-      - classPrompt: "This is an example of the class 'letter'"
+        x-aws-idp-image-path: "config_library/pattern-2/your_config/example-images/letter1.jpg"
+      - x-aws-idp-class-prompt: "This is an example of the class 'Letter'"
         name: "Letter2"
-        imagePath: "config_library/pattern-2/your_config/example-images/letter2.png"
+        x-aws-idp-image-path: "config_library/pattern-2/your_config/example-images/letter2.png"
 ```
 
 ### Example Image Path Support
@@ -988,20 +992,40 @@ The regex system includes robust error handling:
 ```yaml
 classes:
   # W2 Tax Forms
-  - name: W2
-    document_page_content_regex: "(?i)(form\\s+w-?2|wage\\s+and\\s+tax|social\\s+security)"
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: W2
+    x-aws-idp-document-type: W2
+    type: object
+    description: "W2 Tax Form"
+    x-aws-idp-document-page-content-regex: "(?i)(form\\s+w-?2|wage\\s+and\\s+tax|social\\s+security)"
+    properties: {}
     
   # Bank Statements  
-  - name: Bank-Statement
-    document_page_content_regex: "(?i)(account\\s+number|statement\\s+period|beginning\\s+balance)"
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: Bank-Statement
+    x-aws-idp-document-type: Bank-Statement
+    type: object
+    description: "Bank Statement"
+    x-aws-idp-document-page-content-regex: "(?i)(account\\s+number|statement\\s+period|beginning\\s+balance)"
+    properties: {}
     
   # Driver Licenses
-  - name: US-drivers-licenses
-    document_page_content_regex: "(?i)(driver\\s+license|state\\s+id|date\\s+of\\s+birth)"
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: US-drivers-licenses
+    x-aws-idp-document-type: US-drivers-licenses
+    type: object
+    description: "US Driver's License"
+    x-aws-idp-document-page-content-regex: "(?i)(driver\\s+license|state\\s+id|date\\s+of\\s+birth)"
+    properties: {}
     
   # Invoices
-  - name: Invoice
-    document_page_content_regex: "(?i)(invoice\\s+number|bill\\s+to|remit\\s+payment)"
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: Invoice
+    x-aws-idp-document-type: Invoice
+    type: object
+    description: "Invoice"
+    x-aws-idp-document-page-content-regex: "(?i)(invoice\\s+number|bill\\s+to|remit\\s+payment)"
+    properties: {}
 ```
 
 ## Best Practices for Classification

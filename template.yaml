@@ -53,6 +53,10 @@ Mappings:
       ConfigPath: "realkie-fcc-verified"
     ocr-benchmark:
       ConfigPath: "ocr-benchmark"
+    rule-validation:
+      ConfigPath: "rule-validation"
+    rule-extraction:
+      ConfigPath: "rule-extraction"
     default:
       ConfigPath: "rvl-cdip"
 
@@ -139,6 +143,8 @@ Parameters:
       - "bank-statement-sample"
       - "realkie-fcc-verified"
       - "ocr-benchmark"
+      - "rule-validation"
+      - "rule-extraction"
       - "default"
     Description: >-
       Select the configuration preset for Pattern 2. Each configuration contains pre-tuned settings for specific document processing scenarios see https://github.com/aws-samples/sample-genai-idp/blob/main/config_library/README.md. Note: Custom configuration overrides the selected pattern configuration when provided.
@@ -4027,6 +4033,7 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${GetLowercase.Lowercase}-reporting-db/document_evaluations"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${GetLowercase.Lowercase}-reporting-db/section_evaluations"
                 - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${GetLowercase.Lowercase}-reporting-db/attribute_evaluations"
+                - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${GetLowercase.Lowercase}-reporting-db/rule_validation_*"
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel

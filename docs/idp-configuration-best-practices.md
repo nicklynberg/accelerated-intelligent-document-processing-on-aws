@@ -747,78 +747,83 @@ Few-shot learning enhances AI model performance by providing concrete examples a
 
 ### Configuration Structure
 
-Few-shot examples are configured within document class definitions:
+Few-shot examples are configured within document class definitions using JSON Schema format:
 
 ```yaml
 classes:
-  - name: letter
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: Letter
+    x-aws-idp-document-type: Letter
+    type: object
     description: "A formal written correspondence..."
-    attributes:
-      - name: sender_name
+    properties:
+      SenderName:
+        type: string
         description: "The name of the person who wrote the letter..."
-      - name: sender_address
+      SenderAddress:
+        type: string
         description: "The physical address of the sender..."
-    examples:
-      - classPrompt: "This is an example of the class 'letter'"
+    x-aws-idp-examples:
+      - x-aws-idp-class-prompt: "This is an example of the class 'Letter'"
         name: "Letter1"
-        attributesPrompt: |
+        x-aws-idp-attributes-prompt: |
           expected attributes are:
-              "sender_name": "Will E. Clark",
-              "sender_address": "206 Maple Street P.O. Box 1056 Murray Kentucky 42071-1056",
-              "recipient_name": "The Honorable Wendell H. Ford",
-              "date": "10/31/1995",
-              "subject": null
-        imagePath: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
-      - classPrompt: "This is an example of the class 'letter'"
+              "SenderName": "Will E. Clark",
+              "SenderAddress": "206 Maple Street P.O. Box 1056 Murray Kentucky 42071-1056",
+              "RecipientName": "The Honorable Wendell H. Ford",
+              "Date": "10/31/1995",
+              "Subject": null
+        x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
+      - x-aws-idp-class-prompt: "This is an example of the class 'Letter'"
         name: "Letter2"
-        attributesPrompt: |
+        x-aws-idp-attributes-prompt: |
           expected attributes are:
-              "sender_name": "William H. W. Anderson",
-              "sender_address": "P O. BOX 12046 CAMERON VILLAGE STATION RALEIGH N. c 27605",
-              "recipient_name": "Mr. Addison Y. Yeaman",
-              "date": "10/14/1970",
-              "subject": "Invitation to the Twelfth Annual Meeting of the TGIC"
-        imagePath: "config_library/pattern-2/few_shot_example/example-images/letter2.png"
+              "SenderName": "William H. W. Anderson",
+              "SenderAddress": "P O. BOX 12046 CAMERON VILLAGE STATION RALEIGH N. c 27605",
+              "RecipientName": "Mr. Addison Y. Yeaman",
+              "Date": "10/14/1970",
+              "Subject": "Invitation to the Twelfth Annual Meeting of the TGIC"
+        x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/letter2.png"
 ```
 
 ### Example Fields Explained
 
 Each example includes four key components:
 
-- **`classPrompt`**: A brief description identifying this as an example of the document class (used for classification)
+- **`x-aws-idp-class-prompt`**: A brief description identifying this as an example of the document class (used for classification)
 - **`name`**: A unique identifier for the example (for reference and debugging)
-- **`attributesPrompt`**: The expected attribute extraction results in exact JSON format (used for extraction)
-- **`imagePath`**: Path to example document image(s) - supports single files, local directories, or S3 prefixes
+- **`x-aws-idp-attributes-prompt`**: The expected attribute extraction results in exact JSON format (used for extraction)
+- **`x-aws-idp-image-path`**: Path to example document image(s) - supports single files, local directories, or S3 prefixes
 
 ### Example Processing Rules
 
 **Important**: Examples are only processed if they contain the required prompt field for the specific task:
 
-- **For Classification**: Examples are only included if they have a non-empty `classPrompt` field
-- **For Extraction**: Examples are only included if they have a non-empty `attributesPrompt` field
+- **For Classification**: Examples are only included if they have a non-empty `x-aws-idp-class-prompt` field
+- **For Extraction**: Examples are only included if they have a non-empty `x-aws-idp-attributes-prompt` field
 
 ### Enhanced Image Path Support
 
-The `imagePath` field supports multiple formats:
+The `x-aws-idp-image-path` field supports multiple formats:
 
 **Single Image File:**
 ```yaml
-imagePath: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
+x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
 ```
 
 **Local Directory with Multiple Images:**
 ```yaml
-imagePath: "config_library/pattern-2/few_shot_example/example-images/"
+x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/"
 ```
 
 **S3 Prefix with Multiple Images:**
 ```yaml
-imagePath: "s3://my-config-bucket/few-shot-examples/letter/"
+x-aws-idp-image-path: "s3://my-config-bucket/few-shot-examples/letter/"
 ```
 
 **Direct S3 Image URI:**
 ```yaml
-imagePath: "s3://my-config-bucket/few-shot-examples/letter/example1.jpg"
+x-aws-idp-image-path: "s3://my-config-bucket/few-shot-examples/letter/example1.jpg"
 ```
 
 ### Integration with Template Prompts
@@ -1379,22 +1384,29 @@ EvaluationBaselineBucketName:
 
 ### Evaluation Methods Configuration
 
-Configure evaluation methods for specific document classes and attributes:
+Configure evaluation methods for specific document classes and attributes using JSON Schema format:
 
 ```yaml
 classes:
-  - name: invoice
-    attributes:
-      - name: invoice_number
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: Invoice
+    x-aws-idp-document-type: Invoice
+    type: object
+    description: A commercial invoice
+    properties:
+      InvoiceNumber:
+        type: string
         description: The unique identifier for the invoice
-        evaluation_method: EXACT  # Use exact string matching
-      - name: amount_due
+        x-aws-idp-evaluation-method: EXACT  # Use exact string matching
+      AmountDue:
+        type: string
         description: The total amount to be paid
-        evaluation_method: NUMERIC_EXACT  # Use numeric comparison
-      - name: vendor_name
+        x-aws-idp-evaluation-method: NUMERIC_EXACT  # Use numeric comparison
+      VendorName:
+        type: string
         description: Name of the vendor
-        evaluation_method: FUZZY  # Use fuzzy matching
-        evaluation_threshold: 0.8  # Minimum similarity threshold
+        x-aws-idp-evaluation-method: FUZZY  # Use fuzzy matching
+        x-aws-idp-confidence-threshold: 0.8  # Minimum similarity threshold
 ```
 
 ### Supported Evaluation Methods

@@ -652,6 +652,156 @@ class DocumentDynamoDBService:
             "nextToken": response.get("LastEvaluatedKey"),
         }
 
+    def update_document_status(
+        self,
+        document_id: str,
+        status: Status,
+        workflow_execution_arn: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update only the status of a document (lightweight operation).
+
+        This method performs a minimal update that only touches the ObjectStatus field,
+        reducing DynamoDB WCU consumption from ~100KB to ~500 bytes. Use this during
+        parallel Map operations where multiple Lambda functions update status concurrently.
+
+        Args:
+            document_id: The ObjectKey of the document to update
+            status: The new Status to set
+            workflow_execution_arn: Optional workflow execution ARN
+
+        Returns:
+            Dictionary with the updated document attributes
+
+        Raises:
+            DynamoDBError: If the DynamoDB operation fails
+        """
+        key = {
+            "PK": f"doc#{document_id}",
+            "SK": "none",
+        }
+
+        # Derive workflow status from document status
+        if status == Status.FAILED:
+            workflow_status = "FAILED"
+        elif status == Status.COMPLETED:
+            workflow_status = "SUCCEEDED"
+        elif status == Status.ABORTED:
+            workflow_status = "ABORTED"
+        else:
+            workflow_status = "RUNNING"
+
+        # Build minimal update expression
+        set_expressions = [
+            "#ObjectStatus = :ObjectStatus",
+            "#WorkflowStatus = :WorkflowStatus",
+        ]
+        expression_names = {
+            "#ObjectStatus": "ObjectStatus",
+            "#WorkflowStatus": "WorkflowStatus",
+        }
+        expression_values = {
+            ":ObjectStatus": status.value,
+            ":WorkflowStatus": workflow_status,
+        }
+
+        if workflow_execution_arn:
+            set_expressions.append("#WorkflowExecutionArn = :WorkflowExecutionArn")
+            expression_names["#WorkflowExecutionArn"] = "WorkflowExecutionArn"
+            expression_values[":WorkflowExecutionArn"] = workflow_execution_arn
+
+        update_expression = "SET " + ", ".join(set_expressions)
+
+        response = self.client.update_item(
+            key=key,
+            update_expression=update_expression,
+            expression_attribute_names=expression_names,
+            expression_attribute_values=expression_values,
+            return_values="ALL_NEW",
+        )
+
+        logger.info(f"Updated document status: {document_id} -> {status.value}")
+        return response.get("Attributes", {})
+
+    def update_document_section(
+        self,
+        document_id: str,
+        section_index: int,
+        section: Section,
+    ) -> Dict[str, Any]:
+        """
+        Update a single section in a document (atomic section-level update).
+
+        This method performs an atomic update of a single section using DynamoDB's
+        SET Sections[index] = :value expression. This reduces WCU consumption from
+        ~100KB to ~5KB per update and avoids read-modify-write race conditions
+        during parallel Map operations.
+
+        Args:
+            document_id: The ObjectKey of the document to update
+            section_index: The index position of the section in the Sections array
+            section: The Section object with updated data
+
+        Returns:
+            Dictionary with the updated document attributes
+
+        Raises:
+            DynamoDBError: If the DynamoDB operation fails
+        """
+        key = {
+            "PK": f"doc#{document_id}",
+            "SK": "none",
+        }
+
+        # Convert page IDs to integers for DynamoDB
+        page_ids = []
+        for page_id in section.page_ids:
+            try:
+                page_ids.append(int(page_id))
+            except ValueError:
+                logger.warning(
+                    f"Skipping page ID {page_id} in section {section.section_id} - not an integer"
+                )
+
+        section_data = {
+            "Id": section.section_id,
+            "PageIds": page_ids,
+            "Class": section.classification,
+            "OutputJSONUri": section.extraction_result_uri or "",
+        }
+
+        # Convert confidence threshold alerts
+        if section.confidence_threshold_alerts:
+            alerts_data = []
+            for alert in section.confidence_threshold_alerts:
+                alert_data = convert_floats_to_decimal(
+                    {
+                        "attributeName": alert.get("attribute_name"),
+                        "confidence": alert.get("confidence"),
+                        "confidenceThreshold": alert.get("confidence_threshold"),
+                    }
+                )
+                alerts_data.append(alert_data)
+            section_data["ConfidenceThresholdAlerts"] = alerts_data
+
+        # Use SET Sections[index] = :value for atomic section update
+        update_expression = f"SET #Sections[{section_index}] = :section"
+        expression_names = {"#Sections": "Sections"}
+        expression_values = {":section": section_data}
+
+        response = self.client.update_item(
+            key=key,
+            update_expression=update_expression,
+            expression_attribute_names=expression_names,
+            expression_attribute_values=expression_values,
+            return_values="ALL_NEW",
+        )
+
+        logger.info(
+            f"Updated section {section_index} ({section.section_id}) for document: {document_id}"
+        )
+        return response.get("Attributes", {})
+
     def calculate_ttl(self, days: int = 30) -> int:
         """
         Calculate a TTL timestamp for document expiration.

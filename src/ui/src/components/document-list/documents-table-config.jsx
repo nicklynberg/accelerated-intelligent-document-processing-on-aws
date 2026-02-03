@@ -231,29 +231,55 @@ export const DocumentsCommonHeader = ({
           <ButtonDropdown loading={props.loading} onItemClick={onPeriodToLoadChange} items={TIME_PERIOD_DROPDOWN_ITEMS}>
             {`Load: ${periodText}`}
           </ButtonDropdown>
-          <Button iconName="refresh" variant="normal" loading={props.loading} onClick={() => props.setIsLoading(true)} />
-          <Button iconName="download" variant="normal" loading={props.loading} onClick={() => props.downloadToExcel()} />
+          <span title="Refresh document list">
+            <Button
+              iconName="refresh"
+              variant="normal"
+              loading={props.loading}
+              onClick={() => props.setIsLoading(true)}
+              ariaLabel="Refresh"
+            />
+          </span>
+          <span title="Download document list to Excel">
+            <Button
+              iconName="download"
+              variant="normal"
+              loading={props.loading}
+              onClick={() => props.downloadToExcel()}
+              ariaLabel="Download"
+            />
+          </span>
           {onClaimReview && (
             <Button variant="primary" disabled={!hasClaimableItems} onClick={onClaimReview}>
               Start Review
             </Button>
           )}
-          {onReleaseReview && (
-            <Button variant="normal" disabled={!hasReleasableItems} onClick={onReleaseReview}>
-              Release Review
-            </Button>
-          )}
           {onAbort && (
-            <Button iconName="status-stopped" variant="normal" disabled={!hasAbortableItems} onClick={onAbort}>
-              Abort
-            </Button>
+            <span title="Abort processing for selected documents">
+              <Button iconName="status-stopped" variant="normal" disabled={!hasAbortableItems} onClick={onAbort} ariaLabel="Abort" />
+            </span>
           )}
           {onReprocess && (
-            <Button iconName="arrow-right" variant="normal" disabled={!hasSelectedItems} onClick={onReprocess}>
-              Reprocess
-            </Button>
+            <span title="Reprocess selected documents">
+              <Button iconName="redo" variant="normal" disabled={!hasSelectedItems} onClick={onReprocess} ariaLabel="Reprocess" />
+            </span>
           )}
-          {onDelete && <Button iconName="remove" variant="normal" disabled={!hasSelectedItems} onClick={onDelete} />}
+          {onDelete && (
+            <span title="Delete selected documents">
+              <Button iconName="remove" variant="normal" disabled={!hasSelectedItems} onClick={onDelete} ariaLabel="Delete" />
+            </span>
+          )}
+          {onReleaseReview && (
+            <span title="Release review lock on selected documents">
+              <Button
+                iconName="unlocked"
+                variant="normal"
+                disabled={!hasReleasableItems}
+                onClick={onReleaseReview}
+                ariaLabel="Release Review"
+              />
+            </span>
+          )}
         </SpaceBetween>
       }
       {...props}

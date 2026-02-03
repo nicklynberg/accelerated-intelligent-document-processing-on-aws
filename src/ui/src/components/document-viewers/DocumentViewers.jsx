@@ -18,12 +18,15 @@ const ViewerControls = ({
   onViewSource,
   onViewReport,
   onViewSummary,
+  onViewRuleValidation,
   onSetAsBaseline,
   isSourceVisible,
   isReportVisible,
   isSummaryVisible,
+  isRuleValidationVisible,
   evaluationReportUri,
   summaryReportUri,
+  ruleValidationResultUri,
   copyStatus,
   evaluationStatus,
 }) => (
@@ -41,6 +44,11 @@ const ViewerControls = ({
         {isSummaryVisible ? 'Close Document Summary' : 'View Document Summary'}
       </Button>
     )}
+    {ruleValidationResultUri && (
+      <Button onClick={onViewRuleValidation} variant={isRuleValidationVisible ? 'primary' : 'normal'}>
+        {isRuleValidationVisible ? 'Close Rule Validation Summary' : 'View Rule Validation Summary'}
+      </Button>
+    )}
     <Button onClick={onSetAsBaseline} disabled={copyStatus === 'in-progress' || evaluationStatus === 'BASELINE_COPYING'}>
       Use as Evaluation Baseline
     </Button>
@@ -51,8 +59,17 @@ const ViewerControls = ({
   </SpaceBetween>
 );
 
-const ViewerContent = ({ isSourceVisible, isReportVisible, isSummaryVisible, objectKey, evaluationReportUri, summaryReportUri }) => {
-  if (!isSourceVisible && !isReportVisible && !isSummaryVisible) {
+const ViewerContent = ({
+  isSourceVisible,
+  isReportVisible,
+  isSummaryVisible,
+  isRuleValidationVisible,
+  objectKey,
+  evaluationReportUri,
+  summaryReportUri,
+  ruleValidationResultUri,
+}) => {
+  if (!isSourceVisible && !isReportVisible && !isSummaryVisible && !isRuleValidationVisible) {
     return null;
   }
 
@@ -83,14 +100,25 @@ const ViewerContent = ({ isSourceVisible, isReportVisible, isSummaryVisible, obj
           />
         </div>
       )}
+      {isRuleValidationVisible && (
+        <div className="flex-1 min-w-0">
+          <MarkdownReport
+            reportUri={ruleValidationResultUri}
+            documentId={objectKey}
+            title="Rule Validation Summary"
+            emptyMessage="Rule validation summary not available for this document"
+          />
+        </div>
+      )}
     </div>
   );
 };
 
-const DocumentViewers = ({ objectKey, evaluationReportUri, summaryReportUri, evaluationStatus }) => {
+const DocumentViewers = ({ objectKey, evaluationReportUri, summaryReportUri, ruleValidationResultUri, evaluationStatus }) => {
   const [isSourceVisible, setIsSourceVisible] = useState(false);
   const [isReportVisible, setIsReportVisible] = useState(false);
   const [isSummaryVisible, setIsSummaryVisible] = useState(false);
+  const [isRuleValidationVisible, setIsRuleValidationVisible] = useState(false);
   const [copyStatus, setCopyStatus] = useState(null);
 
   // Show temporary message when copy is initiated, then clear it
@@ -122,6 +150,10 @@ const DocumentViewers = ({ objectKey, evaluationReportUri, summaryReportUri, eva
 
   const handleViewSummary = () => {
     setIsSummaryVisible(!isSummaryVisible);
+  };
+
+  const handleViewRuleValidation = () => {
+    setIsRuleValidationVisible(!isRuleValidationVisible);
   };
 
   const handleSetAsBaseline = async () => {
@@ -165,12 +197,15 @@ const DocumentViewers = ({ objectKey, evaluationReportUri, summaryReportUri, eva
           onViewSource={handleViewSource}
           onViewReport={handleViewReport}
           onViewSummary={handleViewSummary}
+          onViewRuleValidation={handleViewRuleValidation}
           onSetAsBaseline={handleSetAsBaseline}
           isSourceVisible={isSourceVisible}
           isReportVisible={isReportVisible}
           isSummaryVisible={isSummaryVisible}
+          isRuleValidationVisible={isRuleValidationVisible}
           evaluationReportUri={evaluationReportUri}
           summaryReportUri={summaryReportUri}
+          ruleValidationResultUri={ruleValidationResultUri}
           copyStatus={copyStatus}
           evaluationStatus={evaluationStatus}
         />
@@ -178,9 +213,11 @@ const DocumentViewers = ({ objectKey, evaluationReportUri, summaryReportUri, eva
           isSourceVisible={isSourceVisible}
           isReportVisible={isReportVisible}
           isSummaryVisible={isSummaryVisible}
+          isRuleValidationVisible={isRuleValidationVisible}
           objectKey={objectKey}
           evaluationReportUri={evaluationReportUri}
           summaryReportUri={summaryReportUri}
+          ruleValidationResultUri={ruleValidationResultUri}
         />
       </SpaceBetween>
     </Box>

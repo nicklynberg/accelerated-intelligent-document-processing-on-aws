@@ -214,14 +214,78 @@ The section review interface provides:
 
 ### Visual Editor
 
-The visual editor provides a comprehensive review experience:
+The visual editor provides a comprehensive review experience with a modern tabbed interface:
 
-- **Document Image Panel**: View the original document with zoom and pan
-- **Data Panel**: View and edit extracted key-value pairs
-- **Bounding Box Overlay**: Visual highlighting of field locations
-- **Confidence Indicators**: Color-coded confidence scores
-- **Form View**: Structured form for editing values
-- **JSON View**: Raw JSON editor for advanced users
+#### Navigation Controls
+- **Mouse Wheel Zoom**: Zoom in/out using the mouse wheel without requiring modifier keys
+- **Click-and-Drag Panning**: Pan around zoomed images by clicking and dragging (cursor shows grab/grabbing state)
+- **Section Navigation**: Use Previous/Next buttons to navigate between document sections without closing the editor
+
+#### Tabbed Interface
+
+**Visual Editor Tab**
+- Split-pane layout with document image (left) and form-based field editing (right)
+- Bounding box overlay highlighting field locations on the document
+- Color-coded confidence indicators (green=meets threshold, red=below threshold, black=no threshold)
+- Inline editing with visual change tracking (✏️ Edited badges)
+
+**JSON Editor Tab**
+- Raw JSON editing for advanced users
+- Section filtering with multiselect dropdown to focus on specific sections
+- Full JSON validation before saving
+
+**Revision History Tab**
+- Complete audit trail of all edits to the document
+- Timestamps showing when edits were made
+- Reviewer identification showing who made each change
+- Field-level diff information showing exactly what was modified
+
+#### Editing Features
+
+**Prediction Editing**
+- Edit extracted field values directly in the visual editor
+- Change tracking with visual indicators (blue left border on modified fields)
+- Save changes directly to S3 with proper versioning
+- Discard changes button to revert all edits
+
+**Evaluation Baseline Editing** (when evaluation is enabled)
+- Edit baseline (expected) values alongside predictions
+- Independent change tracking from predictions (orange left border on modified baseline fields)
+- Separate save/discard controls for baseline edits
+- Side-by-side comparison of predicted vs expected values
+
+**Save & Reprocess Workflow**
+
+After making edits to predictions or baselines, you can trigger reprocessing to re-run downstream steps with the updated data:
+
+1. **Save Your Edits**: Click "Save Changes" to persist prediction edits or "Save Baseline" to persist baseline edits to S3
+2. **Trigger Reprocessing**: After saving, click the "Reprocess" button (or use the document toolbar "Reprocess" action)
+3. **Automatic Pipeline Execution**: The document automatically transitions through processing stages:
+   - `SUMMARIZING` → Re-generates document summary using updated extraction data
+   - `EVALUATING` → Re-runs evaluation comparing updated predictions against baselines
+   - `COMPLETE` → Processing finished with updated results
+4. **View Updated Results**: Once complete, the evaluation scores and comparison results reflect your edits
+
+**Key Benefits of Save & Reprocess:**
+- **Iterative Refinement**: Make corrections and immediately see how they affect evaluation scores
+- **Baseline Correction**: Fix ground truth errors and re-evaluate without re-uploading documents
+- **Prompt Tuning Workflow**: Edit predictions to match desired output, save as baseline, then use for prompt improvement
+- **Quality Assurance**: Verify that corrections properly resolve evaluation mismatches
+
+#### Smart Filtering
+
+- **Low Confidence Filter**: Toggle to show only fields with confidence scores below threshold
+- **Evaluation Mismatches Filter**: Toggle to show only fields that don't match baseline (when evaluation enabled)
+- **Collapsible Tree Navigation**: Expand/Collapse All buttons for nested data structures
+- **Individual Node Toggle**: Click ▶/▼ to expand or collapse specific objects/arrays
+
+#### Evaluation Comparison Mode
+
+When evaluation data is available:
+- Side-by-side display of prediction and baseline values for each field
+- Match indicators showing ✓ Match or ⚠ Mismatch status
+- Evaluation scores and LLM-generated comparison reasons
+- Aggregate scores for nested groups and arrays
 
 ## Best Practices
 

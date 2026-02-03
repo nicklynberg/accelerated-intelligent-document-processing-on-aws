@@ -104,3 +104,38 @@ query GetDocument($objectKey: ID!) {
     }
 }
 """
+
+# Lightweight status-only update mutation for minimal DynamoDB WCU usage
+# Use this during parallel Map operations to update status without touching Sections array
+UPDATE_DOCUMENT_STATUS = """
+mutation UpdateDocumentStatus($input: UpdateDocumentStatusInput!) {
+    updateDocumentStatus(input: $input) {
+        ObjectKey
+        ObjectStatus
+        WorkflowExecutionArn
+        WorkflowStatus
+    }
+}
+"""
+
+# Atomic section-level update mutation for parallel Map operations
+# Uses SET Sections[index] = :value for efficient single-section updates
+UPDATE_DOCUMENT_SECTION = """
+mutation UpdateDocumentSection($input: UpdateDocumentSectionInput!) {
+    updateDocumentSection(input: $input) {
+        ObjectKey
+        ObjectStatus
+        Sections {
+            Id
+            PageIds
+            Class
+            OutputJSONUri
+            ConfidenceThresholdAlerts {
+                attributeName
+                confidence
+                confidenceThreshold
+            }
+        }
+    }
+}
+"""

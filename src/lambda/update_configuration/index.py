@@ -13,6 +13,7 @@ from botocore.exceptions import ClientError
 from idp_common.config.configuration_manager import (
     ConfigurationManager,  # type: ignore[import-untyped]
 )
+from idp_common.config.merge_utils import merge_config_with_defaults
 from pydantic import ValidationError
 
 logger = logging.getLogger()
@@ -187,6 +188,72 @@ def swap_model_ids(data: Any, region_type: str) -> Any:
 
 
 
+def detect_pattern_from_config(config: Dict[str, Any]) -> str:
+    """
+    Auto-detect the IDP pattern from config content.
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        Pattern name (pattern-1, pattern-2, or pattern-3)
+    """
+    # Check classification method
+    classification_method = config.get("classification", {}).get("classificationMethod", "")
+    
+    if classification_method == "bda":
+        return "pattern-1"
+    elif classification_method == "udop":
+        return "pattern-3"
+    else:
+        # Default to pattern-2 (most common - Textract + Bedrock LLM)
+        return "pattern-2"
+
+
+def merge_custom_with_defaults(
+    custom_config: Dict[str, Any],
+    pattern: str = None,
+) -> Dict[str, Any]:
+    """
+    Merge a minimal custom config with system defaults.
+    
+    This allows users to provide only the fields they want to customize,
+    with all other fields populated from system defaults.
+    
+    Args:
+        custom_config: User's custom configuration (may be partial)
+        pattern: Pattern to use for defaults. If None, auto-detected.
+        
+    Returns:
+        Complete configuration with defaults applied
+    """
+    # Auto-detect pattern if not provided
+    if pattern is None:
+        pattern = detect_pattern_from_config(custom_config)
+        logger.info(f"Auto-detected pattern: {pattern}")
+    
+    try:
+        # Merge with system defaults
+        merged = merge_config_with_defaults(custom_config, pattern=pattern, validate=False)
+        
+        # Log merge summary
+        user_keys = set(custom_config.keys())
+        merged_keys = set(merged.keys())
+        logger.info(f"Merged custom config: user provided {len(user_keys)} sections, merged has {len(merged_keys)} sections")
+        logger.info(f"User-provided sections: {user_keys}")
+        
+        return merged
+        
+    except FileNotFoundError as e:
+        # System defaults not available in Lambda - return config as-is
+        logger.warning(f"System defaults not available, using config as-is: {e}")
+        return custom_config
+    except Exception as e:
+        # Any other error - log and return original config
+        logger.warning(f"Error merging with defaults, using config as-is: {e}")
+        return custom_config
+
+
 def generate_physical_id(stack_id: str, logical_id: str) -> str:
     """
     Generates a consistent physical ID for the custom resource
@@ -241,6 +308,13 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             # Process Default configuration
             if "Default" in properties:
                 resolved_default = resolve_content(properties["Default"])
+                
+                # Merge minimal config with system defaults
+                # This allows config.yaml files to only specify what they want to customize
+                if isinstance(resolved_default, dict):
+                    logger.info("Merging default config with system defaults...")
+                    resolved_default = merge_custom_with_defaults(resolved_default)
+                
                 # Apply custom model ARNs if provided
                 if isinstance(resolved_default, dict):
                     # Replace classification model if CustomClassificationModelARN is provided and not empty
@@ -280,6 +354,12 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                 # Remove legacy pricing field if present (now stored separately as DefaultPricing)
                 if isinstance(resolved_custom, dict):
                     resolved_custom.pop("pricing", None)
+                    
+                    # Merge minimal custom config with system defaults
+                    # This allows users to provide only customized fields
+                    logger.info("Merging custom config with system defaults...")
+                    resolved_custom = merge_custom_with_defaults(resolved_custom)
+                    
                 configurations["Custom"] = resolved_custom
 
             # Process DefaultPricing configuration if provided

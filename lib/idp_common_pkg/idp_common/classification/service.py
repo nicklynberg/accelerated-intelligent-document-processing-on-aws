@@ -243,11 +243,21 @@ class ClassificationService:
         Returns:
             Document with limited pages for classification
         """
-        # 0 or negative means ALL pages
-        if self.max_pages_for_classification <= 0:
+        # "ALL" means use all pages
+        if str(self.max_pages_for_classification).upper() == "ALL":
             return document
 
-        max_pages = self.max_pages_for_classification
+        try:
+            max_pages = int(self.max_pages_for_classification)
+        except (ValueError, TypeError):
+            logger.warning(
+                f"Invalid maxPagesForClassification value: {self.max_pages_for_classification}, using ALL pages"
+            )
+            return document
+
+        # 0 or negative means ALL pages (backward compatibility)
+        if max_pages <= 0:
+            return document
         try:
             if len(document.pages) <= max_pages:
                 return document
@@ -274,7 +284,7 @@ class ClassificationService:
             )
             return limited_document
 
-        except ValueError:
+        except (ValueError, TypeError):
             logger.warning(
                 f"Invalid maxPagesForClassification value: {self.max_pages_for_classification}, using ALL pages"
             )
@@ -1874,11 +1884,21 @@ class ClassificationService:
             return document
 
         # Check for limited page classification
-        # 0 or negative means ALL pages
-        if self.max_pages_for_classification > 0:
-            logger.info(
-                f"Using limited page classification: {self.max_pages_for_classification} pages"
-            )
+        # "ALL" means use all pages, otherwise parse as int
+        max_pages_str = str(self.max_pages_for_classification).upper()
+        use_limited_pages = False
+        max_pages_int = 0
+
+        if max_pages_str != "ALL":
+            try:
+                max_pages_int = int(self.max_pages_for_classification)
+                if max_pages_int > 0:
+                    use_limited_pages = True
+            except (ValueError, TypeError):
+                pass  # Invalid value, treat as ALL
+
+        if use_limited_pages:
+            logger.info(f"Using limited page classification: {max_pages_int} pages")
 
             # Create limited document for classification
             limited_document = self._limit_pages_for_classification(document)

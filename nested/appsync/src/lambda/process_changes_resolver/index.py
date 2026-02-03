@@ -42,13 +42,12 @@ def handler(event, context):
                 'processingJobId': None
             }
         
+        # Allow empty arrays for evaluation-only reprocessing
+        # When both are empty, the document will be resubmitted and the existing
+        # Lambda skip logic will bypass OCR/Classification/Extraction/Assessment
+        # and proceed directly to Summarization and Evaluation steps
         if not modified_sections and not modified_pages:
-            logger.error("Either modifiedSections or modifiedPages is required")
-            return {
-                'success': False,
-                'message': 'Either modifiedSections or modifiedPages is required',
-                'processingJobId': None
-            }
+            logger.info("No section or page modifications - reprocessing for evaluation/summarization only")
 
         logger.info(f"Processing changes for document: {object_key}")
         logger.info(f"Modified sections: {json.dumps(modified_sections)}")

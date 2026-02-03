@@ -21,7 +21,10 @@ import {
   Select,
   CollectionPreferences,
   ExpandableSection,
+  RadioGroup,
 } from '@cloudscape-design/components';
+// eslint-disable-next-line import/no-extraneous-dependencies
+import yaml from 'js-yaml';
 import { generateClient } from 'aws-amplify/api';
 import GET_TEST_RUN from '../../graphql/queries/getTestResults';
 import START_TEST_RUN from '../../graphql/queries/startTestRun';
@@ -359,6 +362,11 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
   const [selectedRangeData, setSelectedRangeData] = useState(null);
   const [lowestScoreCount, setLowestScoreCount] = useState({ label: '5', value: 5 });
 
+  // Config export modal state
+  const [showConfigExportModal, setShowConfigExportModal] = useState(false);
+  const [configExportFormat, setConfigExportFormat] = useState('json');
+  const [configExportFileName, setConfigExportFileName] = useState('');
+
   const getProgressMessage = (progressLevel) => {
     if (progressLevel <= 1) return 'Initializing test results...';
     if (progressLevel <= 2) return 'Processing evaluation data...';
@@ -590,22 +598,108 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
     console.error('Error parsing breakdown data:', e);
   }
 
-  const downloadConfig = () => {
+  // Helper function to get merged config from results.config
+  // The config may be stored as a JSON string (possibly double-stringified) with {Default: {...}, Custom: {...}} or already merged
+  const getMergedConfig = (config) => {
+    if (!config) return null;
+
+    // Parse if it's a string (may be double-stringified)
+    let parsedConfig = config;
+    while (typeof parsedConfig === 'string') {
+      try {
+        parsedConfig = JSON.parse(parsedConfig);
+      } catch (e) {
+        console.error('Failed to parse config string:', e);
+        return null;
+      }
+    }
+
+    // If config is wrapped in a "Config" object, extract it
+    if (parsedConfig && parsedConfig.Config && typeof parsedConfig.Config === 'object') {
+      parsedConfig = parsedConfig.Config;
+    }
+
+    // Deep merge helper function
+    const deepMerge = (target, source) => {
+      const output = { ...target };
+      if (source && typeof source === 'object' && !Array.isArray(source)) {
+        Object.keys(source).forEach((key) => {
+          if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+            if (target[key] && typeof target[key] === 'object' && !Array.isArray(target[key])) {
+              output[key] = deepMerge(target[key], source[key]);
+            } else {
+              output[key] = { ...source[key] };
+            }
+          } else {
+            output[key] = source[key];
+          }
+        });
+      }
+      return output;
+    };
+
+    // If config has Default and Custom properties, merge them
+    if (parsedConfig && parsedConfig.Default && typeof parsedConfig.Default === 'object') {
+      const defaultConfig = parsedConfig.Default;
+      const customConfig = parsedConfig.Custom || {};
+
+      console.log('Merging Default and Custom configs');
+      return deepMerge(defaultConfig, customConfig);
+    }
+
+    // Config is already in merged format
+    console.log('Config already in merged format or no Default/Custom found');
+    return parsedConfig;
+  };
+
+  // Open config export modal
+  const openConfigExportModal = () => {
     if (!results?.config) {
       console.error('No config data available');
       return;
     }
+    // Set default filename based on testRunId
+    setConfigExportFileName(`test-run-${results.testRunId}-config`);
+    setConfigExportFormat('json');
+    setShowConfigExportModal(true);
+  };
 
-    const configData = JSON.stringify(results.config, null, 2);
-    const blob = new Blob([configData], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `test-run-${results.testRunId}-config.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  // Handle config export
+  const handleConfigExport = () => {
+    try {
+      const mergedConfig = getMergedConfig(results.config);
+      if (!mergedConfig) {
+        console.error('No config data available');
+        return;
+      }
+
+      let content;
+      let mimeType;
+      let fileExtension;
+
+      if (configExportFormat === 'yaml') {
+        content = yaml.dump(mergedConfig);
+        mimeType = 'text/yaml';
+        fileExtension = 'yaml';
+      } else {
+        content = JSON.stringify(mergedConfig, null, 2);
+        mimeType = 'application/json';
+        fileExtension = 'json';
+      }
+
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${configExportFileName}.${fileExtension}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      setShowConfigExportModal(false);
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
   };
 
   const handleReRun = async () => {
@@ -691,7 +785,7 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
   ) : null;
 
   const configButton = (
-    <Button onClick={downloadConfig} iconName="download">
+    <Button onClick={openConfigExportModal} iconName="download">
       Config
     </Button>
   );
@@ -1163,6 +1257,44 @@ const TestResults = ({ testRunId, setSelectedTestRunId }) => {
             <Box>No documents found in this range</Box>
           )}
         </Box>
+      </Modal>
+
+      <Modal
+        visible={showConfigExportModal}
+        onDismiss={() => setShowConfigExportModal(false)}
+        header="Export Configuration"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setShowConfigExportModal(false)}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleConfigExport}>
+                Export
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween direction="vertical" size="l">
+          <FormField label="File format">
+            <RadioGroup
+              value={configExportFormat}
+              onChange={({ detail }) => setConfigExportFormat(detail.value)}
+              items={[
+                { value: 'json', label: 'JSON' },
+                { value: 'yaml', label: 'YAML' },
+              ]}
+            />
+          </FormField>
+          <FormField label="File name">
+            <Input
+              value={configExportFileName}
+              onChange={({ detail }) => setConfigExportFileName(detail.value)}
+              placeholder="configuration"
+            />
+          </FormField>
+        </SpaceBetween>
       </Modal>
     </Container>
   );

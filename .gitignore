@@ -44,3 +44,5 @@ venv/
 output/*
 *.log
 dataset
+venv-*/
+notebooks/doc-split-metrics-exp/

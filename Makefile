@@ -9,13 +9,15 @@ NC := \033[0m  # No Color
 # Default target - run both lint and test
 all: lint test
 
-# Install idp-cli and idp_common packages in development mode
+# Install idp_common, idp-cli, and idp_sdk packages in development mode
 setup:
 	@echo "Installing idp_common package..."
 	pip install -e lib/idp_common_pkg
 	@echo "Installing idp-cli package..."
-	pip install -e idp_cli
-	@echo -e "$(GREEN)✅ Setup complete! idp-cli and idp_common are now installed.$(NC)"
+	pip install -e lib/idp_cli_pkg
+	@echo "Installing idp_sdk package..."
+	pip install -e lib/idp_sdk
+	@echo -e "$(GREEN)✅ Setup complete! idp_common, idp-cli, and idp_sdk are now installed.$(NC)"
 
 # Start the UI development server
 # Usage: make ui-start [STACK_NAME=<stack-name>]
@@ -45,10 +47,11 @@ ui-start:
 	@echo "Starting UI development server..."
 	cd src/ui && npm run start
 
-# Run tests in idp_common_pkg and idp_cli directories
+# Run tests in idp_common_pkg, idp_cli, and idp_sdk directories
 test:
 	$(MAKE) -C lib/idp_common_pkg test
-	cd idp_cli && python -m pytest -v
+	cd lib/idp_cli_pkg && python -m pytest -v
+	cd lib/idp_sdk && python -m pytest -v
 
 # Run both linting and formatting in one command
 lint: ruff-lint format check-arn-partitions validate-buildspec ui-lint
@@ -152,7 +155,7 @@ ui-lint:
 	STORED_HASH=$$(test -f src/ui/.checksum && cat src/ui/.checksum || echo ""); \
 	if [ "$$CURRENT_HASH" != "$$STORED_HASH" ]; then \
 		echo "UI code checksum changed - running lint..."; \
-		cd src/ui && npm ci --prefer-offline --no-audit && npm run lint && \
+		cd src/ui && npm ci --prefer-offline --no-audit && npm run lint -- --fix && \
 		echo "$$CURRENT_HASH" > .checksum; \
 		echo -e "$(GREEN)✅ UI lint completed and checksum updated$(NC)"; \
 	else \

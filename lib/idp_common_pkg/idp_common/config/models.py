@@ -101,11 +101,11 @@ class ExtractionConfig(BaseModel):
         description="Bedrock model ID for extraction",
     )
     system_prompt: str = Field(
-        default="You are a document assistant. Respond only with JSON. Never make up data, only provide data found in the document being provided.",
-        description="System prompt for extraction",
+        default="",
+        description="System prompt for extraction (populated from system defaults)",
     )
     task_prompt: str = Field(
-        default="", description="Task prompt template for extraction"
+        default="", description="Task prompt template for extraction (populated from system defaults)"
     )
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
@@ -159,9 +159,9 @@ class ClassificationConfig(BaseModel):
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
     max_tokens: int = Field(default=4096, gt=0)
-    maxPagesForClassification: int = Field(
-        default=0,
-        description="Max pages to use for classification. 0 or negative = ALL pages, positive = limit to N pages",
+    maxPagesForClassification: str = Field(
+        default="ALL",
+        description="Max pages to use for classification. 'ALL' = all pages, or a number to limit to N pages",
     )
     classificationMethod: str = Field(default="multimodalPageLevelClassification")
     sectionSplitting: str = Field(
@@ -193,13 +193,26 @@ class ClassificationConfig(BaseModel):
 
     @field_validator("maxPagesForClassification", mode="before")
     @classmethod
-    def parse_max_pages(cls, v: Any) -> int:
-        """Parse maxPagesForClassification - can be int or 'ALL' string (converted to 0)"""
+    def parse_max_pages(cls, v: Any) -> str:
+        """Parse maxPagesForClassification - accepts 'ALL' or numeric string/int.
+        
+        Converts legacy value of 0 to 'ALL' for backward compatibility.
+        Returns string to match UI schema enum: ['ALL', '1', '2', '3', '5', '10']
+        """
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return "ALL"
+        if isinstance(v, (int, float)):
+            # Convert legacy 0 to "ALL" for backward compatibility
+            if v <= 0:
+                return "ALL"
+            return str(int(v))
         if isinstance(v, str):
-            if v.upper() == "ALL":
-                return 0  # 0 means ALL pages
-            return int(v) if v else 0
-        return int(v)
+            v_upper = v.strip().upper()
+            # "ALL" or legacy "0" both mean all pages
+            if v_upper == "ALL" or v_upper == "0":
+                return "ALL"
+            return v.strip()
+        return str(v)
 
     @field_validator("sectionSplitting", mode="before")
     @classmethod
@@ -264,72 +277,12 @@ class AssessmentConfig(BaseModel):
         default=None, description="Bedrock model ID for assessment"
     )
     system_prompt: str = Field(
-        default="You are a document analysis assessment expert. Your role is to evaluate the confidence and accuracy of data extraction results by analyzing them against source documents.\n\nProvide accurate confidence scores for each assessment.",
-        description="System prompt for assessment",
+        default="",
+        description="System prompt for assessment (populated from system defaults)",
     )
     task_prompt: str = Field(
-        default="""<background>
-You are an expert document analysis assessment system. Your task is to evaluate the confidence of extraction results for a document of class {DOCUMENT_CLASS} and provide precise spatial localization for each field.
-</background>
-
-<task>
-Analyze the extraction results against the source document and provide confidence assessments AND bounding box coordinates for each extracted attribute. Consider factors such as:
-1. Text clarity and OCR quality in the source regions 
-2. Alignment between extracted values and document content 
-3. Presence of clear evidence supporting the extraction 
-4. Potential ambiguity or uncertainty in the source material 
-5. Completeness and accuracy of the extracted information
-6. Precise spatial location of each field in the document
-</task>
-
-<assessment-guidelines>
-For each attribute, provide: 
-- A confidence score between 0.0 and 1.0 where:
-   - 1.0 = Very high confidence, clear and unambiguous evidence
-   - 0.8-0.9 = High confidence, strong evidence with minor uncertainty
-   - 0.6-0.7 = Medium confidence, reasonable evidence but some ambiguity
-   - 0.4-0.5 = Low confidence, weak or unclear evidence
-   - 0.0-0.3 = Very low confidence, little to no supporting evidence
-- A clear explanation of the confidence reasoning
-- Precise spatial coordinates where the field appears in the document
-
-Guidelines: 
-- Base assessments on actual document content and OCR quality 
-- Consider both text-based evidence and visual/layout clues 
-- Account for OCR confidence scores when provided 
-- Be objective and specific in reasoning 
-- For bounding boxes, provide normalized coordinates (0.0 to 1.0) in the format: {"left": x1, "top": y1, "width": w, "height": h}
-</assessment-guidelines>
-
-<attributes-definitions>
-{ATTRIBUTE_NAMES_AND_DESCRIPTIONS}
-</attributes-definitions>
-
-<<CACHEPOINT>>
-
-<document-image>
-{DOCUMENT_IMAGE}
-</document-image>
-
-<ocr-text-confidence-results>
-{OCR_TEXT_CONFIDENCE}
-</ocr-text-confidence-results>
-
-<<CACHEPOINT>>
-
-<extraction-results>
-{EXTRACTION_RESULTS}
-</extraction-results>
-
-Provide your assessment as a JSON object with this exact structure:
-{
-  "attribute_name": {
-    "confidence": 0.0 to 1.0,
-    "confidence_reason": "explanation",
-    "bounding_box": {"left": 0.0, "top": 0.0, "width": 0.0, "height": 0.0}
-  }
-}""",
-        description="Task prompt template for assessment",
+        default="",
+        description="Task prompt template for assessment (populated from system defaults)",
     )
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
@@ -781,24 +734,73 @@ class PricingConfig(BaseModel):
         return self.model_dump(mode="python")
 
 
-class CriteriaValidationConfig(BaseModel):
-    """Criteria validation configuration"""
+class FactExtractionConfig(BaseModel):
+    """Fact extraction configuration for rule validation"""
 
     model: str = Field(
         default="us.anthropic.claude-3-5-sonnet-20240620-v1:0",
-        description="Bedrock model ID for criteria validation",
+        description="Bedrock model ID for fact extraction",
     )
-    system_prompt: str = Field(default="", description="System prompt")
-    task_prompt: str = Field(default="", description="Task prompt")
+    system_prompt: str = Field(default="", description="System prompt for fact extraction")
+    task_prompt: str = Field(default="", description="Task prompt for fact extraction")
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
     top_k: float = Field(default=20.0, ge=0.0)
     max_tokens: int = Field(default=4096, gt=0)
+
+    @field_validator("temperature", "top_p", "top_k", mode="before")
+    @classmethod
+    def parse_float(cls, v: Any) -> float:
+        if isinstance(v, str):
+            return float(v) if v else 0.0
+        return float(v)
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def parse_int(cls, v: Any) -> int:
+        if isinstance(v, str):
+            return int(v) if v else 0
+        return int(v)
+
+
+class RuleValidationOrchestratorConfig(BaseModel):
+    """Rule validation summarization configuration"""
+
+    model: str = Field(
+        default="us.anthropic.claude-3-5-sonnet-20240620-v1:0",
+        description="Bedrock model ID for rule validation summarization",
+    )
+    system_prompt: str = Field(default="", description="System prompt for summarization")
+    task_prompt: str = Field(default="", description="Task prompt for summarization")
+    temperature: float = Field(default=0.0, ge=0.0, le=1.0)
+    top_p: float = Field(default=0.01, ge=0.0, le=1.0)
+    top_k: float = Field(default=20.0, ge=0.0)
+    max_tokens: int = Field(default=4096, gt=0)
+
+    @field_validator("temperature", "top_p", "top_k", mode="before")
+    @classmethod
+    def parse_float(cls, v: Any) -> float:
+        if isinstance(v, str):
+            return float(v) if v else 0.0
+        return float(v)
+
+    @field_validator("max_tokens", mode="before")
+    @classmethod
+    def parse_int(cls, v: Any) -> int:
+        if isinstance(v, str):
+            return int(v) if v else 0
+        return int(v)
+
+
+class RuleValidationConfig(BaseModel):
+    """Rule validation configuration"""
+
+    enabled: bool = Field(default=True, description="Enable rule validation")
     semaphore: int = Field(
-        default=3, gt=0, description="Number of concurrent API calls"
+        default=5, gt=0, description="Number of concurrent API calls"
     )
     max_chunk_size: int = Field(
-        default=180000, gt=0, description="Maximum tokens per chunk"
+        default=8000, gt=0, description="Maximum tokens per chunk"
     )
     token_size: int = Field(default=4, gt=0, description="Average characters per token")
     overlap_percentage: int = Field(
@@ -807,17 +809,20 @@ class CriteriaValidationConfig(BaseModel):
     response_prefix: str = Field(
         default="<response>", description="Response prefix marker"
     )
-
-    @field_validator("temperature", "top_p", "top_k", mode="before")
-    @classmethod
-    def parse_float(cls, v: Any) -> float:
-        """Parse float from string or number"""
-        if isinstance(v, str):
-            return float(v) if v else 0.0
-        return float(v)
+    recommendation_options: Optional[str] = Field(
+        default=None, description="Available recommendation options"
+    )
+    extraction_results: Optional[Dict[str, Any]] = Field(
+        default=None, description="Extraction results to include in rule validation prompts"
+    )
+    fact_extraction: Optional[FactExtractionConfig] = Field(
+        default=None, description="Configuration for fact extraction step"
+    )
+    rule_validation_orchestrator: Optional[RuleValidationOrchestratorConfig] = Field(
+        default=None, description="Configuration for rule validation summarization"
+    )
 
     @field_validator(
-        "max_tokens",
         "semaphore",
         "max_chunk_size",
         "token_size",
@@ -946,6 +951,20 @@ class DiscoveryConfig(BaseModel):
     )
 
 
+# Known deprecated fields that should be logged when encountered
+# Defined at module level to avoid Pydantic converting to ModelPrivateAttr
+IDP_CONFIG_DEPRECATED_FIELDS = {
+    "criteria_bucket",
+    "criteria_types",
+    "request_bucket",
+    "request_history_prefix",
+    "cost_report_bucket",
+    "output_bucket",
+    "textract_page_tracker",
+    "summary",
+}
+
+
 class SchemaConfig(BaseModel):
     """
     Schema configuration model.
@@ -1009,15 +1028,20 @@ class IDPConfig(BaseModel):
         ),
         description="Summarization configuration",
     )
-    criteria_validation: CriteriaValidationConfig = Field(
-        default_factory=CriteriaValidationConfig,
-        description="Criteria validation configuration",
+    rule_validation: RuleValidationConfig = Field(
+        default_factory=lambda: RuleValidationConfig(
+            model="us.anthropic.claude-3-5-sonnet-20240620-v1:0"
+        ),
+        description="Rule validation configuration",
     )
     agents: AgentsConfig = Field(
         default_factory=AgentsConfig, description="Agents configuration"
     )
     classes: List[Dict[str, Any]] = Field(
         default_factory=list, description="Document class definitions (JSON Schema)"
+    )
+    rule_classes: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Rule class definitions for rule validation (JSON Schema)"
     )
     discovery: DiscoveryConfig = Field(
         default_factory=DiscoveryConfig, description="Discovery configuration"
@@ -1031,39 +1055,56 @@ class IDPConfig(BaseModel):
         default=None, description="Pricing entries (optional - usually loaded from PricingConfig)"
     )
 
-    # Criteria validation specific fields (used in pattern-2/criteria-validation)
+    # Rule validation specific fields (used in pattern-2/rule-validation)
     summary: Optional[Dict[str, Any]] = Field(
-        default=None, description="Summary configuration for criteria validation"
+        default=None, description="Summary configuration for rule validation"
     )
-    criteria_types: Optional[List[str]] = Field(
-        default=None, description="List of criteria types for validation"
-    )
-    
-    request_bucket: Optional[str] = Field(
-        default=None, description="S3 bucket for user history/request data"
-    )
-    request_history_prefix: Optional[str] = Field(
-        default=None, description="S3 prefix for request history"
-    )
-    criteria_bucket: Optional[str] = Field(
-        default=None, description="S3 bucket for criteria documents"
-    )
-    output_bucket: Optional[str] = Field(
-        default=None, description="S3 bucket for processing output"
-    )
-    textract_page_tracker: Optional[str] = Field(
-        default=None, description="S3 bucket for Textract page tracking"
-    )
-    cost_report_bucket: Optional[str] = Field(
-        default=None, description="S3 bucket for cost reports"
+    rule_types: Optional[List[str]] = Field(
+        default=None, description="List of rule types for validation"
     )
 
+
     model_config = ConfigDict(
-        # Do not allow extra fields - all config should be explicit
-        extra="forbid",
+        # Allow extra fields to be ignored - supports backward compatibility
+        # with older configs that may have deprecated fields
+        extra="ignore",
         # Validate on assignment
         validate_assignment=True,
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def log_deprecated_fields(cls, data: Any) -> Any:
+        """Log warnings for deprecated/unknown fields before they're silently ignored."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        if isinstance(data, dict):
+            # Get all field names defined in the model
+            defined_fields = set(cls.model_fields.keys())
+
+            # Find extra fields in the input data
+            extra_fields = set(data.keys()) - defined_fields
+
+            if extra_fields:
+                # Categorize as deprecated vs unknown
+                deprecated = extra_fields & IDP_CONFIG_DEPRECATED_FIELDS
+                unknown = extra_fields - IDP_CONFIG_DEPRECATED_FIELDS
+
+                if deprecated:
+                    logger.warning(
+                        f"IDPConfig: Ignoring deprecated fields (these are no longer used): "
+                        f"{sorted(deprecated)}"
+                    )
+
+                if unknown:
+                    logger.warning(
+                        f"IDPConfig: Ignoring unknown fields (not defined in model): "
+                        f"{sorted(unknown)}"
+                    )
+
+        return data
 
     def to_dict(self, **extra_fields: Any) -> Dict[str, Any]:
         """
@@ -1208,6 +1249,18 @@ class ConfigurationRecord(BaseModel):
                 )
                 config_data["classes"] = migrate_legacy_to_schema(
                     config_data["classes"]
+                )
+
+        # Auto-migrate legacy format for rule_classes if needed
+        if config_data.get("rule_classes"):
+            from .migration import is_legacy_format, migrate_legacy_to_schema
+
+            if is_legacy_format(config_data["rule_classes"]):
+                logger.info(
+                    f"Migrating {config_type} rule_classes to JSON Schema format"
+                )
+                config_data["rule_classes"] = migrate_legacy_to_schema(
+                    config_data["rule_classes"]
                 )
 
         # Remove legacy pricing field (now stored separately as DefaultPricing/CustomPricing)

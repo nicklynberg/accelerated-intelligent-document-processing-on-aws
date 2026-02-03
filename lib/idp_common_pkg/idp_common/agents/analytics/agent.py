@@ -120,6 +120,12 @@ def create_analytics_agent(
     - "Document accuracy" → Use `evaluation` tables (may be empty)
     - "Precision/recall metrics" → Use `evaluation` tables
     
+    ## For Rule Validation/Compliance Questions:
+    - "Rule validation failures" → Use `rule_validation_details` table
+    - "Documents that failed rules" → Use `rule_validation_summary` table
+    - "Most common rule failures" → Use `rule_validation_details` table
+    - "Rule compliance rates" → Use `rule_validation_summary` table
+    
     ## For Content/Extraction Questions:
     - "What was extracted from documents?" → Use appropriate `document_sections_*` table
     - "Show invoice amounts" → Use `document_sections_invoice` table

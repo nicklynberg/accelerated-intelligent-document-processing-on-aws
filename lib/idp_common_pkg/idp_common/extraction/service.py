@@ -39,7 +39,7 @@ except ImportError:
     AGENTIC_AVAILABLE = False
 from pydantic import BaseModel
 
-from idp_common.utils import extract_json_from_text
+from idp_common.utils import extract_json_from_text, repair_truncated_json
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +76,9 @@ class ExtractionResult(BaseModel):
     metering: dict[str, Any]
     parsing_succeeded: bool
     total_duration: float
+    output_truncated: bool = False
+    output_repaired: bool = False
+    repair_method: str | None = None
 
 
 class ExtractionService:
@@ -911,6 +914,11 @@ class ExtractionService:
         # Time the model invocation
         request_start_time = time.time()
 
+        # Initialize repair tracking variables
+        output_truncated = False
+        output_repaired = False
+        repair_method = None
+
         if self.config.extraction.agentic.enabled:
             if not AGENTIC_AVAILABLE:
                 raise ImportError(
@@ -972,16 +980,39 @@ class ExtractionService:
             # Parse response into JSON
             extracted_fields = {}
             parsing_succeeded = True
+            output_truncated = False
+            output_repaired = False
+            repair_method = None
 
             try:
                 extracted_fields = json.loads(extract_json_from_text(extracted_text))
             except Exception as e:
-                logger.error(
-                    f"Error parsing LLM output - invalid JSON?: {extracted_text} - {e}"
+                logger.warning(
+                    f"Error parsing LLM output - attempting JSON repair: {e}"
                 )
-                logger.info("Using unparsed LLM output.")
-                extracted_fields = {"raw_output": extracted_text}
-                parsing_succeeded = False
+
+                # Attempt to repair truncated JSON
+                repaired_data, repair_info = repair_truncated_json(extracted_text)
+                output_truncated = repair_info.get("was_truncated", False)
+
+                if repaired_data:
+                    # Repair succeeded
+                    extracted_fields = repaired_data
+                    output_repaired = True
+                    repair_method = repair_info.get("repair_method")
+                    parsing_succeeded = True
+                    logger.info(
+                        f"JSON repair successful using '{repair_method}': "
+                        f"recovered {repair_info.get('fields_recovered', 0)} fields"
+                    )
+                else:
+                    # Repair failed - store raw output
+                    logger.error(
+                        f"JSON repair failed: {repair_info.get('error', 'unknown error')}. "
+                        f"Raw output preview: {extracted_text[:500]}..."
+                    )
+                    extracted_fields = {"raw_output": extracted_text}
+                    parsing_succeeded = False
 
         total_duration = time.time() - request_start_time
         logger.info(f"Time taken for extraction: {total_duration:.2f} seconds")
@@ -991,6 +1022,9 @@ class ExtractionService:
             metering=metering,
             parsing_succeeded=parsing_succeeded,
             total_duration=total_duration,
+            output_truncated=output_truncated,
+            output_repaired=output_repaired,
+            repair_method=repair_method,
         )
 
     def _save_results(
@@ -1013,15 +1047,25 @@ class ExtractionService:
             section_id: Section ID
             t0: Start time
         """
+        # Build metadata - include truncation/repair info if applicable
+        metadata = {
+            "parsing_succeeded": result.parsing_succeeded,
+            "extraction_time_seconds": result.total_duration,
+        }
+
+        # Add truncation/repair metadata when relevant
+        if result.output_truncated:
+            metadata["output_truncated"] = True
+        if result.output_repaired:
+            metadata["output_repaired"] = True
+            metadata["repair_method"] = result.repair_method
+
         # Write to S3
         output = {
             "document_class": {"type": section_info.class_label},
             "split_document": {"page_indices": section_info.page_indices},
             "inference_result": result.extracted_fields,
-            "metadata": {
-                "parsing_succeeded": result.parsing_succeeded,
-                "extraction_time_seconds": result.total_duration,
-            },
+            "metadata": metadata,
         }
         s3.write_content(
             output,

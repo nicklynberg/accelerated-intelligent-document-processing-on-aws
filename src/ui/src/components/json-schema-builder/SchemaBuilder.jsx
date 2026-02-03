@@ -17,13 +17,13 @@ import {
 import { useSchemaDesigner } from '../../hooks/useSchemaDesigner';
 import { useSchemaValidation } from '../../hooks/useSchemaValidation';
 import { useDebounce } from '../../hooks/useDebounce';
-import { TYPE_OPTIONS, X_AWS_IDP_DOCUMENT_TYPE } from '../../constants/schemaConstants';
+import { TYPE_OPTIONS, X_AWS_IDP_DOCUMENT_TYPE, X_AWS_IDP_RULE_TYPE } from '../../constants/schemaConstants';
 import SchemaCanvas from './SchemaCanvas';
 import SchemaInspector from './SchemaInspector';
 import SchemaPreviewTabs from './SchemaPreviewTabs';
 import { formatTypeBadge, DocumentTypeBadge } from './utils/badgeHelpers';
 
-const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
+const SchemaBuilder = ({ initialSchema, onChange, onValidate, isRuleSchema = false }) => {
   const {
     classes,
     selectedClassId,
@@ -43,7 +43,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
     getSelectedClass,
     getSelectedAttribute,
     clearAllClasses,
-  } = useSchemaDesigner(initialSchema || []);
+  } = useSchemaDesigner(initialSchema || [], isRuleSchema);
 
   const { validateSchema } = useSchemaValidation();
 
@@ -200,6 +200,17 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
   const docTypeCount = classes.filter((c) => c[X_AWS_IDP_DOCUMENT_TYPE]).length;
   const sharedCount = classes.filter((c) => !c[X_AWS_IDP_DOCUMENT_TYPE]).length;
 
+  // Dynamic labels based on schema type
+  const typeLabel = isRuleSchema ? 'rule' : 'document';
+  const typeLabelPlural = isRuleSchema ? 'rules' : 'documents';
+  const TypeLabel = isRuleSchema ? 'Rule' : 'Document';
+  const TypesLabel = isRuleSchema ? 'Rules' : 'Documents';
+  const classLabel = isRuleSchema ? 'Rule Class' : 'Class';
+  const classesLabel = isRuleSchema ? 'Rule Classes' : 'Classes';
+  const attributeLabel = isRuleSchema ? 'Rule' : 'Attribute';
+  const attributesLabel = isRuleSchema ? 'Rules' : 'Attributes';
+  const sharedLabel = isRuleSchema ? 'Recommendation Options' : 'Shared Classes';
+
   return (
     <>
       {/* Floating breadcrumb bar showing current selection - fixed to viewport */}
@@ -222,7 +233,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
                 <Box fontSize="body-m" fontWeight="bold">
                   {getSelectedClass()?.name || 'Unknown Class'}
                 </Box>
-                {getSelectedClass()?.[X_AWS_IDP_DOCUMENT_TYPE] && <DocumentTypeBadge />}
+                {getSelectedClass()?.[X_AWS_IDP_DOCUMENT_TYPE] && <DocumentTypeBadge isRuleSchema={isRuleSchema} />}
               </>
             )}
             {selectedAttributeId && (
@@ -276,10 +287,10 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
                   <Box>
                     <SpaceBetween direction="horizontal" size="xs">
                       <Button onClick={handleAddClass} iconName="add-plus">
-                        Add Class
+                        {isRuleSchema ? 'Add Rule Class' : 'Add Class'}
                       </Button>
                       <Button onClick={handleAddAttribute} disabled={!selectedClassId} iconName="add-plus">
-                        Add Attribute
+                        {isRuleSchema ? 'Add Rule' : 'Add Attribute'}
                       </Button>
                       <Button onClick={() => setShowPreview(!showPreview)} iconName={showPreview ? 'view-vertical' : 'view-horizontal'}>
                         {showPreview ? 'Hide' : 'Show'} Preview
@@ -316,21 +327,22 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
               <Box>
                 <SpaceBetween size="m">
                   <Header variant="h3">
-                    Classes ({classes.length} total: {docTypeCount} document {docTypeCount === 1 ? 'type' : 'types'}, {sharedCount} shared)
+                    {classesLabel} ({docTypeCount} {typeLabel} {docTypeCount === 1 ? 'type' : 'types'})
                   </Header>
 
                   {classes.filter((c) => c[X_AWS_IDP_DOCUMENT_TYPE]).length === 0 && (
-                    <Alert type="warning" header="No Document Types">
-                      No classes are marked as document types. Mark at least one class as a document type to generate extraction schemas.
+                    <Alert type="warning" header={`No ${TypesLabel} Types`}>
+                      No classes are marked as {typeLabel} types. Mark at least one class as a {typeLabel} type to generate {typeLabel}{' '}
+                      schemas.
                     </Alert>
                   )}
 
                   <Box>
-                    <Header variant="h4">Document Types</Header>
+                    {!isRuleSchema && <Header variant="h4">{TypesLabel} Types</Header>}
                     <SpaceBetween size="s">
                       {classes.filter((c) => c[X_AWS_IDP_DOCUMENT_TYPE]).length === 0 && (
                         <Box fontSize="body-s" color="text-body-secondary" padding="s">
-                          No document types yet. Add a class and mark it as a document type.
+                          No {typeLabel} types yet. Add a class and mark it as a {typeLabel} type.
                         </Box>
                       )}
                       {classes
@@ -358,7 +370,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
                               <SpaceBetween size="xs">
                                 <Box>
                                   <SpaceBetween direction="horizontal" size="s" alignItems="center">
-                                    <DocumentTypeBadge />
+                                    <DocumentTypeBadge isRuleSchema={isRuleSchema} />
                                     <Box fontWeight="bold">{cls.name}</Box>
                                     <Box float="right">
                                       <SpaceBetween direction="horizontal" size="xs">
@@ -391,7 +403,8 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
                                   </Box>
                                 )}
                                 <Box fontSize="body-s" color="text-body-secondary">
-                                  {Object.keys(cls.attributes?.properties || {}).length} attribute(s)
+                                  {Object.keys(cls.attributes?.properties || {}).length}{' '}
+                                  {isRuleSchema ? attributesLabel.toLowerCase() : 'attribute(s)'}
                                 </Box>
                               </SpaceBetween>
                             </div>
@@ -400,79 +413,81 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
                     </SpaceBetween>
                   </Box>
 
-                  <Box>
-                    <Header variant="h4">Shared Classes</Header>
-                    <SpaceBetween size="s">
-                      {classes.filter((c) => !c[X_AWS_IDP_DOCUMENT_TYPE]).length === 0 && (
-                        <Box fontSize="body-s" color="text-body-secondary" padding="s">
-                          No shared classes. Shared classes can be referenced by document types via $ref.
-                        </Box>
-                      )}
-                      {classes
-                        .filter((cls) => !cls[X_AWS_IDP_DOCUMENT_TYPE])
-                        .map((cls) => (
-                          <Container key={cls.id} disableContentPaddings={false}>
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => setSelectedClassId(cls.id)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  setSelectedClassId(cls.id);
-                                }
-                              }}
-                              style={{
-                                cursor: 'pointer',
-                                padding: '12px',
-                                borderRadius: '8px',
-                                border: selectedClassId === cls.id ? '2px solid #0972d3' : '2px solid transparent',
-                                backgroundColor: selectedClassId === cls.id ? '#e8f4fd' : 'transparent',
-                                transition: 'all 0.2s ease',
-                              }}
-                            >
-                              <SpaceBetween size="xs">
-                                <Box>
-                                  <SpaceBetween direction="horizontal" size="s" alignItems="center">
-                                    <Box fontWeight="bold">{cls.name}</Box>
-                                    <Box float="right">
-                                      <SpaceBetween direction="horizontal" size="xs">
-                                        <Button
-                                          variant="icon"
-                                          iconName="edit"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleEditClass(cls);
-                                          }}
-                                          ariaLabel={`Edit ${cls.name}`}
-                                        />
-                                        <Button
-                                          variant="icon"
-                                          iconName="close"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setClassToDelete(cls);
-                                            setShowDeleteConfirmModal(true);
-                                          }}
-                                          ariaLabel={`Delete ${cls.name}`}
-                                        />
-                                      </SpaceBetween>
-                                    </Box>
-                                  </SpaceBetween>
-                                </Box>
-                                {cls.description && (
-                                  <Box fontSize="body-s" color="text-body-secondary">
-                                    {cls.description}
+                  {!isRuleSchema && (
+                    <Box>
+                      <Header variant="h4">{sharedLabel}</Header>
+                      <SpaceBetween size="s">
+                        {classes.filter((c) => !c[X_AWS_IDP_DOCUMENT_TYPE]).length === 0 && (
+                          <Box fontSize="body-s" color="text-body-secondary" padding="s">
+                            No shared classes. Shared classes can be referenced by {typeLabel} types via $ref.
+                          </Box>
+                        )}
+                        {classes
+                          .filter((cls) => !cls[X_AWS_IDP_DOCUMENT_TYPE])
+                          .map((cls) => (
+                            <Container key={cls.id} disableContentPaddings={false}>
+                              <div
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelectedClassId(cls.id)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    setSelectedClassId(cls.id);
+                                  }
+                                }}
+                                style={{
+                                  cursor: 'pointer',
+                                  padding: '12px',
+                                  borderRadius: '8px',
+                                  border: selectedClassId === cls.id ? '2px solid #0972d3' : '2px solid transparent',
+                                  backgroundColor: selectedClassId === cls.id ? '#e8f4fd' : 'transparent',
+                                  transition: 'all 0.2s ease',
+                                }}
+                              >
+                                <SpaceBetween size="xs">
+                                  <Box>
+                                    <SpaceBetween direction="horizontal" size="s" alignItems="center">
+                                      <Box fontWeight="bold">{cls.name}</Box>
+                                      <Box float="right">
+                                        <SpaceBetween direction="horizontal" size="xs">
+                                          <Button
+                                            variant="icon"
+                                            iconName="edit"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleEditClass(cls);
+                                            }}
+                                            ariaLabel={`Edit ${cls.name}`}
+                                          />
+                                          <Button
+                                            variant="icon"
+                                            iconName="close"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setClassToDelete(cls);
+                                              setShowDeleteConfirmModal(true);
+                                            }}
+                                            ariaLabel={`Delete ${cls.name}`}
+                                          />
+                                        </SpaceBetween>
+                                      </Box>
+                                    </SpaceBetween>
                                   </Box>
-                                )}
-                                <Box fontSize="body-s" color="text-body-secondary">
-                                  {Object.keys(cls.attributes?.properties || {}).length} attribute(s)
-                                </Box>
-                              </SpaceBetween>
-                            </div>
-                          </Container>
-                        ))}
-                    </SpaceBetween>
-                  </Box>
+                                  {cls.description && (
+                                    <Box fontSize="body-s" color="text-body-secondary">
+                                      {cls.description}
+                                    </Box>
+                                  )}
+                                  <Box fontSize="body-s" color="text-body-secondary">
+                                    {Object.keys(cls.attributes?.properties || {}).length} attribute(s)
+                                  </Box>
+                                </SpaceBetween>
+                              </div>
+                            </Container>
+                          ))}
+                      </SpaceBetween>
+                    </Box>
+                  )}
                 </SpaceBetween>
               </Box>
 
@@ -494,6 +509,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
                       setSelectedAttributeId(attributeName);
                     }}
                     availableClasses={classes}
+                    isRuleSchema={isRuleSchema}
                   />
 
                   <SchemaInspector
@@ -505,6 +521,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
                     onRenameAttribute={(newName) => renameAttribute(selectedClassId, selectedAttributeId, newName)}
                     availableClasses={classes}
                     isRequired={getSelectedClass()?.attributes?.required?.includes(selectedAttributeId) || false}
+                    isRuleSchema={isRuleSchema}
                     onToggleRequired={(checked) => {
                       const selectedClass = getSelectedClass();
                       if (!selectedClass || !selectedClass.attributes) return;
@@ -554,7 +571,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
             setNewClassName('');
             setNewClassDescription('');
           }}
-          header="Add New Class"
+          header={isRuleSchema ? 'Add Rule Class' : 'Add Class'}
           footer={
             <Box float="right">
               <SpaceBetween direction="horizontal" size="xs">
@@ -569,18 +586,21 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
                   Cancel
                 </Button>
                 <Button variant="primary" onClick={handleConfirmAddClass} disabled={!newClassName.trim()}>
-                  Add Class
+                  {isRuleSchema ? 'Add Rule Class' : 'Add Class'}
                 </Button>
               </SpaceBetween>
             </Box>
           }
         >
           <SpaceBetween size="m">
-            <FormField label="Class Name" description="A unique name for this extraction class">
+            <FormField
+              label={isRuleSchema ? 'Rule Class Name' : 'Class Name'}
+              description={`A unique name for this ${isRuleSchema ? 'rule' : 'extraction'} class`}
+            >
               <Input
                 value={newClassName}
                 onChange={({ detail }) => setNewClassName(detail.value)}
-                placeholder="e.g., Invoice, Customer, Address"
+                placeholder={isRuleSchema ? 'e.g., ComplianceRules, SafetyChecks' : 'e.g., Invoice, Customer, Address'}
               />
             </FormField>
             <FormField label="Description (Optional)" description="Describe what this class represents">
@@ -603,7 +623,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
             setNewAttributeDescription('');
             setNewAttributeReferenceClass(null);
           }}
-          header="Add New Attribute"
+          header={isRuleSchema ? 'Add Rule' : 'Add Attribute'}
           footer={
             <Box float="right">
               <SpaceBetween direction="horizontal" size="xs">
@@ -620,21 +640,27 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
                   Cancel
                 </Button>
                 <Button variant="primary" onClick={handleConfirmAddAttribute} disabled={!newAttributeName.trim()}>
-                  Add Attribute
+                  {isRuleSchema ? 'Add Rule' : 'Add Attribute'}
                 </Button>
               </SpaceBetween>
             </Box>
           }
         >
           <SpaceBetween size="m">
-            <FormField label="Attribute Name" description="The field name to extract from documents">
+            <FormField
+              label={isRuleSchema ? 'Rule Name' : 'Attribute Name'}
+              description={isRuleSchema ? 'The rule name' : 'The field name to extract from documents'}
+            >
               <Input
                 value={newAttributeName}
                 onChange={({ detail }) => setNewAttributeName(detail.value)}
-                placeholder="e.g., invoiceNumber, customerName, total"
+                placeholder={isRuleSchema ? 'e.g., checkCompliance, validateSafety' : 'e.g., invoiceNumber, customerName, total'}
               />
             </FormField>
-            <FormField label="Attribute Type" description="The type of data this field contains">
+            <FormField
+              label={isRuleSchema ? 'Rule Output Data Type' : 'Attribute Type'}
+              description={isRuleSchema ? 'The type of data this rule validates' : 'The type of data this field contains'}
+            >
               <Select
                 selectedOption={newAttributeType}
                 onChange={({ detail }) => setNewAttributeType(detail.selectedOption)}
@@ -793,7 +819,7 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
         <Modal
           visible={showWipeAllModal}
           onDismiss={() => setShowWipeAllModal(false)}
-          header="Wipe All Document Classes"
+          header={`Wipe All ${TypeLabel} Classes`}
           footer={
             <Box float="right">
               <SpaceBetween direction="horizontal" size="xs">
@@ -809,11 +835,15 @@ const SchemaBuilder = ({ initialSchema, onChange, onValidate }) => {
         >
           <SpaceBetween size="m">
             <Alert type="error">
-              Are you sure you want to delete <strong>all {classes.length} document class(es)</strong>? This action cannot be undone.
+              Are you sure you want to delete{' '}
+              <strong>
+                all {classes.length} {typeLabel} class(es)
+              </strong>
+              ? This action cannot be undone.
             </Alert>
             <Box variant="p">
-              All document classes and their attributes will be permanently removed. You will need to recreate them or use the discovery
-              feature to regenerate your schema.
+              All {typeLabel} classes and their attributes will be permanently removed.
+              {!isRuleSchema && ' You will need to recreate them or use the discovery feature to regenerate your schema.'}
             </Box>
           </SpaceBetween>
         </Modal>
@@ -826,12 +856,14 @@ SchemaBuilder.propTypes = {
   initialSchema: PropTypes.oneOfType([PropTypes.arrayOf(PropTypes.shape({})), PropTypes.shape({})]),
   onChange: PropTypes.func,
   onValidate: PropTypes.func,
+  isRuleSchema: PropTypes.bool,
 };
 
 SchemaBuilder.defaultProps = {
   initialSchema: null,
   onChange: null,
   onValidate: null,
+  isRuleSchema: false,
 };
 
 export default SchemaBuilder;

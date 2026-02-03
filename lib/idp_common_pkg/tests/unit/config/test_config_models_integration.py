@@ -199,8 +199,8 @@ class TestConfigModelsIntegration:
         assert config.ocr is not None
         assert config.classification is not None
 
-    def test_criteria_validation_config(self, config_root):
-        """Test criteria validation configuration"""
+    def test_rule_validation_config(self, config_root):
+        """Test rule validation configuration"""
         config_file = config_root / "pattern-2" / "criteria-validation" / "config.yaml"
 
         if not config_file.exists():

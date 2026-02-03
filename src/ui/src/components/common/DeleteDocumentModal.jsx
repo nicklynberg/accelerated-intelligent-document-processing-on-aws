@@ -4,22 +4,22 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import { Modal, Box, SpaceBetween, Button } from '@cloudscape-design/components';
 
-const DeleteDocumentModal = ({ visible, onDismiss, onConfirm, selectedItems }) => {
+const DeleteDocumentModal = ({ visible, onDismiss, onConfirm, selectedItems, isLoading = false }) => {
   const documentCount = selectedItems.length;
   const isMultiple = documentCount > 1;
 
   return (
     <Modal
       visible={visible}
-      onDismiss={onDismiss}
+      onDismiss={isLoading ? undefined : onDismiss}
       header={`Delete ${isMultiple ? 'Documents' : 'Document'}`}
       footer={
         <Box float="right">
           <SpaceBetween direction="horizontal" size="xs">
-            <Button variant="link" onClick={onDismiss}>
+            <Button variant="link" onClick={onDismiss} disabled={isLoading}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={onConfirm}>
+            <Button variant="primary" onClick={onConfirm} loading={isLoading}>
               Delete
             </Button>
           </SpaceBetween>
@@ -50,6 +50,7 @@ DeleteDocumentModal.propTypes = {
       name: PropTypes.string,
     }),
   ).isRequired,
+  isLoading: PropTypes.bool,
 };
 
 export default DeleteDocumentModal;

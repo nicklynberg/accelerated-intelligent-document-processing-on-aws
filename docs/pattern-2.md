@@ -462,35 +462,42 @@ Few shot examples work by including reference documents with known classificatio
 
 ### Configuration
 
-Few shot examples are configured using the configuration files in the `config_library/pattern-2/` directory. The `few_shot_example` configuration demonstrates how to set up examples:
+Few shot examples are configured using JSON Schema format in the configuration files in the `config_library/pattern-2/` directory. The `few_shot_example` configuration demonstrates how to set up examples:
 
 ```yaml
 classes:
-  - name: letter
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: Letter
+    x-aws-idp-document-type: Letter
+    type: object
     description: "A formal written correspondence..."
-    attributes:
-      - name: sender_name
+    properties:
+      SenderName:
+        type: string
         description: "The name of the person who wrote the letter..."
-    examples:
-      - classPrompt: "This is an example of the class 'letter'"
+    x-aws-idp-examples:
+      - x-aws-idp-class-prompt: "This is an example of the class 'Letter'"
         name: "Letter1"
-        attributesPrompt: |
+        x-aws-idp-attributes-prompt: |
           expected attributes are:
-              "sender_name": "Will E. Clark",
-              "sender_address": "206 Maple Street P.O. Box 1056 Murray Kentucky 42071-1056",
-              "recipient_name": "The Honorable Wendell H. Ford"
-        imagePath: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
-  - name: email
+              "SenderName": "Will E. Clark",
+              "SenderAddress": "206 Maple Street P.O. Box 1056 Murray Kentucky 42071-1056",
+              "RecipientName": "The Honorable Wendell H. Ford"
+        x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/letter1.jpg"
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: Email
+    x-aws-idp-document-type: Email
+    type: object
     description: "A digital message with email headers..."
-    examples:
-      - classPrompt: "This is an example of the class 'email'"
+    x-aws-idp-examples:
+      - x-aws-idp-class-prompt: "This is an example of the class 'Email'"
         name: "Email1"
-        attributesPrompt: |
+        x-aws-idp-attributes-prompt: |
           expected attributes are: 
-             "from_address": "Kelahan, Ben",
-             "to_address": "TI New York: 'TI Minnesota",
-             "subject": "FW: Morning Team Notes 4/20"
-        imagePath: "config_library/pattern-2/few_shot_example/example-images/email1.jpg"
+             "FromAddress": "Kelahan, Ben",
+             "ToAddress": "TI New York: 'TI Minnesota",
+             "Subject": "FW: Morning Team Notes 4/20"
+        x-aws-idp-image-path: "config_library/pattern-2/few_shot_example/example-images/email1.jpg"
 ```
 
 ### Benefits
@@ -626,17 +633,23 @@ The extraction system can be customized through the configuration files rather t
    - Available models are defined in the configuration schema
    - Changes can be made through the Web UI without redeployment
 
-Example attribute definition from the configuration:
+Example attribute definition from the configuration using JSON Schema format:
 ```yaml
 classes:
-  - name: invoice
+  - $schema: "https://json-schema.org/draft/2020-12/schema"
+    $id: Invoice
+    x-aws-idp-document-type: Invoice
+    type: object
     description: A commercial document issued by a seller to a buyer relating to a sale
-    attributes:
-      - name: invoice_number
+    properties:
+      InvoiceNumber:
+        type: string
         description: The unique identifier for the invoice. Look for 'invoice no', 'invoice #', or 'bill number', typically near the top of the document.
-      - name: invoice_date
+      InvoiceDate:
+        type: string
         description: The date when the invoice was issued. May be labeled as 'date', 'invoice date', or 'billing date'.
-      - name: total_amount
+      TotalAmount:
+        type: string
         description: The final amount to be paid including all charges. Look for 'total', 'grand total', or 'amount due', typically the last figure on the invoice.
 ```
 

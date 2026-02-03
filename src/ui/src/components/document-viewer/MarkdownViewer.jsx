@@ -63,9 +63,9 @@ const MarkdownViewer = ({ content, documentName, title, simple = false, height =
         if (targetId === 'table-of-contents') {
           // Scroll to the top of the markdown content container
           if (contentRef.current) {
-            contentRef.current.scrollIntoView({
+            contentRef.current.scrollTo({
+              top: 0,
               behavior: 'smooth',
-              block: 'start',
             });
           }
           return;
@@ -73,10 +73,18 @@ const MarkdownViewer = ({ content, documentName, title, simple = false, height =
 
         const targetElement = document.getElementById(targetId);
         if (targetElement) {
-          targetElement.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start',
-          });
+          // Scroll within the contentRef container, not the entire page
+          if (contentRef.current) {
+            const containerTop = contentRef.current.scrollTop;
+            const containerRect = contentRef.current.getBoundingClientRect();
+            const elementRect = targetElement.getBoundingClientRect();
+            const relativeTop = elementRect.top - containerRect.top + containerTop;
+
+            contentRef.current.scrollTo({
+              top: relativeTop - 20, // 20px offset for padding
+              behavior: 'smooth',
+            });
+          }
         }
       }
     }

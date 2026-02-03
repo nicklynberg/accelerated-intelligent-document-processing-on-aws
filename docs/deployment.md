@@ -41,7 +41,7 @@ For programmatic deployment, updates, and batch processing, use the IDP CLI.
 #### Install the CLI
 
 ```bash
-cd idp_cli
+cd lib/idp_cli_pkg
 pip install -e .
 ```
 
@@ -336,7 +336,7 @@ For batch processing, evaluation workflows, or automated testing:
 
 ```bash
 # Install CLI
-cd idp_cli && pip install -e .
+cd lib/idp_cli_pkg && pip install -e .
 
 # Process sample documents
 idp-cli run-inference \

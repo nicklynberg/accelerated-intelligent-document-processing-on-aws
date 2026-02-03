@@ -125,7 +125,7 @@ const GenAIIDPLayout = ({ children }) => {
               <Route path="upload" element={<UploadDocumentPanel />} />
               <Route path="discovery" element={<DiscoveryPanel />} />
               <Route path="users" element={<UserManagementLayout />} />
-              <Route path=":objectKey" element={<DocumentDetails />} />
+              <Route path="*" element={<DocumentDetails />} />
             </Routes>
           )
         }

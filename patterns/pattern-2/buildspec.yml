@@ -21,6 +21,8 @@ phases:
       - export FUNCTION_processresults="patterns/pattern-2/src/processresults_function"
       - export FUNCTION_summarization="patterns/pattern-2/src/summarization_function"
       - export FUNCTION_evaluation="patterns/pattern-2/src/evaluation_function"
+      - export FUNCTION_rule_validation="patterns/pattern-2/src/rule-validation-function"
+      - export FUNCTION_rule_validation_summarization="patterns/pattern-2/src/rule-validation-orchestration-function"
       - docker buildx build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_ocr -t $ECR_URI:ocr-function-$IMAGE_VERSION -t $ECR_URI:ocr-function --platform linux/arm64 --load .
       - docker push $ECR_URI:ocr-function-$IMAGE_VERSION
       - docker push $ECR_URI:ocr-function
@@ -42,6 +44,12 @@ phases:
       - docker buildx build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_evaluation -t $ECR_URI:evaluation-function-$IMAGE_VERSION -t $ECR_URI:evaluation-function --platform linux/arm64 --load .
       - docker push $ECR_URI:evaluation-function-$IMAGE_VERSION
       - docker push $ECR_URI:evaluation-function
+      - docker buildx build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_rule_validation -t $ECR_URI:rule-validation-function-$IMAGE_VERSION -t $ECR_URI:rule-validation-function --platform linux/arm64 --load .
+      - docker push $ECR_URI:rule-validation-function-$IMAGE_VERSION
+      - docker push $ECR_URI:rule-validation-function
+      - docker buildx build -f Dockerfile.optimized --build-arg FUNCTION_PATH=$FUNCTION_rule_validation_summarization -t $ECR_URI:rule-validation-orchestration-function-$IMAGE_VERSION -t $ECR_URI:rule-validation-orchestration-function --platform linux/arm64 --load .
+      - docker push $ECR_URI:rule-validation-orchestration-function-$IMAGE_VERSION
+      - docker push $ECR_URI:rule-validation-orchestration-function
   post_build:
     commands:
       - echo "Build completed on $(date)"
@@ -54,7 +62,7 @@ phases:
       - |
         # Optional: Quick check if any scans have already completed
         # This is informational only and does not block the build
-        IMAGES=("ocr-function" "classification-function" "extraction-function" "assessment-function" "processresults-function" "hitl-wait-function" "hitl-status-update-function" "hitl-process-function" "summarization-function" "evaluation-function")
+        IMAGES=("ocr-function" "classification-function" "extraction-function" "assessment-function" "processresults-function" "hitl-wait-function" "hitl-status-update-function" "hitl-process-function" "summarization-function" "evaluation-function" "rule-validation-function" "rule-validation-orchestration-function")
         echo "Checking scan status (non-blocking)..."
         for IMAGE in "${IMAGES[@]}"; do
           SCAN_STATUS=$(aws ecr describe-image-scan-findings --repository-name $(basename $ECR_URI) --image-id imageTag=$IMAGE-$IMAGE_VERSION --region $AWS_REGION --query 'imageScanStatus.status' --output text 2>/dev/null || echo "IN_PROGRESS")

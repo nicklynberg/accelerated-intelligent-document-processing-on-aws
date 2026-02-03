@@ -117,38 +117,43 @@ class ConfigurationReader:
         self, *, as_model: bool = False
     ) -> Union[IDPConfig, Dict[str, Any]]:
         """
-        Get and merge Default and Custom configurations with automatic migration
+        Get and merge Default and Custom configurations for runtime processing.
+        
+        DESIGN PATTERN (CRITICAL):
+        - Default: Full stack baseline (Pydantic validated)
+        - Custom: SPARSE DELTAS ONLY (raw from DynamoDB, NO Pydantic defaults!)
+        - Merged: Default deep-updated with Custom = final runtime config
+        
+        This is THE method to use for all runtime document processing.
 
         Args:
             as_model: If True, return IDPConfig Pydantic model. If False (default), return dict.
 
         Returns:
-            Merged configuration as IDPConfig or dictionary (auto-migrated if needed)
+            Merged configuration as IDPConfig or dictionary
         """
         try:
-            # Get Default configuration (auto-migrated by ConfigurationManager)
+            # Get Default configuration (Pydantic validated - this is correct for Default)
             default_config = self.get_configuration("Default", as_dict=True)
             if not default_config:
                 raise ValueError("Default configuration not found")
+            
+            # Remove the 'Configuration' key as it's not part of the actual config
+            default_config.pop("Configuration", None)
 
-            # Get Custom configuration (auto-migrated by ConfigurationManager)
-            custom_config = self.get_configuration("Custom", as_dict=True)
+            # Get Custom configuration as RAW dict (NO Pydantic defaults!)
+            # This is critical for the sparse delta pattern to work correctly
+            custom_config = self.manager.get_raw_configuration("Custom")
 
-            # If no custom config exists, use default
+            # If no custom config exists, use default as-is
             if not custom_config:
                 logger.info("No Custom configuration found, using Default only")
-                # Remove the 'Configuration' key as it's not part of the actual config
-                default_config.pop("Configuration", None)
                 merged_config = default_config
             else:
-                # Remove the 'Configuration' key as it's not part of the actual config
-                default_config.pop("Configuration", None)
-                custom_config.pop("Configuration", None)
-
-                # Merge configurations - simple update since Custom only contains overrides
+                # Merge: Default deep-updated with Custom deltas
                 merged_config = self.simple_merge(default_config, custom_config)
 
-            logger.info("Successfully merged configurations")
+            logger.info("Successfully merged Default + Custom configurations for runtime")
 
             # Return Pydantic model if requested
             if as_model:

@@ -419,7 +419,7 @@ const PagesPanel = ({ pages, documentItem }) => {
               <SpaceBetween direction="horizontal" size="xs">
                 {!isEditMode ? (
                   <Button variant="primary" iconName="edit" onClick={handleEditPagesClick}>
-                    Edit Pages
+                    Edit Mode
                   </Button>
                 ) : (
                   <>
@@ -433,7 +433,7 @@ const PagesPanel = ({ pages, documentItem }) => {
                       disabled={modifiedPageIds.size === 0 || isProcessing}
                       loading={isProcessing}
                     >
-                      Save & Process Changes
+                      Process Changes
                     </Button>
                   </>
                 )}
@@ -481,7 +481,7 @@ const PagesPanel = ({ pages, documentItem }) => {
       <Modal
         visible={showPattern1Modal}
         onDismiss={() => setShowPattern1Modal(false)}
-        header="Edit Pages - Pattern-1"
+        header="Edit Mode - Pattern-1"
         footer={
           <Box float="right">
             <Button variant="primary" onClick={() => setShowPattern1Modal(false)}>

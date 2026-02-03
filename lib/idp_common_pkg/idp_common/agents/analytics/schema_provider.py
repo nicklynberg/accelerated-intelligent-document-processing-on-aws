@@ -222,6 +222,70 @@ GROUP BY se."section_type"
 """
 
 
+def get_rule_validation_tables_description() -> str:
+    """
+    Get comprehensive description of the rule validation tables.
+
+    Returns:
+        Detailed description of rule validation table schemas and usage patterns
+    """
+    return """
+## Rule Validation Tables
+
+**Purpose**: Store business rule validation results showing compliance and policy adherence
+
+**Key Usage**: Use these tables for questions about rule compliance, policy violations, and validation results
+
+### Rule Validation Summary Table (rule_validation_summary)
+
+**Purpose**: Document-level summary of rule validation results
+
+#### Schema:
+- `document_id` (string): Unique identifier for the document
+- `input_key` (string): S3 key of the input document
+- `validation_date` (timestamp): When the validation was performed
+- `overall_status` (string): Overall validation status (COMPLETE, FAILED, etc.)
+- `total_rule_types` (int): Number of rule types evaluated
+- `total_rules` (int): Total number of rules evaluated
+- `pass_count` (int): Number of rules that passed
+- `fail_count` (int): Number of rules that failed
+- `information_not_found_count` (int): Number of rules where information was not found
+
+**Partitioned by**: date (YYYY-MM-DD format)
+
+### Rule Validation Details Table (rule_validation_details)
+
+**Purpose**: Individual rule-level validation results with recommendations and reasoning
+
+#### Schema:
+- `document_id` (string): Unique identifier for the document
+- `rule_type` (string): Category/type of the rule
+- `rule` (string): Description of the specific rule being validated
+- `recommendation` (string): Validation result (Pass, Fail, Information Not Found)
+- `reasoning` (string): Explanation for the recommendation
+- `supporting_pages` (string): JSON array of page numbers
+- `validation_date` (timestamp): When the validation was performed
+
+**Partitioned by**: date (YYYY-MM-DD format)
+
+### Sample Queries:
+```sql
+-- Overall pass/fail rates
+SELECT SUM("pass_count") as total_pass, SUM("fail_count") as total_fail
+FROM rule_validation_summary
+
+-- Documents with failed rules
+SELECT "document_id", "fail_count"
+FROM rule_validation_summary WHERE "fail_count" > 0
+
+-- Most common failures
+SELECT "rule_type", "rule", COUNT(*) as count
+FROM rule_validation_details WHERE "recommendation" = 'Fail'
+GROUP BY "rule_type", "rule" ORDER BY count DESC LIMIT 10
+```
+"""
+
+
 def get_dynamic_document_sections_description(
     config: Optional[IDPConfig] = None,
 ) -> str:
@@ -625,6 +689,10 @@ def get_table_info(table_names: list[str], config: Optional[IDPConfig] = None) -
             "attribute_evaluations",
         ]:
             detailed_info += get_evaluation_tables_description()
+            detailed_info += "\n---\n\n"
+
+        elif table_name in ["rule_validation_summary", "rule_validation_details"]:
+            detailed_info += get_rule_validation_tables_description()
             detailed_info += "\n---\n\n"
 
         elif table_name.startswith("document_sections_"):

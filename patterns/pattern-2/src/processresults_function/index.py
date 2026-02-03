@@ -246,12 +246,24 @@ def handler(event, context):
         except Exception as e:
             logger.error(f"Failed to update HITLSectionsPending: {str(e)}")
 
+    # Check if rule validation is enabled in config AND has rules configured
+    rule_validation_enabled = False
+    if hasattr(config, 'rule_validation'):
+        rule_validation_enabled = config.rule_validation.enabled
+        # Also check if there are any rules configured
+        if rule_validation_enabled and hasattr(config, 'rule_classes'):
+            if not config.rule_classes or len(config.rule_classes) == 0:
+                logger.info("Rule validation is enabled but no rule_classes configured - skipping rule validation")
+                rule_validation_enabled = False
+        logger.info(f"Rule validation enabled: {rule_validation_enabled}")
+    
     # Return the completed document with compression
     response = {
         "document": document.serialize_document(
             working_bucket, "processresults", logger
         ),
         "hitl_triggered": hitl_triggered,
+        "rule_validation_enabled": rule_validation_enabled
     }
 
     logger.info(f"Response: {json.dumps(response, default=str)}")

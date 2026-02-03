@@ -36,6 +36,7 @@ export default gql`
       EvaluationReportUri
       EvaluationStatus
       SummaryReportUri
+      RuleValidationResultUri
       ExpiresAfter
       HITLStatus
       HITLReviewURL

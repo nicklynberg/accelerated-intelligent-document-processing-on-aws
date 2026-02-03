@@ -14,7 +14,13 @@ import logging
 from typing import Any, Dict, Optional
 
 from idp_common.appsync.client import AppSyncClient
-from idp_common.appsync.mutations import CREATE_DOCUMENT, GET_DOCUMENT, UPDATE_DOCUMENT
+from idp_common.appsync.mutations import (
+    CREATE_DOCUMENT,
+    GET_DOCUMENT,
+    UPDATE_DOCUMENT,
+    UPDATE_DOCUMENT_SECTION,
+    UPDATE_DOCUMENT_STATUS,
+)
 from idp_common.models import Document, HitlMetadata, Page, Section, Status
 
 logger = logging.getLogger(__name__)
@@ -192,6 +198,15 @@ class DocumentAppSyncService:
         if document.summary_report_uri:
             input_data["SummaryReportUri"] = document.summary_report_uri
 
+        # Add rule validation result URI if available
+        if (
+            document.rule_validation_result
+            and document.rule_validation_result.output_uri
+        ):
+            input_data["RuleValidationResultUri"] = (
+                document.rule_validation_result.output_uri
+            )
+
         # Add HITL fields if available from hitl_metadata
         if document.hitl_metadata:
             # Get the most recent HITL metadata entry
@@ -233,6 +248,15 @@ class DocumentAppSyncService:
             summary_report_uri=appsync_data.get("SummaryReportUri"),
             trace_id=appsync_data.get("TraceId"),
         )
+
+        # Handle rule validation result URI if present
+        rule_validation_uri = appsync_data.get("RuleValidationResultUri")
+        if rule_validation_uri:
+            from idp_common.models import RuleValidationResult
+
+            doc.rule_validation_result = RuleValidationResult(
+                request_id=doc.id or "", output_uri=rule_validation_uri
+            )
 
         # Handle HITL fields - create HITL metadata if HITL fields are present
         hitl_status = appsync_data.get("HITLStatus")
@@ -424,6 +448,132 @@ class DocumentAppSyncService:
         except Exception as e:
             logger.warning(f"Failed to get document {object_key}: {e}")
             return None
+
+    def update_document_status(
+        self,
+        document_id: str,
+        status: Status,
+        workflow_execution_arn: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update only the status of a document (lightweight operation).
+
+        This method performs a minimal update that only touches the ObjectStatus field,
+        reducing DynamoDB WCU consumption from ~100KB to ~500 bytes. Use this during
+        parallel Map operations where multiple Lambda functions update status concurrently.
+
+        Args:
+            document_id: The ObjectKey of the document to update
+            status: The new Status to set
+            workflow_execution_arn: Optional workflow execution ARN
+
+        Returns:
+            Dictionary with the updated document fields
+
+        Raises:
+            AppSyncError: If the GraphQL operation fails
+        """
+        # Derive workflow status from document status
+        if status == Status.FAILED:
+            workflow_status = "FAILED"
+        elif status == Status.COMPLETED:
+            workflow_status = "SUCCEEDED"
+        elif status == Status.ABORTED:
+            workflow_status = "ABORTED"
+        else:
+            workflow_status = "RUNNING"
+
+        input_data = {
+            "ObjectKey": document_id,
+            "ObjectStatus": status.value,
+            "WorkflowStatus": workflow_status,
+        }
+
+        if workflow_execution_arn:
+            input_data["WorkflowExecutionArn"] = workflow_execution_arn
+
+        result = self.client.execute_mutation(
+            UPDATE_DOCUMENT_STATUS, {"input": input_data}
+        )
+
+        logger.info(f"Updated document status: {document_id} -> {status.value}")
+        return result["updateDocumentStatus"]
+
+    def update_document_section(
+        self,
+        document_id: str,
+        section_index: int,
+        section: Section,
+    ) -> Dict[str, Any]:
+        """
+        Update a single section in a document (atomic section-level update).
+
+        This method performs an atomic update of a single section using DynamoDB's
+        SET Sections[index] = :value expression. This reduces WCU consumption from
+        ~100KB to ~5KB per update and avoids read-modify-write race conditions
+        during parallel Map operations.
+
+        Args:
+            document_id: The ObjectKey of the document to update
+            section_index: The index position of the section in the Sections array
+            section: The Section object with updated data
+
+        Returns:
+            Dictionary with the updated document fields
+
+        Raises:
+            AppSyncError: If the GraphQL operation fails
+        """
+        # Convert page IDs to integers for AppSync
+        page_ids = []
+        for page_id in section.page_ids:
+            try:
+                page_ids.append(int(page_id))
+            except ValueError:
+                logger.warning(
+                    f"Skipping page ID {page_id} in section {section.section_id} - not an integer"
+                )
+
+        section_data = {
+            "Id": section.section_id,
+            "PageIds": page_ids,
+            "Class": section.classification,
+            "OutputJSONUri": section.extraction_result_uri or "",
+        }
+
+        # Convert confidence threshold alerts
+        if section.confidence_threshold_alerts:
+            alerts_data = []
+            for alert in section.confidence_threshold_alerts:
+                confidence_value = alert.get("confidence")
+                confidence_threshold_value = alert.get("confidence_threshold")
+
+                alert_data = {
+                    "attributeName": alert.get("attribute_name"),
+                    "confidence": float(confidence_value)
+                    if confidence_value is not None
+                    else None,
+                    "confidenceThreshold": float(confidence_threshold_value)
+                    if confidence_threshold_value is not None
+                    else None,
+                }
+                alerts_data.append(alert_data)
+            section_data["ConfidenceThresholdAlerts"] = alerts_data
+
+        input_data = {
+            "ObjectKey": document_id,
+            "SectionIndex": section_index,
+            "Section": section_data,
+        }
+
+        result = self.client.execute_mutation(
+            UPDATE_DOCUMENT_SECTION, {"input": input_data}
+        )
+
+        logger.info(
+            f"Updated section {section_index} ({section.section_id}) for document: {document_id}"
+        )
+        return result["updateDocumentSection"]
 
     def calculate_ttl(self, days: int = 30) -> int:
         """

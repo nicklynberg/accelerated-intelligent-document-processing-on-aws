@@ -305,6 +305,7 @@ const SchemaCanvas = ({
   onNavigateToClass,
   onNavigateToAttribute,
   availableClasses,
+  isRuleSchema = false,
 }) => {
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -313,11 +314,14 @@ const SchemaCanvas = ({
     }),
   );
 
+  const attributeLabel = isRuleSchema ? 'rule' : 'attribute';
+  const attributesLabel = isRuleSchema ? 'Rules' : 'Attributes';
+
   if (!selectedClass) {
     return (
       <Box textAlign="center" padding="xxl">
         <Header variant="h3">No Class Selected</Header>
-        <p>Select or create a class to start defining attributes</p>
+        <p>Select or create a class to start defining {attributeLabel}s</p>
       </Box>
     );
   }
@@ -342,14 +346,16 @@ const SchemaCanvas = ({
     <Box>
       <Header
         variant="h3"
-        description="Click an attribute to view and modify its properties. Use the drag handle to reorder, or click the expand arrow to preview nested content."
+        description={`Click ${
+          isRuleSchema ? 'a rule' : 'an attribute'
+        } to view and modify its properties. Use the drag handle to reorder, or click the expand arrow to preview nested content.`}
       >
-        Attributes ({attributes.length})
+        {attributesLabel} ({attributes.length})
       </Header>
       <SpaceBetween size="s">
         {attributes.length === 0 ? (
           <Box textAlign="center" padding="l" color="text-body-secondary">
-            No attributes defined. Click &quot;Add Attribute&quot; to get started.
+            No {attributeLabel}s defined. Click &quot;Add {isRuleSchema ? 'Rule' : 'Attribute'}&quot; to get started.
           </Box>
         ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -395,6 +401,7 @@ SchemaCanvas.propTypes = {
       id: PropTypes.string,
     }),
   ),
+  isRuleSchema: PropTypes.bool,
 };
 
 SchemaCanvas.defaultProps = {
@@ -403,6 +410,7 @@ SchemaCanvas.defaultProps = {
   onNavigateToClass: null,
   onNavigateToAttribute: null,
   availableClasses: [],
+  isRuleSchema: false,
 };
 
 // Memoize the component to prevent re-renders when props haven't changed

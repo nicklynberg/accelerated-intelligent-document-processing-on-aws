@@ -160,6 +160,11 @@ def handler(event, context):
     except Exception as e:
         logger.warning(f"Failed to add Lambda metering for classification: {str(e)}")
     
+    # Persist classifications and sections to DynamoDB for immediate UI visibility
+    # This allows the UI to show document classes and empty sections right after classification
+    logger.info("Persisting classification results to DynamoDB for UI visibility")
+    document_service.update_document(document)
+    
     # Prepare output with automatic compression if needed
     response = {
         "document": document.serialize_document(working_bucket, "classification", logger)

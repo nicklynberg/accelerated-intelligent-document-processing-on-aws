@@ -44,6 +44,9 @@ const DocumentList = () => {
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [isReprocessModalVisible, setIsReprocessModalVisible] = useState(false);
   const [isAbortModalVisible, setIsAbortModalVisible] = useState(false);
+  const [isDeleteLoading, setIsDeleteLoading] = useState(false);
+  const [isReprocessLoading, setIsReprocessLoading] = useState(false);
+  const [isAbortLoading, setIsAbortLoading] = useState(false);
   const [currentUsername, setCurrentUsername] = useState('');
   const { settings } = useSettingsContext();
   const { isReviewer, isAdmin } = useUserRole();
@@ -148,42 +151,57 @@ const DocumentList = () => {
     const objectKeys = collectionProps.selectedItems.map((item) => item.objectKey);
     logger.debug('Deleting documents', objectKeys);
 
-    const result = await deleteDocuments(objectKeys);
-    logger.debug('Delete result', result);
+    setIsDeleteLoading(true);
+    try {
+      const result = await deleteDocuments(objectKeys);
+      logger.debug('Delete result', result);
 
-    // Close the modal
-    setIsDeleteModalVisible(false);
+      // Close the modal
+      setIsDeleteModalVisible(false);
 
-    // Clear selection after deletion
-    actions.setSelectedItems([]);
+      // Clear selection after deletion
+      actions.setSelectedItems([]);
+    } finally {
+      setIsDeleteLoading(false);
+    }
   };
 
   const handleReprocessConfirm = async () => {
     const objectKeys = collectionProps.selectedItems.map((item) => item.objectKey);
     logger.debug('Reprocessing documents', objectKeys);
 
-    const result = await reprocessDocuments(objectKeys);
-    logger.debug('Reprocess result', result);
+    setIsReprocessLoading(true);
+    try {
+      const result = await reprocessDocuments(objectKeys);
+      logger.debug('Reprocess result', result);
 
-    // Close the modal
-    setIsReprocessModalVisible(false);
+      // Close the modal
+      setIsReprocessModalVisible(false);
 
-    // Clear selection after reprocessing
-    actions.setSelectedItems([]);
+      // Clear selection after reprocessing
+      actions.setSelectedItems([]);
+    } finally {
+      setIsReprocessLoading(false);
+    }
   };
 
   const handleAbortConfirm = async (abortableItems) => {
     const objectKeys = abortableItems.map((item) => item.objectKey);
     logger.debug('Aborting workflows', objectKeys);
 
-    const result = await abortWorkflows(objectKeys);
-    logger.debug('Abort result', result);
+    setIsAbortLoading(true);
+    try {
+      const result = await abortWorkflows(objectKeys);
+      logger.debug('Abort result', result);
 
-    // Close the modal
-    setIsAbortModalVisible(false);
+      // Close the modal
+      setIsAbortModalVisible(false);
 
-    // Clear selection after aborting
-    actions.setSelectedItems([]);
+      // Clear selection after aborting
+      actions.setSelectedItems([]);
+    } finally {
+      setIsAbortLoading(false);
+    }
   };
 
   const handleClaimReview = async () => {
@@ -314,6 +332,7 @@ const DocumentList = () => {
         onDismiss={() => setIsDeleteModalVisible(false)}
         onConfirm={handleDeleteConfirm}
         selectedItems={collectionProps.selectedItems}
+        isLoading={isDeleteLoading}
       />
 
       <ReprocessDocumentModal
@@ -321,6 +340,7 @@ const DocumentList = () => {
         onDismiss={() => setIsReprocessModalVisible(false)}
         onConfirm={handleReprocessConfirm}
         selectedItems={collectionProps.selectedItems}
+        isLoading={isReprocessLoading}
       />
 
       <AbortWorkflowModal
@@ -328,6 +348,7 @@ const DocumentList = () => {
         onDismiss={() => setIsAbortModalVisible(false)}
         onConfirm={handleAbortConfirm}
         selectedItems={collectionProps.selectedItems}
+        isLoading={isAbortLoading}
       />
     </>
   );

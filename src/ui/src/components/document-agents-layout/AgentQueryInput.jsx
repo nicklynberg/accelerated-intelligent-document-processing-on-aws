@@ -624,7 +624,10 @@ const AgentQueryInput = ({ onSubmit, isSubmitting = false, selectedResult = null
             </Box>
             <Box>
               For detailed setup instructions and examples, see the{' '}
-              <Link external href="https://github.com/aws-samples/genaiic-idp-accelerator/blob/main/docs/custom-MCP-agent.md">
+              <Link
+                external
+                href="https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/docs/custom-MCP-agent.md"
+              >
                 Custom MCP Agent Documentation
               </Link>
             </Box>

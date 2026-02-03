@@ -109,7 +109,7 @@ For batch processing, automation, or evaluation workflows:
 
 ```bash
 # Install CLI
-cd idp_cli && pip install -e .
+cd lib/idp_cli_pkg && pip install -e .
 
 # Process documents
 idp-cli run-inference \
@@ -176,6 +176,7 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 - [Extraction](./docs/extraction.md) - Customizing information extraction
 - [Human-in-the-Loop Review](./docs/human-review.md) - Human review workflows with built-in review system
 - [Assessment](./docs/assessment.md) - Extraction confidence evaluation using LLMs
+- [Rule Validation](./docs/rule-validation.md) - Business rule validation and compliance checking
 - [Evaluation Framework](./docs/evaluation.md) - Accuracy assessment system with analytics database and reporting
 - [Knowledge Base](./docs/knowledge-base.md) - Document knowledge base query feature
 - [Monitoring](./docs/monitoring.md) - Monitoring and logging capabilities

@@ -2,88 +2,234 @@
 
 ## Current Work Focus
 
-### GitHub Issue #150 - Implemented ✅
-**Issue:** Add Previous/Next Page Context Support for Multimodal Classification
-**Reporter:** Behrad-Gh (Dec 4, 2025)
-**Status:** Implementation complete
+### Default/Custom Configuration Design Pattern (CRITICAL)
+**Date:** January 22, 2026
+**Status:** Fixing implementation to match original design intent
 
-### GitHub Issue #166 - Fixed ✅
-**Issue:** Missing Bedrock Model access does not fail Step Function execution
-**Reporter:** nicklynberg (Jan 15, 2026)
-**Environment:** us-gov-west-2, Pattern 2, Version 0.4.10
+#### Design Intent
+
+The configuration system uses a **sparse delta pattern** for storing user customizations:
+
+```mermaid
+flowchart TD
+    subgraph "DynamoDB Storage"
+        D[Default Item<br>Stack baseline - FULL config]
+        C[Custom Item<br>User deltas ONLY - sparse]
+    end
+    
+    subgraph "Stack Updates"
+        SU[CDK/CloudFormation] -->|"Update Default ONLY"| D
+        SU -.->|"NEVER touch"| C
+    end
+    
+    subgraph "UI Operations"
+        D --> M{Merge}
+        C --> M
+        M --> UI[Display merged config]
+        UI -->|"Save field change"| C
+        UI -->|"Restore field default"| RC[Remove from Custom]
+        UI -->|"Restore all defaults"| EC[Empty Custom entirely]
+        UI -->|"Save as default"| SAD[Save merged → Default<br>Empty Custom]
+    end
+    
+    subgraph "Runtime Processing"
+        D --> RM{Merge}
+        C --> RM
+        RM --> RT[get_merged_configuration]
+    end
+```
+
+#### Key Principles
+
+1. **Default Item**: 
+   - Contains complete stack baseline configuration
+   - Created at deployment time (config_library + system_defaults merge)
+   - Updated ONLY by stack deployments (CDK/CloudFormation)
+   - NEVER modified by user UI actions (except "Save as default")
+
+2. **Custom Item**:
+   - Contains ONLY user-modified fields (sparse delta)
+   - Empty initially (no values = use all defaults)
+   - NEVER touched by stack updates
+   - User customizations survive stack upgrades
+
+3. **UI Operations**:
+   - **Display**: Merge(Default + Custom) - show combined config
+   - **Save change**: Write only changed field to Custom
+   - **Restore field**: Remove specific field from Custom
+   - **Restore all**: Empty/delete Custom item entirely
+   - **Save as default**: Save merged → Default, then empty Custom
+
+4. **Runtime Processing**:
+   - Always use `get_merged_configuration()` for actual processing
+   - Never use raw Custom (it's incomplete)
+
+5. **getConfiguration API Response**:
+   - Returns `{Schema, Default, Custom}` separately
+   - Custom should return RAW deltas (not Pydantic-filled)
+   - Frontend handles display merging
+
+#### Why This Matters
+
+- **Stack upgrades can safely update Default** without losing user customizations
+- **Diff detection works** because Custom only has what user changed
+- **Empty Custom = all defaults** - clean reset capability
+- **Pydantic defaults must NOT fill Custom** - would break delta pattern
+
+#### Anti-patterns to AVOID
+
+❌ Auto-copying Default → Custom when Custom is empty
+❌ Using Pydantic validation on Custom (fills in defaults)
+❌ Returning "full" Custom config from getConfiguration API
+❌ Modifying Default item from UI (except "Save as default")
+
+### GitHub Issue #87 - System Defaults Configuration ✅
+**Issue:** Simplify configuration management with system defaults
+**Date:** January 20, 2026
 
 ## Recent Changes (January 20, 2026)
 
-### Fix Applied to Summarization Service
-Fixed the issue where Bedrock `AccessDeniedException` errors were silently swallowed in the summarization service, causing Step Functions to complete successfully instead of failing.
+### Implemented System Defaults and Config CLI Commands
 
-**File Modified:** `lib/idp_common_pkg/idp_common/summarization/service.py`
+#### Part 1: System Defaults YAML Structure ✅
 
-**Changes Made:**
-1. **`process_document_section` method**: Changed from returning silently on exceptions to re-raising them
-   - Before: `return document, {}` after catching exception
-   - After: `raise` to propagate exception to caller
+Created `config_library/system_defaults/` with:
 
-2. **`process_document` method**: Added exception tracking for parallel section processing
-   - Added `section_exceptions = {}` to track failed sections
-   - After parallel processing completes, checks if any sections failed
-   - Re-raises the first exception to ensure proper workflow failure
-   - Added detailed logging for debugging
+| File | Lines | Purpose |
+|------|-------|---------|
+| `base.yaml` | ~280 | Common defaults shared across all patterns |
+| `pattern-1.yaml` | ~150 | BDA-specific defaults (null OCR/classification/extraction models) |
+| `pattern-2.yaml` | ~550 | Full Bedrock LLM defaults with complete prompt templates |
+| `pattern-3.yaml` | ~130 | UDOP fine-tuned model defaults |
+| `README.md` | ~110 | Documentation for the defaults system |
 
-### Root Cause Analysis
+Key Design Decisions:
+- `_inherits: base.yaml` - Pattern files declare inheritance
+- Complete prompts only in pattern-2.yaml (most commonly used)
+- `enabled: false` for optional features (summarization, evaluation)
+- Pattern-specific models use `null` when BDA/UDOP handle internally
 
-The bug was **specific to the Summarization service only**. Analysis of all Pattern 2 services:
+#### Part 2: Merge Utilities ✅
 
-| Service | Re-raises Exceptions? | Workflow Fails Properly? |
-|---------|----------------------|--------------------------|
-| Classification | ✅ Yes | ✅ Yes |
-| Extraction | ✅ Yes | ✅ Yes |
-| Assessment | ✅ Yes | ✅ Yes |
-| **Summarization** | ❌ No (was broken) | ❌ No (was broken) |
+Extended `lib/idp_common_pkg/idp_common/config/merge_utils.py`:
 
-### Error Flow (After Fix)
+```python
+# Key functions added:
+load_system_defaults(pattern: str) -> Dict[str, Any]
+merge_config_with_defaults(user_config, pattern, validate=False) -> Dict[str, Any]
+generate_config_template(features, pattern, include_prompts=False) -> str
+validate_config(config, pattern) -> Dict[str, Any]
 ```
-Bedrock AccessDeniedException
-    ↓
-process_text() - raises
-    ↓
-process_document_section() - NOW re-raises
-    ↓
-process_document() - NOW collects and re-raises section exceptions
-    ↓
-Lambda handler outer except - sets status to FAILED
-    ↓
-Lambda handler status check - raises Exception
-    ↓
-Step Functions - workflow FAILS ✅
+
+#### Part 3: CLI Commands ✅
+
+Added to `idp_cli/idp_cli/cli.py`:
+
+```bash
+# Generate minimal config template
+idp-cli create-config --features min --pattern pattern-2 --output config.yaml
+
+# Validate config file
+idp-cli validate-config --custom-config ./config.yaml
+
+# Download config from deployed stack (full or minimal diff)
+idp-cli download-config --stack-name my-stack --output config.yaml --format minimal
+```
+
+#### Part 4: Deploy Integration ✅
+
+Updated `idp_cli/idp_cli/deployer.py`:
+- `upload_local_config()` now merges user config with system defaults before upload
+- Auto-detects pattern from config content (classification method)
+- Falls back gracefully if idp_common not available
+
+### User Workflow Now
+
+**Before (600+ line config required):**
+```yaml
+notes: "..."
+ocr:
+  backend: "textract"
+  features:
+    - name: LAYOUT
+  # ... 50 more lines
+classification:
+  model: "..."
+  # ... 100 more lines
+# etc...
+```
+
+**After (20 line minimal config):**
+```yaml
+notes: "My lending package config"
+
+classification:
+  model: us.amazon.nova-2-lite-v1:0
+
+extraction:
+  model: us.amazon.nova-2-lite-v1:0
+
+classes:
+  - $id: W2
+    type: object
+    x-aws-idp-document-type: W2 Tax Form
+    properties:
+      employer_name:
+        type: string
+```
+
+## File Structure
+
+```
+config_library/
+└── system_defaults/
+    ├── README.md
+    ├── base.yaml         # Common defaults
+    ├── pattern-1.yaml    # BDA defaults
+    ├── pattern-2.yaml    # Bedrock LLM defaults
+    └── pattern-3.yaml    # UDOP defaults
+
+lib/idp_common_pkg/idp_common/config/
+└── merge_utils.py        # Extended with system defaults functions
+
+idp_cli/idp_cli/
+├── cli.py                # Added create-config, validate-config, download-config
+└── deployer.py           # Updated upload_local_config() for merge
 ```
 
 ## Next Steps
 
-1. **Unit Tests**: Add tests for `AccessDeniedException` propagation in summarization service
-2. **Integration Test**: Deploy and verify fix in test environment
-3. **PR**: Create pull request referencing GitHub Issue #166
+1. **Documentation Updates**
+   - Update `docs/configuration.md` with minimal config examples
+   - Add `idp-cli config` section to `docs/idp-cli.md`
+
+2. **Testing**
+   - Test `create-config` command output
+   - Test `validate-config` with valid/invalid configs
+   - Test deploy with minimal config file
+   - Test `download-config --format minimal` diff calculation
+
+3. **Optional Enhancements**
+   - Add `idp-cli deploy-config` for fast config-only updates (DynamoDB direct write)
+   - Add `--pattern` option to `deploy` command for explicit pattern selection
 
 ## Important Patterns and Preferences
 
-### Error Handling Pattern for Bedrock Services
-All services that use Bedrock should follow this pattern:
-- Catch exceptions for logging and error tracking (add to `document.errors`)
-- **Always re-raise exceptions** to propagate them to the Lambda handler
-- The Lambda handler checks `document.status == Status.FAILED` and raises
-- Step Functions sees Lambda error and properly fails the workflow
+### Configuration Merge Priority
+1. User's custom config (highest)
+2. Pattern-specific defaults (pattern-X.yaml)
+3. Base defaults (base.yaml)
+4. Pydantic model defaults (lowest)
 
-### Pattern 2 Service Structure
-- **OCR** → **Classification** → **Extraction/Assessment (parallel per section)** → **Process Results** → **Summarization** → **Evaluation**
-- Each step has its own Lambda function
-- Step Functions has retry logic for transient errors, but not for `AccessDeniedException`
+### Auto-Detection Logic
+Pattern is auto-detected from config:
+- `classificationMethod: "bda"` → pattern-1
+- `classificationMethod: "udop"` → pattern-3
+- Default → pattern-2
 
 ## Learnings and Project Insights
 
-1. **Silent error swallowing is dangerous**: The summarization service was catching exceptions to handle partial failures gracefully, but this meant critical errors like `AccessDeniedException` were never visible to users.
-
-2. **Consistent error handling is important**: Classification, Extraction, and Assessment services all correctly re-raise exceptions, but Summarization didn't follow the same pattern.
-
-3. **Parallel processing complicates error handling**: When using `ThreadPoolExecutor`, exceptions from worker threads must be explicitly collected and re-raised after all workers complete.
-
-4. **Step Functions rely on Lambda errors**: The workflow only fails if the Lambda function raises an exception. Returning a document with `status=FAILED` is not enough if the Lambda doesn't subsequently raise.
+1. **YAML inheritance via `_inherits` key**: Useful for documentation but handled programmatically
+2. **Prompt templates are large**: Pattern-2 prompts alone are 200+ lines
+3. **Graceful fallback is important**: Deploy should work even if idp_common not installed
+4. **Classes are always required**: Users must always specify document classes - no default

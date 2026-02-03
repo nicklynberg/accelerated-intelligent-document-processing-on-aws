@@ -625,6 +625,375 @@ def extract_structured_data_from_text(text: str, preferred_format: str = 'auto')
         logger.warning("Could not parse as either JSON or YAML, returning original text")
         return text, 'unknown'
 
+def repair_truncated_json(text: str) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Attempt to repair and parse truncated JSON from LLM output.
+    
+    This function handles cases where LLM output is cut off mid-stream (typically due to
+    hitting max_tokens limit), resulting in invalid JSON. It attempts multiple repair
+    strategies to recover as much data as possible.
+    
+    Args:
+        text: Raw text that may contain truncated JSON
+        
+    Returns:
+        Tuple of (parsed_data, repair_info)
+        - parsed_data: Parsed dict if successful, None if repair failed
+        - repair_info: Dict with keys:
+            - was_truncated: True if JSON appeared to be truncated
+            - repair_succeeded: True if repair was successful
+            - repair_method: Description of method used (if successful)
+            - fields_recovered: Number of top-level fields recovered (if successful)
+            - error: Error message (if repair failed)
+    """
+    import json
+    import re
+    
+    repair_info = {
+        "was_truncated": False,
+        "repair_succeeded": False,
+        "repair_method": None,
+        "fields_recovered": 0,
+        "error": None,
+    }
+    
+    if not text or not text.strip():
+        repair_info["error"] = "Empty text provided"
+        return None, repair_info
+    
+    # First, try standard extraction - maybe it's actually valid
+    try:
+        json_str = extract_json_from_text(text)
+        parsed = json.loads(json_str)
+        if isinstance(parsed, dict):
+            # Successfully parsed without repair
+            repair_info["fields_recovered"] = len(parsed)
+            return parsed, repair_info
+    except (json.JSONDecodeError, TypeError):
+        pass
+    
+    # If we reach here, JSON is likely truncated
+    repair_info["was_truncated"] = True
+    logger.info("JSON appears truncated, attempting repair...")
+    
+    # Extract JSON-like content from text (handle markdown code blocks)
+    json_text = text
+    if "```json" in text:
+        start_idx = text.find("```json") + len("```json")
+        end_idx = text.find("```", start_idx)
+        if end_idx == -1:
+            # No closing block - take everything after ```json
+            json_text = text[start_idx:].strip()
+        else:
+            json_text = text[start_idx:end_idx].strip()
+    elif "```" in text:
+        start_idx = text.find("```") + len("```")
+        end_idx = text.find("```", start_idx)
+        if end_idx == -1:
+            json_text = text[start_idx:].strip()
+        else:
+            json_text = text[start_idx:end_idx].strip()
+    
+    # Find the start of JSON object
+    if "{" not in json_text:
+        repair_info["error"] = "No JSON object found in text"
+        return None, repair_info
+    
+    start_idx = json_text.find("{")
+    json_text = json_text[start_idx:]
+    
+    # Strategy 1: Close open brackets/braces progressively
+    def try_close_json(text: str) -> Optional[Dict[str, Any]]:
+        """Try to close open JSON structures."""
+        # Track open structures
+        stack = []
+        in_string = False
+        escape_next = False
+        last_valid_pos = 0
+        
+        for i, char in enumerate(text):
+            if escape_next:
+                escape_next = False
+                continue
+            
+            if char == "\\":
+                escape_next = True
+                continue
+            
+            if char == '"' and not escape_next:
+                in_string = not in_string
+                continue
+            
+            if not in_string:
+                if char == '{':
+                    stack.append('}')
+                    last_valid_pos = i + 1
+                elif char == '[':
+                    stack.append(']')
+                    last_valid_pos = i + 1
+                elif char == '}':
+                    if stack and stack[-1] == '}':
+                        stack.pop()
+                        last_valid_pos = i + 1
+                elif char == ']':
+                    if stack and stack[-1] == ']':
+                        stack.pop()
+                        last_valid_pos = i + 1
+                elif char == ',':
+                    # Track position after comma for potential truncation point
+                    last_valid_pos = i + 1
+        
+        # If we're in a string, close it
+        if in_string:
+            text = text + '"'
+        
+        # Close all open structures
+        closing = ''.join(reversed(stack))
+        repaired = text + closing
+        
+        try:
+            parsed = json.loads(repaired)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+        
+        return None
+    
+    # Try Strategy 1
+    result = try_close_json(json_text)
+    if result:
+        repair_info["repair_succeeded"] = True
+        repair_info["repair_method"] = "closed_open_brackets"
+        repair_info["fields_recovered"] = len(result)
+        logger.info(f"JSON repair successful (closed brackets): recovered {len(result)} fields")
+        return result, repair_info
+    
+    # Strategy 2: Find last complete object/array element and truncate there
+    def find_last_complete_element(text: str) -> Optional[str]:
+        """Find the last position where we had complete JSON elements."""
+        # Look for patterns that indicate end of complete elements
+        # Pattern: }, followed by possible whitespace, then either } or ]
+        # This indicates a complete nested object
+        
+        # Try progressively shorter versions
+        for end_pos in range(len(text), 0, -1):
+            candidate = text[:end_pos]
+            
+            # Count brackets to see if we can close it
+            open_braces = candidate.count('{') - candidate.count('}')
+            open_brackets = candidate.count('[') - candidate.count(']')
+            
+            # Check if we're in a string (simple heuristic: odd number of unescaped quotes)
+            quote_count = len(re.findall(r'(?<!\\)"', candidate))
+            in_string = quote_count % 2 == 1
+            
+            if in_string:
+                # Close the string
+                candidate = candidate + '"'
+            
+            # Close remaining structures
+            closing = '}' * max(0, open_braces) + ']' * max(0, open_brackets)
+            
+            # Make sure we're at a valid truncation point (after a comma, colon, or bracket)
+            last_char = candidate.rstrip()[-1] if candidate.rstrip() else ''
+            if last_char in ',:[{':
+                # We're in the middle of something, try removing the incomplete part
+                # Find the last comma or bracket before this
+                for back_pos in range(len(candidate) - 1, 0, -1):
+                    c = candidate[back_pos]
+                    if c in ',}]':
+                        truncated = candidate[:back_pos + 1]
+                        # Recount brackets
+                        open_braces = truncated.count('{') - truncated.count('}')
+                        open_brackets = truncated.count('[') - truncated.count(']')
+                        closing = '}' * max(0, open_braces) + ']' * max(0, open_brackets)
+                        
+                        try:
+                            result = json.loads(truncated + closing)
+                            if isinstance(result, dict):
+                                return truncated + closing
+                        except json.JSONDecodeError:
+                            continue
+            else:
+                try:
+                    result = json.loads(candidate + closing)
+                    if isinstance(result, dict):
+                        return candidate + closing
+                except json.JSONDecodeError:
+                    continue
+        
+        return None
+    
+    repaired_json = find_last_complete_element(json_text)
+    if repaired_json:
+        try:
+            result = json.loads(repaired_json)
+            repair_info["repair_succeeded"] = True
+            repair_info["repair_method"] = "truncated_to_last_complete_element"
+            repair_info["fields_recovered"] = len(result)
+            logger.info(f"JSON repair successful (truncated): recovered {len(result)} fields")
+            return result, repair_info
+        except json.JSONDecodeError:
+            pass
+    
+    # Strategy 3: Try to extract at least the top-level complete fields
+    def extract_complete_fields(text: str) -> Optional[Dict[str, Any]]:
+        """Extract fields that are completely defined."""
+        # Start fresh - look for field patterns
+        result = {}
+        
+        # Find field definitions: "field_name": value
+        # We'll extract fields one by one
+        pos = text.find('{')
+        if pos == -1:
+            return None
+        
+        pos += 1  # Move past opening brace
+        
+        while pos < len(text):
+            # Skip whitespace
+            while pos < len(text) and text[pos] in ' \t\n\r':
+                pos += 1
+            
+            if pos >= len(text):
+                break
+            
+            # Look for field name
+            if text[pos] != '"':
+                pos += 1
+                continue
+            
+            # Find field name
+            name_start = pos + 1
+            name_end = text.find('"', name_start)
+            if name_end == -1:
+                break
+            
+            field_name = text[name_start:name_end]
+            pos = name_end + 1
+            
+            # Skip to colon
+            while pos < len(text) and text[pos] in ' \t\n\r':
+                pos += 1
+            
+            if pos >= len(text) or text[pos] != ':':
+                break
+            
+            pos += 1  # Move past colon
+            
+            # Skip whitespace
+            while pos < len(text) and text[pos] in ' \t\n\r':
+                pos += 1
+            
+            if pos >= len(text):
+                break
+            
+            # Extract value
+            value_start = pos
+            value = None
+            
+            if text[pos] == '"':
+                # String value
+                string_end = pos + 1
+                while string_end < len(text):
+                    if text[string_end] == '\\' and string_end + 1 < len(text):
+                        string_end += 2
+                        continue
+                    if text[string_end] == '"':
+                        break
+                    string_end += 1
+                
+                if string_end < len(text) and text[string_end] == '"':
+                    try:
+                        value = json.loads(text[value_start:string_end + 1])
+                        pos = string_end + 1
+                    except json.JSONDecodeError:
+                        break
+                else:
+                    break  # Incomplete string
+            
+            elif text[pos] in '{[':
+                # Object or array - find matching bracket
+                bracket_type = text[pos]
+                close_bracket = '}' if bracket_type == '{' else ']'
+                depth = 1
+                scan_pos = pos + 1
+                in_str = False
+                escape = False
+                
+                while scan_pos < len(text) and depth > 0:
+                    c = text[scan_pos]
+                    if escape:
+                        escape = False
+                        scan_pos += 1
+                        continue
+                    if c == '\\':
+                        escape = True
+                        scan_pos += 1
+                        continue
+                    if c == '"':
+                        in_str = not in_str
+                    elif not in_str:
+                        if c == bracket_type:
+                            depth += 1
+                        elif c == close_bracket:
+                            depth -= 1
+                    scan_pos += 1
+                
+                if depth == 0:
+                    try:
+                        value = json.loads(text[value_start:scan_pos])
+                        pos = scan_pos
+                    except json.JSONDecodeError:
+                        break
+                else:
+                    break  # Incomplete object/array
+            
+            elif text[pos:pos+4] == 'null':
+                value = None
+                pos += 4
+            elif text[pos:pos+4] == 'true':
+                value = True
+                pos += 4
+            elif text[pos:pos+5] == 'false':
+                value = False
+                pos += 5
+            else:
+                # Try to parse as number
+                num_match = re.match(r'-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?', text[pos:])
+                if num_match:
+                    try:
+                        num_str = num_match.group()
+                        value = float(num_str) if '.' in num_str or 'e' in num_str.lower() else int(num_str)
+                        pos += len(num_str)
+                    except ValueError:
+                        break
+                else:
+                    break
+            
+            if value is not None or text[value_start:value_start+4] == 'null':
+                result[field_name] = value
+            
+            # Skip whitespace and comma
+            while pos < len(text) and text[pos] in ' \t\n\r,':
+                pos += 1
+        
+        return result if result else None
+    
+    result = extract_complete_fields(json_text)
+    if result:
+        repair_info["repair_succeeded"] = True
+        repair_info["repair_method"] = "extracted_complete_fields"
+        repair_info["fields_recovered"] = len(result)
+        logger.info(f"JSON repair successful (field extraction): recovered {len(result)} fields")
+        return result, repair_info
+    
+    repair_info["error"] = "All repair strategies failed"
+    logger.warning("JSON repair failed - all strategies exhausted")
+    return None, repair_info
+
+
 def check_token_limit(document_text: str, extraction_results: Dict[str, Any], config: IDPConfig) -> \
 Optional[str]:
     """

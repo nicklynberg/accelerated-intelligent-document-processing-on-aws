@@ -132,18 +132,25 @@ def handler(event, context):
 def handle_get_configuration(manager):
     """
     Handle the getConfiguration GraphQL query
-    Returns Schema, Default, and Custom configuration items with auto-migration support
-
-    Data Flow:
-    1. If Custom is empty on first read, copy Default → Custom
-    2. Frontend only uses Custom for display and diffing
-    3. Default is only used for "Reset to Default" operation
-
-    New ConfigurationManager API returns IDPConfig directly - convert to dict for GraphQL
+    Returns Schema, Default, and Custom configuration items.
+    
+    DESIGN PATTERN (CRITICAL):
+    - Default: Full stack baseline (Pydantic validated)
+    - Custom: SPARSE DELTAS ONLY (raw from DynamoDB, NO Pydantic defaults!)
+    - Frontend merges Default + Custom for display
+    - Runtime uses get_merged_configuration() for processing
+    
+    This design allows:
+    - Stack upgrades to safely update Default without losing user customizations
+    - Empty Custom = all defaults (clean reset)
+    - User customizations survive stack updates
+    
+    ANTI-PATTERNS TO AVOID:
+    - DO NOT auto-copy Default → Custom when Custom is empty
+    - DO NOT use Pydantic validation on Custom (fills in defaults)
     """
     try:
-        # Get all configurations - migration happens automatically in get_configuration
-        # API returns SchemaConfig for Schema, IDPConfig for Default/Custom
+        # Get Schema configuration (Pydantic validated - this is correct for Schema)
         schema_config = manager.get_configuration(CONFIG_TYPE_SCHEMA)
         if schema_config:
             # Remove config_type discriminator before sending to frontend
@@ -153,6 +160,7 @@ def handle_get_configuration(manager):
         else:
             schema_dict = {}
 
+        # Get Default configuration (Pydantic validated - full stack baseline)
         default_config = manager.get_configuration(CONFIG_TYPE_DEFAULT)
         if default_config and isinstance(default_config, IDPConfig):
             default_dict = default_config.model_dump(
@@ -161,27 +169,14 @@ def handle_get_configuration(manager):
         else:
             default_dict = {}
 
-        custom_config = manager.get_configuration(CONFIG_TYPE_CUSTOM)
-
-        # IMPORTANT: If Custom is empty on first read, copy Default → Custom
-        # This ensures frontend always has a complete config to diff against
-        if not custom_config or (
-            isinstance(custom_config, IDPConfig)
-            and not custom_config.model_dump(exclude_unset=True)
-        ):
-            logger.info("Custom config is empty, copying Default → Custom")
-            if default_config and isinstance(default_config, IDPConfig):
-                manager.save_configuration(CONFIG_TYPE_CUSTOM, default_config)
-                custom_config = default_config
-                logger.info("Copied Default to Custom on first read")
-            else:
-                logger.warning("Default config is also empty, using empty Custom")
-
-        if custom_config and isinstance(custom_config, IDPConfig):
-            custom_dict = custom_config.model_dump(
-                mode="python", exclude={"config_type"}
-            )
-        else:
+        # Get Custom configuration as RAW dict (NO Pydantic defaults!)
+        # This is critical for the sparse delta pattern to work correctly
+        custom_dict = manager.get_raw_configuration(CONFIG_TYPE_CUSTOM)
+        
+        # If Custom doesn't exist or is empty, return empty dict
+        # DO NOT auto-copy Default → Custom (this breaks the delta pattern)
+        if not custom_dict:
+            logger.info("Custom config is empty or not found - returning empty dict (expected behavior)")
             custom_dict = {}
 
         # Return all configurations as dicts (GraphQL requires JSON-serializable)
@@ -192,7 +187,7 @@ def handle_get_configuration(manager):
             "Custom": custom_dict,
         }
 
-        logger.info(f"Returning configuration")
+        logger.info("Returning configuration (Default=full, Custom=deltas only)")
         return result
 
     except Exception as e:

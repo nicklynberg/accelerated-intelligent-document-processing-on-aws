@@ -220,6 +220,7 @@ Resources:
     Type: AWS::ECR::Repository
     # checkov:skip=CKV_AWS_51: "Mutable tags allowed for workflow flexibility and version updates."
     Properties:
+      # checkov:skip=CKV_AWS_163: "ECR scanning controlled by parameter for environment-specific deployment requirements"
       ImageScanningConfiguration:
         ScanOnPush: !If [IsECRImageScanningEnabled, true, false]
       EncryptionConfiguration:
@@ -242,12 +243,13 @@ Resources:
 
   DockerBuildProject:
     Type: AWS::CodeBuild::Project
+    # cdk-nag suppress: AwsSolutions-CB5 - Privileged mode required for Docker image builds
     Properties:
       Name: !Sub "${AWS::StackName}-docker-build"
       Description: !Sub >-
         Pattern-3 Docker image builder for GenAIIDP stack - ${AWS::StackName}
       ServiceRole: !GetAtt DockerBuildRole.Arn
-      EncryptionKey: alias/aws/s3
+      EncryptionKey: !Ref CustomerManagedEncryptionKeyArn
       Artifacts:
         Type: NO_ARTIFACTS
       Source:

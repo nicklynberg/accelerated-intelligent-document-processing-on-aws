@@ -92,7 +92,7 @@ The IDP CLI is used for programmatic deployment and batch processing:
 
 ```bash
 # Install CLI
-cd idp_cli && pip install -e .
+make setup
 
 # Deploy a new stack
 idp-cli deploy \

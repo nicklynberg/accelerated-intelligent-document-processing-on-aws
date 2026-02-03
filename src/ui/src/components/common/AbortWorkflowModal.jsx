@@ -21,7 +21,7 @@ const ABORTABLE_STATUSES = [
   'EVALUATING',
 ];
 
-const AbortWorkflowModal = ({ visible, onDismiss, onConfirm, selectedItems = [] }) => {
+const AbortWorkflowModal = ({ visible, onDismiss, onConfirm, selectedItems = [], isLoading = false }) => {
   // Filter to only include items that can be aborted
   const abortableItems = selectedItems.filter((item) => ABORTABLE_STATUSES.includes(item.objectStatus));
   const nonAbortableItems = selectedItems.filter((item) => !ABORTABLE_STATUSES.includes(item.objectStatus));
@@ -45,15 +45,15 @@ const AbortWorkflowModal = ({ visible, onDismiss, onConfirm, selectedItems = [] 
   return (
     <Modal
       visible={visible}
-      onDismiss={onDismiss}
+      onDismiss={isLoading ? undefined : onDismiss}
       header={title}
       footer={
         <Box float="right">
           <SpaceBetween direction="horizontal" size="xs">
-            <Button variant="link" onClick={onDismiss}>
+            <Button variant="link" onClick={onDismiss} disabled={isLoading}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={handleConfirm} disabled={abortableItems.length === 0}>
+            <Button variant="primary" onClick={handleConfirm} disabled={abortableItems.length === 0} loading={isLoading}>
               Abort
             </Button>
           </SpaceBetween>
@@ -112,6 +112,7 @@ AbortWorkflowModal.propTypes = {
       objectStatus: PropTypes.string,
     }),
   ),
+  isLoading: PropTypes.bool,
 };
 
 export default AbortWorkflowModal;

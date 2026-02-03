@@ -1068,6 +1068,9 @@ class EvaluationService:
         This prevents validation errors when baseline data has different types
         than the schema expects (e.g., float values when schema expects strings).
 
+        Also handles required fields that have None/null values by providing
+        appropriate defaults to prevent Pydantic validation errors.
+
         Args:
             data: Dictionary of extraction data
             model_class: Pydantic model class with field type annotations
@@ -1083,6 +1086,7 @@ class EvaluationService:
 
             coerced_data = {}
 
+            # First pass: process existing data
             for key, value in data.items():
                 if key not in model_fields:
                     # Field not in schema, keep as-is
@@ -1109,6 +1113,42 @@ class EvaluationService:
                     value, field_annotation, key
                 )
 
+            # Second pass: add defaults for missing required fields
+            # This handles cases where LLM returned null for required fields
+            # and _remove_none_values() removed them
+            for field_name, field_info in model_fields.items():
+                if field_name in coerced_data:
+                    continue  # Already have a value
+
+                # Check if field is required (no default and not Optional)
+                is_required = field_info.is_required()
+
+                if is_required:
+                    # Get the field's annotation to determine appropriate default
+                    field_annotation = field_info.annotation
+
+                    # Handle Optional types
+                    origin = getattr(field_annotation, "__origin__", None)
+                    if origin is Union:
+                        args = getattr(field_annotation, "__args__", ())
+                        # If None is in the Union, field accepts None
+                        if type(None) in args:
+                            continue  # Optional field, skip
+                        field_annotation = next(
+                            (arg for arg in args if arg is not type(None)),
+                            field_annotation,
+                        )
+
+                    # Provide type-appropriate default for required field
+                    default_value = self._get_default_for_type(
+                        field_annotation, field_name
+                    )
+                    if default_value is not None:
+                        logger.debug(
+                            f"Required field '{field_name}' missing from data, providing default: {default_value!r}"
+                        )
+                        coerced_data[field_name] = default_value
+
             return coerced_data
 
         except Exception as e:
@@ -1116,6 +1156,48 @@ class EvaluationService:
                 f"Error during type coercion: {str(e)}. Returning original data."
             )
             return data
+
+    def _get_default_for_type(self, field_annotation: Any, field_name: str = "") -> Any:
+        """
+        Get an appropriate default value for a required field based on its type.
+
+        This is used when a required field has a null/None value and we need
+        to provide a default to allow Pydantic validation to succeed.
+
+        Args:
+            field_annotation: The type annotation for the field
+            field_name: Name of the field (for logging)
+
+        Returns:
+            Appropriate default value for the type, or None if no default is suitable
+        """
+        origin = getattr(field_annotation, "__origin__", None)
+
+        # Handle list/array types
+        if origin is list:
+            return []
+
+        # Handle dict types
+        if origin is dict:
+            return {}
+
+        # Handle basic types
+        if field_annotation is str:
+            return ""
+        elif field_annotation is int:
+            return 0
+        elif field_annotation is float:
+            return 0.0
+        elif field_annotation is bool:
+            return False
+
+        # For complex types (e.g., nested Pydantic models), return None
+        # This will still cause validation to fail, but that's appropriate
+        # for complex required fields
+        logger.debug(
+            f"No default available for required field '{field_name}' with type {field_annotation}"
+        )
+        return None
 
     def _coerce_value_to_type(
         self, value: Any, expected_type: Any, field_name: str = ""
@@ -1238,6 +1320,58 @@ class EvaluationService:
             cleaned_expected = self._remove_none_values(expected_results)
             cleaned_actual = self._remove_none_values(actual_results)
 
+            # Check for unparsed LLM output (raw_output indicates extraction parsing failed)
+            # This typically happens when LLM output is truncated due to max_tokens limit
+            if (
+                isinstance(cleaned_actual, dict)
+                and "raw_output" in cleaned_actual
+                and len(cleaned_actual) == 1
+            ):
+                raw_output_preview = str(cleaned_actual.get("raw_output", ""))[:500]
+                logger.error(
+                    f"Section {section.section_id}: Extraction produced unparsed raw_output. "
+                    f"This indicates the LLM output could not be parsed as valid JSON. "
+                    f"Raw output preview: {raw_output_preview}..."
+                )
+
+                failure_reason = (
+                    f"Extraction parsing failed for section {section.section_id}. "
+                    f"The LLM output could not be parsed as valid JSON. "
+                    f"This typically indicates truncated output (model hit max_tokens limit). "
+                    f"Consider increasing max_tokens in extraction config. "
+                    f"Raw output preview: {raw_output_preview[:200]}..."
+                )
+
+                # Count expected fields as false negatives since none were extracted
+                num_expected_fields = len(cleaned_expected) if cleaned_expected else 1
+
+                return SectionEvaluationResult(
+                    section_id=section.section_id,
+                    document_class=class_name,
+                    attributes=[
+                        AttributeEvaluationResult(
+                            name="__EXTRACTION_PARSING_FAILED__",
+                            expected=f"Expected {num_expected_fields} fields",
+                            actual="raw_output (unparsed LLM response)",
+                            matched=False,
+                            score=0.0,
+                            reason=failure_reason,
+                            evaluation_method="N/A",
+                        )
+                    ],
+                    metrics={
+                        "precision": 0.0,
+                        "recall": 0.0,
+                        "f1_score": 0.0,
+                        "accuracy": 0.0,
+                        "false_alarm_rate": 0.0,
+                        "false_discovery_rate": 0.0,
+                        "weighted_overall_score": 0.0,
+                        "evaluation_failed": True,
+                        "failure_type": "extraction_parsing_failed",
+                    },
+                )
+
             # Coerce data types to match schema expectations
             # This prevents Pydantic validation errors from type mismatches
             coerced_expected = self._coerce_data_to_schema(cleaned_expected, ModelClass)
@@ -1277,16 +1411,37 @@ class EvaluationService:
             return section_result
 
         except ValueError as ve:
-            # Schema configuration missing - this is a configuration issue
+            # Schema configuration error - determine specific cause for better messaging
+            error_message = str(ve)
             logger.error(
-                f"Configuration error for section {section.section_id}: {str(ve)}",
+                f"Configuration error for section {section.section_id}: {error_message}",
                 exc_info=True,
             )
-            failure_reason = (
-                f"No schema configuration found for document class: {class_name}. "
-                f"Cannot evaluate without configuration or baseline data. "
-                f"Please add configuration for this document class or provide baseline data."
-            )
+
+            # Check for specific known error patterns
+            if "field_definitions must contain at least one field" in error_message:
+                # This happens when a nested object has empty properties: {}
+                # Extract the field name from the error message if possible
+                import re
+
+                field_match = re.search(r"Error in field '([^']+)'", error_message)
+                field_name = field_match.group(1) if field_match else "unknown"
+
+                failure_reason = (
+                    f"Schema error for document class '{class_name}': "
+                    f"Nested object '{field_name}' has no properties defined. "
+                    f"Stickler requires at least one field in nested objects. "
+                    f"Either add properties to '{field_name}' in your schema or remove it entirely."
+                )
+            elif "No schema configuration found" in error_message:
+                failure_reason = (
+                    f"No schema configuration found for document class: {class_name}. "
+                    f"Cannot evaluate without configuration or baseline data. "
+                    f"Please add configuration for this document class or provide baseline data."
+                )
+            else:
+                # Generic schema/configuration error
+                failure_reason = f"Schema configuration error for document class '{class_name}': {error_message}"
 
             return SectionEvaluationResult(
                 section_id=section.section_id,
@@ -1600,7 +1755,17 @@ class EvaluationService:
                         )
 
             # Sort section results by section_id for consistent output
-            section_results.sort(key=lambda x: x.section_id)
+            # Use natural sorting to handle numeric section IDs correctly (1, 2, 10 vs 1, 10, 2)
+            def natural_sort_key(x):
+                """Extract numeric parts for natural sorting."""
+                import re
+
+                # Split section_id into text and numeric parts
+                parts = re.split(r"(\d+)", x.section_id)
+                # Convert numeric parts to integers for proper numerical sorting
+                return [int(p) if p.isdigit() else p.lower() for p in parts]
+
+            section_results.sort(key=natural_sort_key)
 
             # Calculate overall metrics
             overall_metrics = calculate_metrics(

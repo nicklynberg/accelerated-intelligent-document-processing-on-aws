@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { produce } from 'immer';
 import {
   X_AWS_IDP_DOCUMENT_TYPE,
+  X_AWS_IDP_RULE_TYPE,
   X_AWS_IDP_EXAMPLES,
   X_AWS_IDP_DOCUMENT_NAME_REGEX,
   X_AWS_IDP_PAGE_CONTENT_REGEX,
@@ -119,7 +120,9 @@ const convertJsonSchemaToClasses = (jsonSchema) => {
 
     jsonSchema.forEach((schema, schemaIndex) => {
       // Extract inline objects to classes before creating document type
-      const extractedProperties = extractInlineObjectsToClasses(schema.properties || {}, extractedClasses, timestamp);
+      // Handle both standard 'properties' and 'rule_properties' fields
+      const schemaProperties = schema.rule_properties || schema.properties || {};
+      const extractedProperties = extractInlineObjectsToClasses(schemaProperties, extractedClasses, timestamp);
 
       // Convert root schema to document type class
       const docTypeClass = {
@@ -185,7 +188,9 @@ const convertJsonSchemaToClasses = (jsonSchema) => {
   const timestamp = Date.now();
 
   // Extract inline objects from main schema
-  const extractedProperties = extractInlineObjectsToClasses(jsonSchema.properties || {}, extractedClasses, timestamp);
+  // Handle both standard 'properties' and 'rule_properties' fields
+  const schemaProperties = jsonSchema.rule_properties || jsonSchema.properties || {};
+  const extractedProperties = extractInlineObjectsToClasses(schemaProperties, extractedClasses, timestamp);
 
   const mainClassId = `class-${timestamp}`;
   const mainClass = {
@@ -234,7 +239,7 @@ const convertJsonSchemaToClasses = (jsonSchema) => {
   return classes;
 };
 
-export const useSchemaDesigner = (initialSchema = []) => {
+export const useSchemaDesigner = (initialSchema = [], isRuleSchema = false) => {
   const [classes, setClasses] = useState([]);
   const [selectedClassId, setSelectedClassId] = useState(null);
   const [selectedAttributeId, setSelectedAttributeId] = useState(null);
@@ -620,13 +625,17 @@ export const useSchemaDesigner = (initialSchema = []) => {
         return acc;
       }, {});
 
+      // Use conditional field names based on schema type
+      const typeField = isRuleSchema ? X_AWS_IDP_RULE_TYPE : X_AWS_IDP_DOCUMENT_TYPE;
+      const propertiesField = isRuleSchema ? 'rule_properties' : 'properties';
+
       const result = {
         $schema: 'https://json-schema.org/draft/2020-12/schema',
         $id: docTypeClass.name,
-        [X_AWS_IDP_DOCUMENT_TYPE]: docTypeClass.name,
+        [typeField]: docTypeClass.name,
         type: 'object',
         ...(docTypeClass.description ? { description: docTypeClass.description } : {}),
-        properties: sanitizedProps,
+        [propertiesField]: sanitizedProps,
         ...(docTypeClass.attributes.required?.length > 0 ? { required: docTypeClass.attributes.required } : {}),
         ...(Object.keys(defs).length > 0 ? { $defs: defs } : {}),
         ...(docTypeClass[X_AWS_IDP_EXAMPLES]?.length > 0 ? { [X_AWS_IDP_EXAMPLES]: docTypeClass[X_AWS_IDP_EXAMPLES] } : {}),
@@ -648,7 +657,7 @@ export const useSchemaDesigner = (initialSchema = []) => {
 
     // Always return array of schemas for consistency
     return schemas;
-  }, [classes, sanitizeAttributeSchema, findReferencedClasses]);
+  }, [classes, sanitizeAttributeSchema, findReferencedClasses, isRuleSchema]);
 
   const importSchema = useCallback((importedClasses) => {
     setClasses(importedClasses);

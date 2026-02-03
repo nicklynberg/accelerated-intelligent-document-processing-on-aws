@@ -29,12 +29,17 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
   - [rerun-inference](#rerun-inference)
   - [status](#status)
   - [download-results](#download-results)
+  - [delete-documents](#delete-documents)
   - [generate-manifest](#generate-manifest)
   - [validate-manifest](#validate-manifest)
   - [list-batches](#list-batches)
   - [stop-workflows](#stop-workflows)
   - [load-test](#load-test)
   - [remove-deleted-stack-resources](#remove-deleted-stack-resources)
+  - [config-create](#config-create)
+  - [config-validate](#config-validate)
+  - [config-download](#config-download)
+  - [config-upload](#config-upload)
 - [Complete Evaluation Workflow](#complete-evaluation-workflow)
   - [Step 1: Deploy Your Stack](#step-1-deploy-your-stack)
   - [Step 2: Initial Processing from Local Directory](#step-2-initial-processing-from-local-directory)
@@ -61,14 +66,14 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
 ### Install from source
 
 ```bash
-cd idp_cli
+cd lib/idp_cli_pkg
 pip install -e .
 ```
 
 ### Install with test dependencies
 
 ```bash
-cd idp_cli
+cd lib/idp_cli_pkg
 pip install -e ".[test]"
 ```
 
@@ -779,6 +784,94 @@ idp-cli download-results \
 
 ---
 
+### `delete-documents`
+
+Delete documents and all associated data from the IDP system.
+
+**⚠️ WARNING:** This action cannot be undone.
+
+**Usage:**
+```bash
+idp-cli delete-documents [OPTIONS]
+```
+
+**Document Selection (choose ONE):**
+- `--document-ids`: Comma-separated list of document IDs (S3 object keys) to delete
+- `--batch-id`: Delete all documents in this batch
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--status-filter`: Only delete documents with this status (use with --batch-id)
+  - Options: `FAILED`, `COMPLETED`, `PROCESSING`, `QUEUED`
+- `--dry-run`: Show what would be deleted without actually deleting
+- `--force`, `-y`: Skip confirmation prompt
+- `--region`: AWS region (optional)
+
+**What Gets Deleted:**
+- Source files from input bucket
+- Processed outputs from output bucket
+- DynamoDB tracking records
+- List entries in tracking table
+
+**Examples:**
+
+```bash
+# Delete specific documents by ID
+idp-cli delete-documents \
+    --stack-name my-stack \
+    --document-ids "batch-123/doc1.pdf,batch-123/doc2.pdf"
+
+# Delete all documents in a batch
+idp-cli delete-documents \
+    --stack-name my-stack \
+    --batch-id cli-batch-20250123
+
+# Delete only failed documents in a batch
+idp-cli delete-documents \
+    --stack-name my-stack \
+    --batch-id cli-batch-20250123 \
+    --status-filter FAILED
+
+# Dry run to see what would be deleted
+idp-cli delete-documents \
+    --stack-name my-stack \
+    --batch-id cli-batch-20250123 \
+    --dry-run
+
+# Force delete without confirmation
+idp-cli delete-documents \
+    --stack-name my-stack \
+    --document-ids "batch-123/doc1.pdf" \
+    --force
+```
+
+**Output Example:**
+```
+Connecting to stack: my-stack
+Getting documents for batch: cli-batch-20250123
+Found 15 document(s) in batch
+  (filtered by status: FAILED)
+
+⚠️  Documents to be deleted:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  • cli-batch-20250123/doc1.pdf
+  • cli-batch-20250123/doc2.pdf
+  • cli-batch-20250123/doc3.pdf
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Delete 3 document(s) permanently? [y/N]: y
+
+✓ Successfully deleted 3 document(s)
+```
+
+**Use Cases:**
+- Clean up failed documents after fixing issues
+- Remove test documents from a batch
+- Free up storage by removing old processed documents
+- Prepare for reprocessing by removing previous results
+
+---
+
 ### `generate-manifest`
 
 Generate a manifest file from directory or S3 URI, or create a test set in the test set bucket.
@@ -1424,7 +1517,7 @@ minute,count
 5,500
 ```
 
-See `idp_cli/examples/load-test-schedule.csv` for a sample schedule file.
+See `lib/idp_cli_pkg/examples/load-test-schedule.csv` for a sample schedule file.
 
 ---
 
@@ -1526,6 +1619,143 @@ This means:
 
 ---
 
+### `config-create`
+
+Generate an IDP configuration template from system defaults.
+
+**Usage:**
+```bash
+idp-cli config-create [OPTIONS]
+```
+
+**Options:**
+- `--features`: Feature set (default: `min`)
+  - `min`: classification, extraction, classes only (simplest)
+  - `core`: min + ocr, assessment
+  - `all`: all sections with full defaults
+  - Or comma-separated list: `"classification,extraction,summarization"`
+- `--pattern`: Pattern to use for defaults (default: `pattern-2`)
+- `--output`, `-o`: Output file path (default: stdout)
+- `--include-prompts`: Include full prompt templates (default: stripped for readability)
+- `--no-comments`: Omit explanatory header comments
+
+**Examples:**
+
+```bash
+# Generate minimal config to stdout
+idp-cli config-create
+
+# Generate minimal config for Pattern-1
+idp-cli config-create --pattern pattern-1 --output config.yaml
+
+# Generate full config with all sections
+idp-cli config-create --features all --output full-config.yaml
+
+# Custom section selection
+idp-cli config-create --features "classification,extraction,summarization" --output config.yaml
+```
+
+---
+
+### `config-validate`
+
+Validate a configuration file against system defaults and Pydantic models.
+
+**Usage:**
+```bash
+idp-cli config-validate [OPTIONS]
+```
+
+**Options:**
+- `--custom-config` (required): Path to configuration file to validate
+- `--pattern`: Pattern to validate against (default: `pattern-2`)
+- `--show-merged`: Show the full merged configuration
+
+**Examples:**
+
+```bash
+# Validate a config file
+idp-cli config-validate --custom-config ./my-config.yaml
+
+# Validate against Pattern-1 defaults
+idp-cli config-validate --custom-config ./config.yaml --pattern pattern-1
+
+# Show full merged config
+idp-cli config-validate --custom-config ./config.yaml --show-merged
+```
+
+---
+
+### `config-download`
+
+Download configuration from a deployed IDP stack.
+
+**Usage:**
+```bash
+idp-cli config-download [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--output`, `-o`: Output file path (default: stdout)
+- `--format`: Output format - `full` (default) or `minimal` (only differences from defaults)
+- `--pattern`: Pattern for minimal diff (auto-detected if not specified)
+- `--region`: AWS region (optional)
+
+**Examples:**
+
+```bash
+# Download full config
+idp-cli config-download --stack-name my-stack --output config.yaml
+
+# Download minimal config (only customizations)
+idp-cli config-download --stack-name my-stack --format minimal --output config.yaml
+
+# Print to stdout
+idp-cli config-download --stack-name my-stack
+```
+
+---
+
+### `config-upload`
+
+Upload a configuration file to a deployed IDP stack.
+
+**Usage:**
+```bash
+idp-cli config-upload [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--config-file`, `-f` (required): Path to configuration file (YAML or JSON)
+- `--validate/--no-validate`: Validate config before uploading (default: validate)
+- `--pattern`: Pattern for validation (auto-detected if not specified)
+- `--region`: AWS region (optional)
+
+**Examples:**
+
+```bash
+# Upload config with validation
+idp-cli config-upload --stack-name my-stack --config-file ./config.yaml
+
+# Skip validation (use with caution)
+idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --no-validate
+
+# Explicit pattern for validation
+idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --pattern pattern-2
+```
+
+**What Happens:**
+1. Loads and parses your YAML or JSON config file
+2. Validates against system defaults (unless `--no-validate`)
+3. Uploads to the stack's ConfigurationTable in DynamoDB
+4. Configuration is immediately active for new document processing
+
+This uses the same mechanism as the Web UI "Save Configuration" button.
+
+---
+
 ## Troubleshooting
 
 ### Stack Not Found
@@ -1589,7 +1819,7 @@ aws logs tail /aws/lambda/<LookupFunctionName> --follow
 Run the test suite:
 
 ```bash
-cd idp_cli
+cd lib/idp_cli_pkg
 pytest
 ```
 

@@ -338,6 +338,12 @@ const ConfigBuilder = ({
   extractionSchema = null,
   onSchemaChange = null,
   onSchemaValidate = null,
+  activeTabId: controlledActiveTabId = 'configuration',
+  onTabChange = null,
+  showRuleSchema = false,
+  ruleSchema = null,
+  onRuleSchemaChange = null,
+  onRuleSchemaValidate = null,
 }) => {
   // Track expanded state for all list items across the form - default to collapsed
   const [expandedItems, setExpandedItems] = useState({});
@@ -349,8 +355,10 @@ const ConfigBuilder = ({
   // For handling dropdown selection in modal
   const [showNameAsDropdown, setShowNameAsDropdown] = useState(false);
 
-  // State for tab selection
-  const [activeTabId, setActiveTabId] = useState('configuration');
+  // State for tab selection - use controlled props if provided, otherwise local state
+  const [localActiveTabId, setLocalActiveTabId] = useState('configuration');
+  const activeTabId = onTabChange ? controlledActiveTabId : localActiveTabId;
+  const setActiveTabId = onTabChange || setLocalActiveTabId;
 
   // Component-level function to add a new item with a name
   const addNewItem = (path, name) => {
@@ -1466,6 +1474,25 @@ const ConfigBuilder = ({
               </Box>
             ),
           },
+          // Only show Rule Schema tab for Pattern2
+          ...(showRuleSchema
+            ? [
+                {
+                  id: 'rule-schema',
+                  label: 'Rule Schema',
+                  content: (
+                    <Box style={{ height: 'calc(70vh - 60px)' }}>
+                      <SchemaBuilder
+                        initialSchema={ruleSchema}
+                        onChange={onRuleSchemaChange}
+                        onValidate={onRuleSchemaValidate}
+                        isRuleSchema={true}
+                      />
+                    </Box>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
 
@@ -1550,6 +1577,12 @@ ConfigBuilder.propTypes = {
   extractionSchema: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
   onSchemaChange: PropTypes.func,
   onSchemaValidate: PropTypes.func,
+  activeTabId: PropTypes.string,
+  onTabChange: PropTypes.func,
+  showRuleSchema: PropTypes.bool,
+  ruleSchema: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
+  onRuleSchemaChange: PropTypes.func,
+  onRuleSchemaValidate: PropTypes.func,
 };
 
 export default ConfigBuilder;

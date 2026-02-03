@@ -225,6 +225,7 @@ Resources:
     Type: AWS::ECR::Repository
     # checkov:skip=CKV_AWS_51: "Mutable tags allowed for workflow flexibility and version updates."
     Properties:
+      # checkov:skip=CKV_AWS_163: "ECR scanning controlled by parameter for environment-specific deployment requirements"
       ImageScanningConfiguration:
         ScanOnPush: !If [IsECRImageScanningEnabled, true, false]
       EncryptionConfiguration:
@@ -247,12 +248,13 @@ Resources:
 
   DockerBuildProject:
     Type: AWS::CodeBuild::Project
+    # cdk-nag suppress: AwsSolutions-CB5 - Privileged mode required for Docker image builds
     Properties:
       Name: !Sub "${AWS::StackName}-docker-build"
       Description: !Sub >-
         Pattern-2 Docker image builder for GenAIIDP stack - ${AWS::StackName}
       ServiceRole: !GetAtt DockerBuildRole.Arn
-      EncryptionKey: alias/aws/s3
+      EncryptionKey: !Ref CustomerManagedEncryptionKeyArn
       Artifacts:
         Type: NO_ARTIFACTS
       Source:
@@ -395,6 +397,8 @@ Resources:
         - "processresults-function"
         - "summarization-function"
         - "evaluation-function"
+        - "rule-validation-function"
+        - "rule-validation-orchestration-function"
 
   EcrRepositoryCleanup:
     Type: Custom::ECRRepositoryCleanup
@@ -1201,7 +1205,7 @@ Resources:
             sectionLabel: Summarization Inference
             properties:
               enabled:
-                type: boolean
+                type: booleanss
                 description: Enable or disable document summarization
                 default: true
                 order: 0
@@ -1606,6 +1610,204 @@ Resources:
                         description: Default time range in hours for analysis
                         default: 24
                         order: 2
+          rule_validation:
+            order: 10
+            type: object
+            sectionLabel: Rule Validation Inference
+            properties:
+              enabled:
+                type: boolean
+                description: Enable or disable rule validation processing
+                default: true
+                order: 0
+              recommendation_options:
+                type: string
+                format: text-area
+                description: "Recommendation options that define the possible outcomes for rule validation: Pass (criteria fully met), Fail (partially met or needs more info), Information Not Found (no relevant data)"
+                default: |-
+                  Pass: The requirement criteria are fully met.
+                  Fail: The requirement is partially met or requires additional information.
+                  Information Not Found: No relevant data exists in the user history.
+                order: 1
+                dependsOn: { field: "enabled", value: true }
+              semaphore:
+                type: integer
+                minimum: 1
+                maximum: 10
+                description: Number of concurrent API calls for rule validation
+                default: 5
+                order: 2
+                dependsOn: { field: "enabled", value: true }
+              max_chunk_size:
+                type: integer
+                minimum: 1000
+                maximum: 200000
+                description: Maximum chunk size (in characters) for rule validation processing
+                default: 8000
+                order: 3
+                dependsOn: { field: "enabled", value: true }
+              fact_extraction:
+                type: object
+                sectionLabel: Fact Extraction
+                description: Configuration for extracting relevant facts from documents
+                order: 4
+                dependsOn: { field: "enabled", value: true }
+                properties:
+                  model:
+                    type: string
+                    description: Bedrock model ID for fact extraction
+                    enum:
+                      [
+                        "us.amazon.nova-lite-v1:0",
+                        "us.amazon.nova-pro-v1:0",
+                        "us.amazon.nova-premier-v1:0",
+                        "us.amazon.nova-2-lite-v1:0", "us.amazon.nova-2-lite-v1:0:priority", "us.amazon.nova-2-lite-v1:0:flex", "global.amazon.nova-2-lite-v1:0", "global.amazon.nova-2-lite-v1:0:priority", "global.amazon.nova-2-lite-v1:0:flex",
+                        "us.anthropic.claude-3-haiku-20240307-v1:0",
+                        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+                        "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
+                        "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                        "us.anthropic.claude-sonnet-4-20250514-v1:0",
+                        "us.anthropic.claude-sonnet-4-20250514-v1:0:1m",
+                        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
+                        "us.anthropic.claude-opus-4-20250514-v1:0",
+                        "us.anthropic.claude-opus-4-1-20250805-v1:0",
+                        "us.anthropic.claude-opus-4-5-20251101-v1:0",
+                        "eu.amazon.nova-lite-v1:0",
+                        "eu.amazon.nova-pro-v1:0",
+                        "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
+                        "eu.anthropic.claude-3-haiku-20240307-v1:0",
+                        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "eu.anthropic.claude-3-5-sonnet-20241022-v2:0",
+                        "eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                        "eu.anthropic.claude-sonnet-4-20250514-v1:0",
+                        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
+                        "eu.anthropic.claude-opus-4-5-20251101-v1:0",
+                        "qwen.qwen3-vl-235b-a22b",
+                        "global.amazon.nova-2-lite-v1:0",
+                        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "global.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
+                        "global.anthropic.claude-opus-4-5-20251101-v1:0"
+                      ]
+                    default: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+                    order: 0
+                  temperature:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random)"
+                    default: 0.0
+                    order: 1
+                  top_k:
+                    type: integer
+                    minimum: 1
+                    description: Sampling Top K
+                    default: 20
+                    order: 2
+                  top_p:
+                    type: number
+                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0)"
+                    default: 0.01
+                    order: 3
+                  max_tokens:
+                    type: integer
+                    description: Max tokens
+                    default: 4096
+                    order: 4
+                  system_prompt:
+                    type: string
+                    format: textarea
+                    description: System prompt that defines the LLM's role as a fact extractor for identifying relevant information from documents
+                    order: 5
+                  task_prompt:
+                    type: string
+                    format: textarea
+                    description: Task prompt for fact extraction - supports placeholders {DOCUMENT_TEXT} (replaced with document content), {recommendation_options} (replaced with available recommendation options), {rule_type} (replaced with rule type), and {rule} (replaced with rule description). Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
+                    order: 6
+              rule_validation_orchestrator:
+                type: object
+                sectionLabel: Rule Validation Orchestrator
+                description: Configuration for consolidating fact extraction results into final compliance decisions
+                order: 5
+                dependsOn: { field: "enabled", value: true }
+                properties:
+                  model:
+                    type: string
+                    description: Bedrock model ID for rule validation orchestrator
+                    enum:
+                      [
+                        "us.amazon.nova-lite-v1:0",
+                        "us.amazon.nova-pro-v1:0",
+                        "us.amazon.nova-premier-v1:0",
+                        "us.amazon.nova-2-lite-v1:0", "us.amazon.nova-2-lite-v1:0:priority", "us.amazon.nova-2-lite-v1:0:flex", "global.amazon.nova-2-lite-v1:0", "global.amazon.nova-2-lite-v1:0:priority", "global.amazon.nova-2-lite-v1:0:flex",
+                        "us.anthropic.claude-3-haiku-20240307-v1:0",
+                        "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+                        "us.anthropic.claude-3-5-sonnet-20240620-v1:0",
+                        "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                        "us.anthropic.claude-sonnet-4-20250514-v1:0",
+                        "us.anthropic.claude-sonnet-4-20250514-v1:0:1m",
+                        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
+                        "us.anthropic.claude-opus-4-20250514-v1:0",
+                        "us.anthropic.claude-opus-4-1-20250805-v1:0",
+                        "us.anthropic.claude-opus-4-5-20251101-v1:0",
+                        "eu.amazon.nova-lite-v1:0",
+                        "eu.amazon.nova-pro-v1:0",
+                        "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
+                        "eu.anthropic.claude-3-haiku-20240307-v1:0",
+                        "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "eu.anthropic.claude-3-5-sonnet-20241022-v2:0",
+                        "eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
+                        "eu.anthropic.claude-sonnet-4-20250514-v1:0",
+                        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "eu.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
+                        "eu.anthropic.claude-opus-4-5-20251101-v1:0",
+                        "qwen.qwen3-vl-235b-a22b",
+                        "global.amazon.nova-2-lite-v1:0",
+                        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+                        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+                        "global.anthropic.claude-sonnet-4-5-20250929-v1:0:1m",
+                        "global.anthropic.claude-opus-4-5-20251101-v1:0"
+                      ]
+                    default: "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+                    order: 0
+                  temperature:
+                    type: number
+                    minimum: 0
+                    maximum: 1
+                    description: "Sampling temperature: Controls randomness in model output (0.0 = deterministic, higher = more random)"
+                    default: 0.0
+                    order: 1
+                  top_k:
+                    type: integer
+                    minimum: 1
+                    description: Sampling Top K
+                    default: 20
+                    order: 2
+                  top_p:
+                    type: number
+                    description: "Sampling Top P: Nucleus sampling threshold (0.0-1.0)"
+                    default: 0.01
+                    order: 3
+                  max_tokens:
+                    type: integer
+                    description: Max tokens
+                    default: 4096
+                    order: 4
+                  system_prompt:
+                    type: string
+                    format: textarea
+                    description: System prompt for rule validation orchestrator - defines the LLM's role in consolidating extracted facts into final compliance decisions
+                    order: 5
+                  task_prompt:
+                    type: string
+                    format: textarea
+                    description: Task prompt for rule validation orchestrator - supports placeholders {recommendation_options}, {extracted_evidence}, {policy_class}, and {rule}. Optionally use <<CACHEPOINT>> to separate static and dynamic elements of prompt for Bedrock prompt caching.
+                    order: 6
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 
@@ -2385,6 +2587,355 @@ Resources:
       LogGroupName: !Sub "/${AWS::StackName}/lambda/EvaluationFunction"
       RetentionInDays: !Ref LogRetentionDays
 
+  RuleValidationFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: DockerBuildRun
+    Metadata:
+      SkipBuild: True
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      # Container configuration
+      PackageType: Image
+      ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-function-${ImageVersion}"
+      Architectures:
+        - arm64
+      ImageConfig:
+        Command:
+          - "index.handler"
+      # Local testing configuration (commented for deployment)
+      # CodeUri: src/rule-validation-function/
+      # Handler: index.handler
+      # Runtime: python3.12
+      Timeout: 900
+      MemorySize: 4096
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          GUARDRAIL_ID_AND_VERSION:
+            !If [
+              HasGuardrailConfig,
+              !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}",
+              "",
+            ]
+          LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
+          TRACKING_TABLE: !Ref TrackingTable
+          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          WORKING_BUCKET: !Ref WorkingBucket
+      LoggingConfig:
+        LogGroup: !Ref RuleValidationFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - !Ref LambdaECRAccessPolicy
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref WorkingBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            # AppSync permissions for updating document status (only if AppSync API is available)
+            - !If
+              - HasAppSyncApi
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
+              - !Ref AWS::NoValue
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            - !If
+              - HasGuardrailConfig
+              - Effect: Allow
+                Action: bedrock:ApplyGuardrail
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+
+  RuleValidationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/RuleValidationFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  RuleValidationOrchestrationFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: DockerBuildRun
+    Metadata:
+      SkipBuild: True
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      # Container configuration
+      PackageType: Image
+      ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-orchestration-function-${ImageVersion}"
+      Architectures:
+        - arm64
+      ImageConfig:
+        Command:
+          - "index.handler"
+      # Local testing configuration (commented for deployment)
+      # CodeUri: src/rule-validation-orchestration-function/
+      # Handler: index.handler
+      # Runtime: python3.12
+      Timeout: 900
+      MemorySize: 4096
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          GUARDRAIL_ID_AND_VERSION:
+            !If [
+              HasGuardrailConfig,
+              !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}",
+              "",
+            ]
+          LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
+          TRACKING_TABLE: !Ref TrackingTable
+          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          WORKING_BUCKET: !Ref WorkingBucket
+          REPORTING_BUCKET: !Ref ReportingBucket
+          SAVE_REPORTING_FUNCTION_NAME: !Ref SaveReportingFunctionName
+      LoggingConfig:
+        LogGroup: !Ref RuleValidationOrchestrationFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - !Ref LambdaECRAccessPolicy
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref WorkingBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            - !If
+              - HasAppSyncApi
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
+              - !Ref AWS::NoValue
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            - Effect: Allow
+              Action:
+                - aws-marketplace:Subscribe
+                - aws-marketplace:Unsubscribe
+                - aws-marketplace:ViewSubscriptions
+              Resource: "*"
+            - !If
+              - HasGuardrailConfig
+              - Effect: Allow
+                Action:
+                  - bedrock:ApplyGuardrail
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${SaveReportingFunctionName}"
+
+  RuleValidationOrchestrationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/RuleValidationOrchestrationFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  RuleValidationFunction:
+    Type: AWS::Serverless::Function
+    DependsOn: DockerBuildRun
+    Metadata:
+      SkipBuild: True
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Cloudwatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      # Container configuration
+      PackageType: Image
+      ImageUri: !Sub "${ECRRepository.RepositoryUri}:rule-validation-function-${ImageVersion}"
+      Architectures:
+        - arm64
+      ImageConfig:
+        Command:
+          - "index.handler"
+      # Local testing configuration (commented for deployment)
+      # CodeUri: src/rule-validation-function/
+      # Handler: index.handler
+      # Runtime: python3.12
+      Timeout: 900
+      MemorySize: 4096
+      Environment:
+        Variables:
+          METRIC_NAMESPACE: !Ref StackName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          GUARDRAIL_ID_AND_VERSION:
+            !If [
+              HasGuardrailConfig,
+              !Sub "${BedrockGuardrailId}:${BedrockGuardrailVersion}",
+              "",
+            ]
+          LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !Ref AppSyncApiUrl
+          TRACKING_TABLE: !Ref TrackingTable
+          DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, "appsync", "dynamodb"]
+          WORKING_BUCKET: !Ref WorkingBucket
+      LoggingConfig:
+        LogGroup: !Ref RuleValidationFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - !Ref LambdaECRAccessPolicy
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref WorkingBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            # AppSync permissions for updating document status (only if AppSync API is available)
+            - !If
+              - HasAppSyncApi
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource:
+                  - !Sub "${AppSyncApiArn}/types/Mutation/*"
+              - !Ref AWS::NoValue
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:InvokeModelWithResponseStream
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            - !If
+              - HasGuardrailConfig
+              - Effect: Allow
+                Action: bedrock:ApplyGuardrail
+                Resource: !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+              - !Ref AWS::NoValue
+
+  RuleValidationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/RuleValidationFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  RuleValidationOrchestrationFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/RuleValidationOrchestrationFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
   DocumentProcessingStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
@@ -2404,6 +2955,8 @@ Resources:
         ProcessResultsLambdaArn: !GetAtt ProcessResultsFunction.Arn
         SummarizationLambdaArn: !GetAtt SummarizationFunction.Arn
         EvaluationLambdaArn: !GetAtt EvaluationFunction.Arn
+        RuleValidationLambdaArn: !GetAtt RuleValidationFunction.Arn
+        RuleValidationOrchestrationLambdaArn: !GetAtt RuleValidationOrchestrationFunction.Arn
         OutputBucket: !Ref OutputBucket
       Logging:
         Level: ALL
@@ -2427,6 +2980,10 @@ Resources:
             FunctionName: !Ref SummarizationFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref EvaluationFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref RuleValidationFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref RuleValidationOrchestrationFunction
         - CloudWatchLogsFullAccess
 
   StateMachineLogGroup:
@@ -2906,6 +3463,56 @@ Resources:
                 "title": "Summarization Lambda Errors",
                 "view": "table"
               }
+            },
+            {
+              "type": "metric",
+              "x": 16,
+              "y": 24,
+              "width": 8,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${RuleValidationFunction}"]
+                ],
+                "region": "${AWS::Region}",
+                "title": "Rule Validation Function Duration",
+                "period": 300,
+                "annotations": {
+                  "horizontal": [{
+                    "value": ${ExecutionTimeThresholdMs},
+                    "label": "Threshold (${ExecutionTimeThresholdMs}ms)",
+                    "color": "#ff0000"
+                  }]
+                },
+                "stat": "Average",
+                "view": "timeSeries"
+              }
+            },
+            {
+              "type": "log",
+              "x": 0,
+              "y": 54,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${RuleValidationFunctionLogGroup}' | filter @type = \"REPORT\" | fields @timestamp, @logStream, @billedDuration, @maxMemoryUsed/1024/1024 as memoryUsedMB | filter @billedDuration > ${ExecutionTimeThresholdMs} | sort by @billedDuration desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Rule Validation Lambda Long Running Invocations",
+                "view": "table"
+              }
+            },
+            {
+              "type": "log",
+              "x": 12,
+              "y": 54,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "query": "SOURCE '${RuleValidationFunctionLogGroup}' | fields @timestamp, @logStream, @message | filter @message like /ERROR/ or @message like /Task timed out/ | parse @message /RequestId: (?<requestId>[^ ]*)/ | sort @timestamp desc | limit 20",
+                "region": "${AWS::Region}",
+                "title": "Rule Validation Lambda Errors",
+                "view": "table"
+              }
             }
           ]
         }
@@ -2935,6 +3542,8 @@ Outputs:
         - !Ref AssessmentFunctionLogGroup
         - !Ref ProcessResultsFunctionLogGroup
         - !Ref SummarizationFunctionLogGroup
+        - !Ref RuleValidationFunctionLogGroup
+        - !Ref RuleValidationOrchestrationFunctionLogGroup
         - !Ref StateMachineLogGroup
 
   DashboardName:

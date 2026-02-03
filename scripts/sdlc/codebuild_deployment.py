@@ -78,7 +78,7 @@ def publish_templates():
     region = get_env_var("AWS_DEFAULT_REGION", "us-east-1")
 
     # Generate bucket name and prefix
-    bucket_basename = f"genaiic-sdlc-sourcecode-{account_id}-{region}"
+    bucket_basename = f"genaiic-sdlc-sourcecode-{account_id}"
     prefix = f"codebuild-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
     # Run publish.sh

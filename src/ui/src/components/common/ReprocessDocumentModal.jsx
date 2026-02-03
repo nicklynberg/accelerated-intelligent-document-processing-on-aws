@@ -7,7 +7,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 
 const logger = new ConsoleLogger('ReprocessDocumentModal');
 
-const ReprocessDocumentModal = ({ visible, onDismiss, onConfirm, selectedItems = [] }) => {
+const ReprocessDocumentModal = ({ visible, onDismiss, onConfirm, selectedItems = [], isLoading = false }) => {
   let title = 'Reprocess document';
   let message = 'Are you sure you want to reprocess this document?';
 
@@ -24,15 +24,15 @@ const ReprocessDocumentModal = ({ visible, onDismiss, onConfirm, selectedItems =
   return (
     <Modal
       visible={visible}
-      onDismiss={onDismiss}
+      onDismiss={isLoading ? undefined : onDismiss}
       header={title}
       footer={
         <Box float="right">
           <SpaceBetween direction="horizontal" size="xs">
-            <Button variant="link" onClick={onDismiss}>
+            <Button variant="link" onClick={onDismiss} disabled={isLoading}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={handleConfirm}>
+            <Button variant="primary" onClick={handleConfirm} loading={isLoading}>
               Reprocess
             </Button>
           </SpaceBetween>
@@ -59,6 +59,7 @@ ReprocessDocumentModal.propTypes = {
       objectKey: PropTypes.string.isRequired,
     }),
   ),
+  isLoading: PropTypes.bool,
 };
 
 export default ReprocessDocumentModal;

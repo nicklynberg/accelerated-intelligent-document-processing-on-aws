@@ -1701,9 +1701,19 @@ STDERR:
                     "<LAMBDA_HASH_TOKEN>": self.get_directory_checksum(
                         "./src/lambda/agentcore_gateway_manager"
                     )[:16],
-                    "<CONFIG_LIBRARY_HASH_TOKEN>": self.get_directory_checksum(
-                        "config_library"
-                    )[:16],
+                    # Include config_library + config processing code (Lambda, models, system defaults)
+                    # This ensures UpdateConfiguration custom resource re-runs when processing logic changes
+                    "<CONFIG_LIBRARY_HASH_TOKEN>": hashlib.sha256(
+                        (
+                            self.get_directory_checksum("config_library")
+                            + self.get_directory_checksum(
+                                "src/lambda/update_configuration"
+                            )
+                            + self.get_directory_checksum(
+                                "lib/idp_common_pkg/idp_common/config"
+                            )
+                        ).encode()
+                    ).hexdigest()[:16],
                     "<CONFIG_FILES_LIST_TOKEN>": config_files_json,
                     "<WORKFORCE_URL_HASH_TOKEN>": workforce_url_hash,
                     "<A2I_RESOURCES_HASH_TOKEN>": a2i_resources_hash,
@@ -2339,8 +2349,15 @@ STDERR:
     def build_lambda_layer(self, layer_name, layer_extras):
         """Build a single Lambda layer with specified extras.
 
-        The hash is computed from actual layer contents AFTER removing boto packages,
-        ensuring the hash accurately reflects what's in the final layer.
+        The hash is computed from:
+        1. Source code hash of lib/idp_common_pkg (to detect when source changes)
+        2. Layer content hash AFTER removing boto packages (to verify installed content)
+
+        This dual-hash approach ensures:
+        - When source changes, old layer zips won't be reused (source hash differs)
+        - Layer content is accurately reflected (content hash)
+
+        Layer zip naming: idp-common-{name}-{source_hash[:8]}-{content_hash[:8]}.zip
 
         Args:
             layer_name: Name of the layer (e.g., 'base', 'reporting', 'agents')
@@ -2445,15 +2462,18 @@ STDERR:
                     f"  Removed Lambda runtime packages: {', '.join(set(removed_packages))}"
                 )
 
-            # Compute hash from actual layer contents AFTER removing boto packages
-            layer_hash = self.compute_directory_hash(layer_python_dir)
-            layer_zip_name = f"idp-common-{layer_name}-{layer_hash}.zip"
+            # Compute SOURCE hash from lib/idp_common_pkg source files
+            # This ensures when source changes, layer is always rebuilt
+            source_hash = self.get_source_files_checksum("./lib/idp_common_pkg")[:8]
+
+            # Use source hash in zip name to ensure rebuild when source changes
+            layer_zip_name = f"idp-common-{layer_name}-{source_hash}.zip"
             layer_zip_path = os.path.join(".aws-sam", "layers", layer_zip_name)
 
-            # Check if layer with this content hash already exists
+            # Check if layer with this source hash already exists
             if os.path.exists(layer_zip_path):
                 self.console.print(
-                    f"[green]Layer {layer_name} already built with same content: {layer_zip_name}[/green]"
+                    f"[green]Layer {layer_name} already built with same source: {layer_zip_name}[/green]"
                 )
                 # Clean up build directory
                 shutil.rmtree(layer_build_dir)
@@ -2551,12 +2571,16 @@ STDERR:
         Used when lib hasn't changed but we need to populate _layer_arns
         with the correct layer zip names for template token replacement.
 
-        IMPORTANT: Also verifies that layers exist in S3 at the current version path.
+        IMPORTANT: Verifies that the SOURCE HASH in the layer zip filename matches
+        the current source code hash. If it doesn't match (source changed but checksum
+        didn't detect it), this returns empty dict to force a rebuild.
+
+        Also verifies that layers exist in S3 at the current version path.
         If a layer exists locally but not in S3 (e.g., VERSION changed), it uploads it.
-        This prevents deployment failures when the S3 prefix changes due to VERSION updates.
 
         Returns:
             Dict mapping layer names to layer info dicts with zip_name, etc.
+            Empty dict if source hash doesn't match (triggers rebuild)
         """
         layers_dir = ".aws-sam/layers"
         layer_info = {}
@@ -2570,6 +2594,12 @@ STDERR:
                 "[yellow]⚠️  Layers directory not found - cannot discover existing layers[/yellow]"
             )
             return layer_info
+
+        # Compute current source hash to verify existing layers match current source
+        current_source_hash = self.get_source_files_checksum("./lib/idp_common_pkg")[:8]
+        self.console.print(
+            f"[dim]   Current lib source hash: {current_source_hash}[/dim]"
+        )
 
         # Find existing layer zips
         layer_zips = [
@@ -2585,28 +2615,25 @@ STDERR:
         # Map each layer name to its zip file
         expected_layers = ["base", "reporting", "agents"]
         for layer_name in expected_layers:
-            # Find the zip for this layer (format: idp-common-{name}-{hash}.zip)
-            matching_zips = [z for z in layer_zips if f"idp-common-{layer_name}-" in z]
-            if matching_zips:
-                # Use the most recent one (in case there are multiple)
-                zip_name = sorted(matching_zips)[-1]
+            # Find the zip for this layer (format: idp-common-{name}-{source_hash}.zip)
+            # Match based on current source hash to ensure we use up-to-date layers
+            expected_zip_name = f"idp-common-{layer_name}-{current_source_hash}.zip"
+
+            if expected_zip_name in layer_zips:
+                zip_name = expected_zip_name
                 zip_path = os.path.join(layers_dir, zip_name)
-                # Extract hash from zip_name
-                layer_hash = zip_name.replace(f"idp-common-{layer_name}-", "").replace(
-                    ".zip", ""
-                )
+                layer_hash = current_source_hash
                 s3_key = f"{self.prefix_and_version}/layers/{zip_name}"
 
                 # Verify layer exists in S3 at current version path
-                # This handles VERSION changes where layer exists locally but not at new S3 path
                 try:
                     self.s3_client.head_object(Bucket=self.bucket, Key=s3_key)
                     self.console.print(
-                        f"[green]   ✓ Layer '{layer_name}': {zip_name} (in S3)[/green]"
+                        f"[green]   ✓ Layer '{layer_name}': {zip_name} (source hash matches, in S3)[/green]"
                     )
                 except ClientError as e:
                     if e.response["Error"]["Code"] == "404":
-                        # Layer exists locally but not in S3 at new version path - upload it
+                        # Layer exists locally but not in S3 - upload it
                         self.console.print(
                             f"[yellow]   ⚠️  Layer '{layer_name}' not in S3 at current version path - uploading[/yellow]"
                         )
@@ -2623,16 +2650,34 @@ STDERR:
                     "s3_key": s3_key,
                 }
             else:
-                self.console.print(
-                    f"[yellow]⚠️  No existing layer zip found for '{layer_name}'[/yellow]"
-                )
+                # Layer with matching source hash not found
+                # Check if there's an OLD layer (different hash) - indicates source changed
+                old_matching = [
+                    z for z in layer_zips if f"idp-common-{layer_name}-" in z
+                ]
+                if old_matching:
+                    old_hash = (
+                        old_matching[0]
+                        .replace(f"idp-common-{layer_name}-", "")
+                        .replace(".zip", "")
+                    )
+                    self.console.print(
+                        f"[yellow]⚠️  Layer '{layer_name}' has stale source hash ({old_hash} != {current_source_hash}) - needs rebuild[/yellow]"
+                    )
+                else:
+                    self.console.print(
+                        f"[yellow]⚠️  No existing layer zip found for '{layer_name}'[/yellow]"
+                    )
+                # Don't add to layer_info - will trigger rebuild
 
-        if layer_info:
+        if len(layer_info) == len(expected_layers):
             self.console.print(
-                f"[green]✅ Discovered {len(layer_info)} existing layer zips (lib unchanged)[/green]"
+                f"[green]✅ Discovered {len(layer_info)} existing layer zips with matching source hash[/green]"
             )
         else:
-            self.console.print("[yellow]⚠️  No layer zips discovered[/yellow]")
+            self.console.print(
+                f"[yellow]⚠️  Only {len(layer_info)}/{len(expected_layers)} layers have matching source hash - will rebuild[/yellow]"
+            )
 
         return layer_info
 

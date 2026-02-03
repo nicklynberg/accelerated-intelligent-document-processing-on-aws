@@ -27,9 +27,11 @@ class Status(Enum):
     POSTPROCESSING = "POSTPROCESSING"  # Document summarization
     HITL_IN_PROGRESS = "HITL_IN_PROGRESS"  # Human-in-the-loop review in progress
     SUMMARIZING = "SUMMARIZING"  # Document summarization
+    RULE_VALIDATION = "RULE_VALIDATION"  # Rule validation processing
+    RULE_VALIDATION_ORCHESTRATOR = "RULE_VALIDATION_ORCHESTRATOR"  # Rule validation orchestration and consolidation
     EVALUATING = "EVALUATING"  # Document evaluation
     COMPLETED = "COMPLETED"  # All processing completed
-    FAILED = "FAILED"  # Processing failed
+    FAILED = "FAILED"  # Processing failedy
     ABORTED = "ABORTED"  # User cancelled workflow
 
 
@@ -87,6 +89,70 @@ class Section:
             "attributes": self.attributes,
             "confidence_threshold_alerts": self.confidence_threshold_alerts,
         }
+
+
+@dataclass
+class RuleValidationResult:
+    """Result of criteria validation for a document request."""
+
+    request_id: str
+    summary: Optional[Dict[str, Any]] = None
+    section_results: Optional[List[Dict[str, Any]]] = None
+    metadata: Optional[Dict[str, Any]] = None
+    output_uri: Optional[str] = None
+    errors: Optional[List[str]] = None
+
+    @classmethod
+    def for_section(
+        cls,
+        document_id: str,
+        section_uri: str,
+        timing_metrics: Dict = None,
+        chunking_occurred: bool = False,
+        chunks_created: int = 0,
+    ):
+        """Create result for single section processing."""
+        section_data = {
+            "section_uri": section_uri,
+            "timing": timing_metrics or {},
+            "chunking_occurred": chunking_occurred,
+            "chunks_created": chunks_created,
+        }
+        return cls(
+            request_id=document_id,
+            section_results=[section_data],
+            metadata={
+                "sections_processed": 1,
+                "section_output_uri": section_uri,
+                "chunking_occurred": chunking_occurred,
+                "chunks_created": chunks_created,
+            },
+            output_uri=section_uri,
+        )
+
+    @classmethod
+    def for_consolidation(
+        cls,
+        document_id: str,
+        rule_type_uris: List[str],
+        summary_uri: str,
+        sections_processed: int = 0,
+        section_results: Optional[List[Dict[str, Any]]] = None,
+    ):
+        """Create result for consolidation processing."""
+        return cls(
+            request_id=document_id,
+            summary={
+                "rule_type_uris": rule_type_uris,
+                "consolidated_summary_uri": summary_uri,
+            },
+            section_results=section_results,  # Preserve section results from Map state
+            metadata={
+                "processing_type": "consolidation",
+                "sections_processed": sections_processed,
+            },
+            output_uri=summary_uri,
+        )
 
 
 @dataclass
@@ -203,6 +269,7 @@ class Document:
     evaluation_status: Optional[str] = None
     evaluation_report_uri: Optional[str] = None
     evaluation_results_uri: Optional[str] = None
+    rule_validation_result: Optional[RuleValidationResult] = None
     evaluation_result: Any = None  # Holds the DocumentEvaluationResult object
     summarization_result: Any = None  # Holds the DocumentSummarizationResult object
     errors: List[str] = field(default_factory=list)
@@ -264,6 +331,17 @@ class Document:
             if section.attributes:
                 section_dict["attributes"] = section.attributes
             result["sections"].append(section_dict)
+
+        # Add rule_validation_result if present (optional)
+        if self.rule_validation_result:
+            result["rule_validation_result"] = {
+                "request_id": self.rule_validation_result.request_id,
+                "summary": self.rule_validation_result.summary,
+                "section_results": self.rule_validation_result.section_results,
+                "metadata": self.rule_validation_result.metadata,
+                "output_uri": self.rule_validation_result.output_uri,
+                "errors": self.rule_validation_result.errors,
+            }
 
         # Add HITL metadata if it has any values
         if self.hitl_metadata:
@@ -340,6 +418,18 @@ class Document:
         hitl_metadata_data = data.get("hitl_metadata", [])
         for metadata_item in hitl_metadata_data:
             document.hitl_metadata.append(HitlMetadata.from_dict(metadata_item))
+
+        # Convert rule_validation_result if present (optional)
+        if "rule_validation_result" in data:
+            rv_data = data["rule_validation_result"]
+            document.rule_validation_result = RuleValidationResult(
+                request_id=rv_data.get("request_id"),
+                summary=rv_data.get("summary"),
+                section_results=rv_data.get("section_results"),
+                metadata=rv_data.get("metadata"),
+                output_uri=rv_data.get("output_uri"),
+                errors=rv_data.get("errors"),
+            )
 
         return document
 

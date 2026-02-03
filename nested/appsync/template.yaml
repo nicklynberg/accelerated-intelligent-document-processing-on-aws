@@ -1420,6 +1420,8 @@ Resources:
       Description: Lambda function to delete documents via GraphQL API
       MemorySize: 512
       Timeout: 60
+      Layers:
+        - !Ref IDPCommonBaseLayerArn
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
@@ -3309,6 +3311,92 @@ Resources:
                 #if( !${expValues.isEmpty()} )
                 , "expressionValues": $utils.toJson($expValues)
                 #end
+            }
+        }
+      ResponseMappingTemplate: |
+        $util.toJson($ctx.result)
+
+
+  ##########################################################################
+  # UpdateDocumentStatusResolver - Lightweight status-only update
+  # Minimizes DynamoDB WCU usage during processing steps
+  ##########################################################################
+  UpdateDocumentStatusResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: updateDocumentStatus
+      DataSourceName: !GetAtt TrackingTableDataSource.Name
+      RequestMappingTemplate: |-
+        #set( $PK = "doc#${ctx.args.input.ObjectKey}" )
+        #set( $expNames = {} )
+        #set( $expValues = {} )
+        
+        ## Always set ObjectStatus (required)
+        $util.qr($expNames.put("#ObjectStatus", "ObjectStatus"))
+        $util.qr($expValues.put(":ObjectStatus", $util.dynamodb.toDynamoDB($ctx.args.input.ObjectStatus)))
+        #set( $expression = "SET #ObjectStatus = :ObjectStatus" )
+        
+        ## Optionally set WorkflowExecutionArn
+        #if( !$util.isNullOrBlank($ctx.args.input.WorkflowExecutionArn) )
+            $util.qr($expNames.put("#WorkflowExecutionArn", "WorkflowExecutionArn"))
+            $util.qr($expValues.put(":WorkflowExecutionArn", $util.dynamodb.toDynamoDB($ctx.args.input.WorkflowExecutionArn)))
+            #set( $expression = "${expression}, #WorkflowExecutionArn = :WorkflowExecutionArn" )
+        #end
+        
+        ## Optionally set WorkflowStatus
+        #if( !$util.isNullOrBlank($ctx.args.input.WorkflowStatus) )
+            $util.qr($expNames.put("#WorkflowStatus", "WorkflowStatus"))
+            $util.qr($expValues.put(":WorkflowStatus", $util.dynamodb.toDynamoDB($ctx.args.input.WorkflowStatus)))
+            #set( $expression = "${expression}, #WorkflowStatus = :WorkflowStatus" )
+        #end
+        
+        {
+            "version" : "2018-05-29",
+            "operation" : "UpdateItem",
+            "key" : {
+              "PK": $util.dynamodb.toDynamoDBJson($PK),
+              "SK": $util.dynamodb.toDynamoDBJson("none")
+            },
+            "update" : {
+                "expression": "$expression",
+                "expressionNames": $utils.toJson($expNames),
+                "expressionValues": $utils.toJson($expValues)
+            }
+        }
+      ResponseMappingTemplate: |
+        $util.toJson($ctx.result)
+
+
+  ##########################################################################
+  # UpdateDocumentSectionResolver - Atomic section-level update
+  # Updates a single section by index for parallel Map operations
+  ##########################################################################
+  UpdateDocumentSectionResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      TypeName: Mutation
+      FieldName: updateDocumentSection
+      DataSourceName: !GetAtt TrackingTableDataSource.Name
+      RequestMappingTemplate: |-
+        #set( $PK = "doc#${ctx.args.input.ObjectKey}" )
+        #set( $sectionIndex = $ctx.args.input.SectionIndex )
+        #set( $section = $ctx.args.input.Section )
+        
+        {
+            "version" : "2018-05-29",
+            "operation" : "UpdateItem",
+            "key" : {
+              "PK": $util.dynamodb.toDynamoDBJson($PK),
+              "SK": $util.dynamodb.toDynamoDBJson("none")
+            },
+            "update" : {
+                "expression": "SET Sections[${sectionIndex}] = :section",
+                "expressionValues": {
+                  ":section": $util.dynamodb.toDynamoDBJson($section)
+                }
             }
         }
       ResponseMappingTemplate: |
