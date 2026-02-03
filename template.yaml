@@ -444,6 +444,24 @@ Parameters:
     Default: ""
     Description: Optional - Existing Security Group ID for VPC-enabled Lambda functions (required if VpcId is provided)
 
+  DeployBastionHost:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Whether to deploy a bastion host to facilitate testing of the Private API Gateway
+
+  BastionHostSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public Subnet ID where the bastion host will be deployed, if DeployBastionHost is 'true'
+
+  BastionHostSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Security Group ID for the bastion host to use, if DeployBastionHost is 'true'
+
+  BastionHostAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
 Rules:
   Pattern3UDOPModelArtifactPath:
     RuleCondition:
@@ -457,6 +475,7 @@ Rules:
 
 Conditions:
   DeployApiGateway: !Not [!Equals [!Ref VpcId, ""]]
+  ShouldDeployBastionHost: !Equals [!Ref DeployBastionHost, 'true']
   
   IsPattern1:
     !Equals [
@@ -875,6 +894,93 @@ Resources:
                 - kms:Decrypt
                 - kms:GenerateDataKey*
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+  BastionKey:
+    Type: AWS::KMS::Key
+    Condition: ShouldDeployBastionHost
+    Properties:
+      Description: 'KMS Key for Bastion Host EBS encryption'
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow use of the key for EBS
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:Encrypt
+              - kms:GenerateDataKey*
+              - kms:ReEncrypt*
+            Resource: '*'
+
+  BastionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldDeployBastionHost
+    Properties:
+      RoleName: !Sub '${AWS::StackName}BastionHost-Role'
+      Description: 'Assumed by bastion host'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+
+  BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: ShouldDeployBastionHost
+    Properties:
+      InstanceProfileName: !Sub '${AWS::StackName}BastionHost-InstanceProfile'
+      Roles:
+        - !Ref BastionRole
+
+  BastionLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Condition: ShouldDeployBastionHost
+    Properties:
+      LaunchTemplateName: !Sub '${AWS::StackName}BastionLaunchTemplate'
+      LaunchTemplateData:
+        ImageId: !Ref BastionHostAmiId
+        InstanceType: t3.small
+        IamInstanceProfile:
+          Arn: !GetAtt BastionInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref BastionHostSecurityGroupId
+        BlockDeviceMappings:
+          - DeviceName: '/dev/xvda'
+            Ebs:
+              VolumeSize: 20
+              VolumeType: gp3
+              Encrypted: true
+              KmsKeyId: !Ref BastionKey
+              DeleteOnTermination: true
+        MetadataOptions:
+          HttpTokens: required
+        Monitoring:
+          Enabled: true
+
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Condition: ShouldDeployBastionHost
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref BastionLaunchTemplate
+        Version: !GetAtt BastionLaunchTemplate.LatestVersionNumber
+      SubnetId: !Ref BastionHostSubnetId
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}BastionHost'
 
   ConfigurationCopyFunction:
     Type: AWS::Serverless::Function
