@@ -149,9 +149,9 @@ echo sudo -E $sshcmd \
         -o ServerAliveCountMax=2 \
         -i $BASTION_FN \
         ec2-user@$BASTION_ID \
-        -L 127.0.0.101:443:${API_VPCE_DOMAIN:-$API_DOMAIN}:443 \
+        -L 127.0.0.101:443:$API_DOMAIN:443 \
+        -L 127.0.0.102:443:$API_VPCE_DOMAIN:443 \
         $interactive
-echo 'bout to need sudo'
 # sudo -E $sshcmd \
 #         -o ExitOnForwardFailure=yes \
 #         -o ProxyCommand="sh -c \"aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p'\"" \
