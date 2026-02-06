@@ -99,7 +99,8 @@ else
   if [ -n "$API_GW_VPCE_ID" ]; then
     # Use VPC Endpoint DNS format: {vpce-id}.execute-api.{region}.amazonaws.com
     REGION=$(aws configure get region)
-    API_VPCE_DOMAIN="od77kzrok3-${API_GW_VPCE_ID}.execute-api.${REGION}.amazonaws.com"
+    API_GW_ID=$(echo $API_DOMAIN | cut -d'.' -f1)
+    API_VPCE_DOMAIN="${API_GW_ID}-${API_GW_VPCE_ID}.execute-api.${REGION}.amazonaws.com"
     echo "Using API Gateway VPC Endpoint: $API_VPCE_DOMAIN"
   else
     echo "Warning: No VPC Endpoint ID found for API Gateway, using regular domain"
