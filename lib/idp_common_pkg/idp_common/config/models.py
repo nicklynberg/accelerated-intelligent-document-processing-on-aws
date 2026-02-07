@@ -111,7 +111,11 @@ class ExtractionConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(default=10000, gt=0)
+    max_tokens: int = Field(
+        default=10000,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
     image: ImageConfig = Field(default_factory=ImageConfig)
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
     custom_prompt_lambda_arn: Optional[str] = Field(
@@ -159,7 +163,11 @@ class ClassificationConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
     maxPagesForClassification: str = Field(
         default="ALL",
         description="Max pages to use for classification. 'ALL' = all pages, or a number to limit to N pages",
@@ -288,7 +296,11 @@ class AssessmentConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(default=10000, gt=0)
+    max_tokens: int = Field(
+        default=10000,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
     default_confidence_threshold: float = Field(
         default=0.8,
         ge=0.0,
@@ -339,7 +351,11 @@ class SummarizationConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -755,7 +771,11 @@ class FactExtractionConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
     top_k: float = Field(default=20.0, ge=0.0)
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -784,7 +804,11 @@ class RuleValidationOrchestratorConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
     top_k: float = Field(default=20.0, ge=0.0)
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -850,7 +874,11 @@ class EvaluationLLMMethodConfig(BaseModel):
     """Evaluation LLM method configuration"""
 
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
     top_k: float = Field(default=5.0, ge=0.0)
     task_prompt: str = Field(
         default="""
@@ -925,7 +953,11 @@ class DiscoveryModelConfig(BaseModel):
     system_prompt: str = Field(default="", description="System prompt for discovery")
     temperature: float = Field(default=1.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
-    max_tokens: int = Field(default=10000, gt=0)
+    max_tokens: int = Field(
+        default=10000,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
     user_prompt: str = Field(
         default="", description="User prompt template for discovery"
     )
