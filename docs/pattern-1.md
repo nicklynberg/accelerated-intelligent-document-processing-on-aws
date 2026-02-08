@@ -38,6 +38,12 @@ This pattern implements an intelligent document processing workflow using Amazon
 4. Completion Lambda sends task success/failure to Step Functions using the stored token
 5. Process Results Lambda copies output files to designated location
 
+
+
+https://github.com/user-attachments/assets/24547356-6d68-4935-b0fd-ddeed9c25ba8
+
+
+
 ### Components
 - **Main Functions**:
   - BDA Invoke Function (bda_invoke_function): Initiates BDA jobs and stores task tokens

@@ -7,6 +7,29 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **Custom Date Range Selector for Document List and Test Executions** - [GitHub Issue #177](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/177)
+  - Added "Custom range..." option to the time period dropdown in both Document List and Test Studio → Test Results
+  - Users can now select absolute start/end dates to query historical documents beyond the previous 30-day limit
+  - **Scalable Server-Side Architecture**: Custom date ranges use a new `listDocumentsByDateRange` Lambda resolver that iterates shards server-side and batch-fetches documents, avoiding the client-side fan-out scalability issue
+  - **Existing Behavior Preserved**: Relative period presets (2h through 30d) continue using the proven client-side shard mechanism — zero changes to existing code paths
+  - **365-Day Maximum**: Date range capped at 365 days in the UI to prevent unbounded queries
+
+### Fixed
+
+- **Schema Builder Few-Shot Examples Input Focus Loss** - [GitHub Issue #174](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/174)
+  - Fixed cursor jumping out of input fields after each keystroke when editing few-shot examples in the Schema Builder
+
+
+- **Code Intelligence Agent - DeepWiki MCP Transport Migration**
+  - Fixed "client initialization failed" error when using Code Intelligence Agent in Agent Companion Chat
+  - **Root Cause**: DeepWiki deprecated their SSE transport endpoint (`/sse`) and now returns HTTP 410 Gone
+  - **Solution**: Migrated from SSE (`sse_client`) to Streamable HTTP (`streamablehttp_client`) transport using the new `/mcp` endpoint
+  - See DeepWiki documentation: https://docs.devin.ai/work-with-devin/deepwiki-mcp
+
+## [0.4.14]
+
+### Added
+
 - **Enhanced BDA to IDP Sync for Pattern-1**
   - Separate "Sync from BDA" and "Sync to BDA" buttons in the UI for explicit directional control instead of bidirectional-only sync
   - Parallel blueprint processing for improved sync performance on configurations with many document classes
@@ -60,6 +83,16 @@ SPDX-License-Identifier: MIT-0
   - OCR step now converts non-Bedrock-compatible formats (TIFF, BMP) to JPEG during page image extraction
   - Multi-page TIFF files handled like PDFs - each page becomes a separate document page
 
+- **Discovery Feature Overwriting Existing Classes During Class Discovery**
+  - Fixed issue where using Discovery to discover a new document type would delete all existing classes from the configuration
+  - **Root Cause**: Custom config `classes` array was replacing Default `classes` array during runtime merge, causing loss of existing classes
+  - **Solution**: Discovery now reads both Default and Custom classes, merges them with the newly discovered class, and saves the complete merged list to Custom config
+  - Ensures discovered classes are additive to existing configuration rather than replacing it
+
+### Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.14.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.14.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.14.yaml`
 
 ## [0.4.13]
 

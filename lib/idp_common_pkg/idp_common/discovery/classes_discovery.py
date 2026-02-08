@@ -23,16 +23,20 @@ class ClassesDiscovery:
         input_bucket: str,
         input_prefix: str,
         region: Optional[str] = None,
+        version: Optional[str] = None,
     ):
         self.input_bucket = input_bucket
         self.input_prefix = input_prefix
         self.region = region or os.environ.get("AWS_REGION")
-
+        self.version = version
         try:
             self.config_reader = ConfigurationReader()
             self.config_manager = ConfigurationManager()
             self.config: IDPConfig = cast(
-                IDPConfig, self.config_reader.get_configuration("Config", as_model=True)
+                IDPConfig,
+                self.config_reader.get_configuration(
+                    "Config", as_model=True, version=self.version
+                ),
             )
         except Exception as e:
             logger.error(f"Failed to load configuration from DynamoDB: {e}")
@@ -50,9 +54,7 @@ class ClassesDiscovery:
 
         return
 
-    def discovery_classes_with_document(
-        self, input_bucket: str, input_prefix: str, version: str
-    ):
+    def discovery_classes_with_document(self, input_bucket: str, input_prefix: str):
         """
         Create blueprint for document discovery.
         Process document/image:
@@ -63,19 +65,15 @@ class ClassesDiscovery:
         Args:
             input_bucket: S3 bucket name
             input_prefix: S3 prefix
-            version: Configuration version to save to
 
         Returns:
             status of blueprint creation
 
         Raises:
-            Exception: If blueprint creation fails or version is missing
+            Exception: If blueprint creation fails
         """
-        if not version:
-            raise Exception("Version parameter is required for discovery processing")
-
         logger.info(
-            f"Creating blueprint for document discovery: s3://{input_bucket}/{input_prefix} (version: {version})"
+            f"Creating blueprint for document discovery: s3://{input_bucket}/{input_prefix}"
         )
 
         try:
@@ -100,38 +98,9 @@ class ClassesDiscovery:
             # No need to transform - it's already in the right format
             current_class = model_response
 
-            current_config = self.config_manager.get_configuration("Config")
-            current_config = cast(IDPConfig, current_config)
-            classes = []
-            if current_config and current_config.classes:
-                classes = list(current_config.classes)
-                # Check for existing class by $id or x-aws-idp-document-type
-                class_id = current_class.get("$id") or current_class.get(
-                    "x-aws-idp-document-type"
-                )
-                for i, class_obj in enumerate(classes):
-                    existing_id = class_obj.get("$id") or class_obj.get(
-                        "x-aws-idp-document-type"
-                    )
-                    if existing_id == class_id:
-                        classes[i] = current_class  # Replace existing
-                        break
-                else:
-                    classes.append(current_class)  # Add new if not found
-            else:
-                classes.append(current_class)
-
-            # Update configuration with new classes
-            # Load existing custom config to preserve all other fields
-            if not current_config:
-                # If no custom config exists, get default as base
-                current_config = IDPConfig()
-
-            # Update only the classes field, preserving all other config
-            current_config.classes = classes
-            self.config_manager.save_configuration(
-                "Config", current_config, version=version
-            )
+            # Merge the new class with existing Default + Custom classes
+            # and save to Custom config
+            self._merge_and_save_class(current_class)
 
             return {"status": "SUCCESS"}
 
@@ -143,7 +112,7 @@ class ClassesDiscovery:
             raise Exception(f"Failed to process document {input_prefix}: {str(e)}")
 
     def discovery_classes_with_document_and_ground_truth(
-        self, input_bucket: str, input_prefix: str, ground_truth_key: str, version: str
+        self, input_bucket: str, input_prefix: str, ground_truth_key: str
     ):
         """
         Create optimized blueprint using ground truth data.
@@ -182,38 +151,9 @@ class ClassesDiscovery:
             # No need to transform - it's already in the right format
             current_class = model_response
 
-            current_config = self.config_manager.get_configuration("Config")
-            current_config = cast(IDPConfig, current_config)
-            classes = []
-            if current_config and current_config.classes:
-                classes = list(current_config.classes)
-                # Check for existing class by $id or x-aws-idp-document-type
-                class_id = current_class.get("$id") or current_class.get(
-                    "x-aws-idp-document-type"
-                )
-                for i, class_obj in enumerate(classes):
-                    existing_id = class_obj.get("$id") or class_obj.get(
-                        "x-aws-idp-document-type"
-                    )
-                    if existing_id == class_id:
-                        classes[i] = current_class  # Replace existing
-                        break
-                else:
-                    classes.append(current_class)  # Add new if not found
-            else:
-                classes.append(current_class)
-
-            # Update configuration with new classes
-            # Load existing custom config to preserve all other fields
-            if not current_config:
-                # If no custom config exists, get default as base
-                current_config = IDPConfig()
-
-            # Update only the classes field, preserving all other config
-            current_config.classes = classes
-            self.config_manager.save_configuration(
-                "Config", current_config, version=version
-            )
+            # Merge the new class with existing Default + Custom classes
+            # and save to Custom config
+            self._merge_and_save_class(current_class)
 
             return {"status": "SUCCESS"}
 
@@ -223,6 +163,88 @@ class ClassesDiscovery:
                 exc_info=True,
             )
             raise Exception(f"Failed to process document {input_prefix}: {str(e)}")
+
+    def _merge_and_save_class(self, new_class: Dict[str, Any]) -> None:
+        """
+        Merge a new discovered class with existing Default + Custom classes and save to Custom.
+
+        This method ensures that discovered classes are ADDITIVE to existing classes:
+        1. Read Default classes (base classes from deployment)
+        2. Read existing Custom classes (previous user customizations)
+        3. Build a merged list starting from Default, overriding with Custom
+        4. Add/update the new discovered class
+        5. Save the complete merged list to Custom
+
+        This is necessary because the Default+Custom merge uses array replacement,
+        not array concatenation. By saving the complete class list to Custom,
+        we ensure no classes are lost during the merge.
+
+        Args:
+            new_class: The newly discovered class schema to add/update
+        """
+        # Get class identifier for the new class
+        new_class_id = new_class.get("$id") or new_class.get("x-aws-idp-document-type")
+        logger.info(f"Merging discovered class: {new_class_id}")
+
+        # Step 1: Read Default classes (base classes from deployment)
+        default_config = self.config_manager.get_configuration("Config", "default")
+        default_classes: list = []
+        if (
+            default_config
+            and isinstance(default_config, IDPConfig)
+            and default_config.classes
+        ):
+            # Convert to list of dicts for easier manipulation
+            default_classes = [
+                cls
+                if isinstance(cls, dict)
+                else cls.model_dump()
+                if hasattr(cls, "model_dump")
+                else dict(cls)
+                for cls in default_config.classes
+            ]
+        logger.info(f"Found {len(default_classes)} classes in Default config")
+
+        # Step 2: Read existing Custom config (raw, no Pydantic defaults)
+        existing_custom = (
+            self.config_manager.get_raw_configuration("Config", version=self.version)
+            or {}
+        )
+        custom_classes = list(existing_custom.get("classes", []))
+        logger.info(f"Found {len(custom_classes)} classes in Custom config")
+
+        # Step 3: Build merged class list - start with Default, override with Custom
+        # Use a dict keyed by class ID for efficient deduplication
+        merged_classes_by_id: Dict[str, Dict[str, Any]] = {}
+
+        # Add Default classes first
+        for cls in default_classes:
+            cls_id = cls.get("$id") or cls.get("x-aws-idp-document-type")
+            if cls_id:
+                merged_classes_by_id[cls_id] = cls
+
+        # Override/add Custom classes
+        for cls in custom_classes:
+            cls_id = cls.get("$id") or cls.get("x-aws-idp-document-type")
+            if cls_id:
+                merged_classes_by_id[cls_id] = cls
+
+        # Step 4: Add/update the new discovered class
+        if new_class_id:
+            merged_classes_by_id[new_class_id] = new_class
+
+        # Convert back to list
+        merged_classes = list(merged_classes_by_id.values())
+        logger.info(f"Merged class list has {len(merged_classes)} classes")
+
+        # Step 5: Save to Custom config
+        # The merged list will replace Default.classes during runtime merge,
+        # ensuring all classes (Default + Custom + new) are preserved
+        existing_custom["classes"] = merged_classes
+        self.config_manager.save_raw_configuration(
+            "Config", existing_custom, version=self.version
+        )
+        logger.info(f"Saved {len(merged_classes)} classes to Custom config")
 
     def _validate_json_schema(self, schema: Dict[str, Any]) -> tuple[bool, str]:
         """

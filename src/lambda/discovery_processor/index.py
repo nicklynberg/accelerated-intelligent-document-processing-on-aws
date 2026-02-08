@@ -108,7 +108,8 @@ def process_discovery_job(job_id, document_key, ground_truth_key, bucket, versio
         classes_discovery = ClassesDiscovery(
             input_bucket=bucket,
             input_prefix=document_key,
-            region=region
+            region=region,
+            version=version
         )
 
         # Process the discovery job based on whether ground truth is provided
@@ -117,15 +118,13 @@ def process_discovery_job(job_id, document_key, ground_truth_key, bucket, versio
             result = classes_discovery.discovery_classes_with_document_and_ground_truth(
                 input_bucket=bucket,
                 input_prefix=document_key,
-                ground_truth_key=ground_truth_key,
-                version=version
+                ground_truth_key=ground_truth_key
             )
         else:
             logger.info("Processing without ground truth")
             result = classes_discovery.discovery_classes_with_document(
                 input_bucket=bucket,
-                input_prefix=document_key,
-                version=version
+                input_prefix=document_key
             )
 
         # Update job status to COMPLETED

@@ -19,6 +19,7 @@ import { exportToExcel } from '../common/download-func';
 import DeleteDocumentModal from '../common/DeleteDocumentModal';
 import ReprocessDocumentModal from '../common/ReprocessDocumentModal';
 import AbortWorkflowModal from '../common/AbortWorkflowModal';
+import DateRangeModal from '../common/DateRangeModal';
 import claimReviewMutation from '../../graphql/mutations/claimReview';
 import releaseReviewMutation from '../../graphql/mutations/releaseReview';
 
@@ -50,6 +51,7 @@ const DocumentList = () => {
   const [isDeleteLoading, setIsDeleteLoading] = useState(false);
   const [isReprocessLoading, setIsReprocessLoading] = useState(false);
   const [isAbortLoading, setIsAbortLoading] = useState(false);
+  const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
   const [currentUsername, setCurrentUsername] = useState('');
   const { settings } = useSettingsContext();
   const { isReviewer, isAdmin } = useUserRole();
@@ -76,6 +78,8 @@ const DocumentList = () => {
     setSelectedItems,
     setToolsOpen,
     periodsToLoad,
+    customDateRange,
+    setCustomDateRange,
     getDocumentDetailsFromIds,
     deleteDocuments,
     reprocessDocuments,
@@ -299,6 +303,9 @@ const DocumentList = () => {
             setIsLoading={setIsDocumentsListLoading}
             periodsToLoad={periodsToLoad}
             setPeriodsToLoad={setPeriodsToLoad}
+            customDateRange={customDateRange}
+            setCustomDateRange={setCustomDateRange}
+            onCustomDateRange={() => setIsDateRangeModalVisible(true)}
             getDocumentDetailsFromIds={getDocumentDetailsFromIds}
             downloadToExcel={() => {
               const exportData = filteredDocumentList.map((item) => ({
@@ -359,6 +366,16 @@ const DocumentList = () => {
         onConfirm={handleAbortConfirm}
         selectedItems={collectionProps.selectedItems}
         isLoading={isAbortLoading}
+      />
+
+      <DateRangeModal
+        visible={isDateRangeModalVisible}
+        onDismiss={() => setIsDateRangeModalVisible(false)}
+        onApply={(dateRange) => {
+          setIsDateRangeModalVisible(false);
+          setCustomDateRange(dateRange);
+          localStorage.setItem('customDateRange', JSON.stringify(dateRange));
+        }}
       />
     </>
   );
