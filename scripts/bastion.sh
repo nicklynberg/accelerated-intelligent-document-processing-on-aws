@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-ROOT=$(realpath $(dirname $0)/..)
-# source $ROOT/.env
-
 usage() {
   echo "Usage: $0 <STACK_NAME> [--debug] [-h]" 1>&2
   echo "  STACK_NAME: CloudFormation stack name" 1>&2
