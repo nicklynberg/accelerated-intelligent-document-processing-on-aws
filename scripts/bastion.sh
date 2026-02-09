@@ -2,7 +2,7 @@
 
 usage() {
   echo "Usage: $0 <STACK_NAME> [--debug] [-h]" 1>&2
-  echo "  STACK_NAME: CloudFormation stack name" 1>&2
+  echo "  STACK_NAME: IdP CloudFormation stack name" 1>&2
   echo "  --debug: Enable debug mode" 1>&2
   echo "  -h: Show this help" 1>&2
   echo "" 1>&2
@@ -34,10 +34,9 @@ while getopts ":hv-:" o; do
   esac
 done
 
-# Shift past the options
 shift $((OPTIND-1))
 
-# Now get the stack name from remaining arguments
+# Get stack name from remaining arguments
 if [ $# -eq 0 ]; then
   echo "Error: STACK_NAME is required"
   usage
