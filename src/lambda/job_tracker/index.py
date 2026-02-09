@@ -7,13 +7,14 @@ import os
 import logging
 import zipfile
 from idp_common.job_service import create_job_service
+from idp_common.models import Status
 from io import BytesIO
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 OUTPUT_BUCKET = os.environ["OUTPUT_BUCKET"]
-TERMINAL_STATUSES = {"COMPLETED", "FAILED", "ABORTED"}
+TERMINAL_STATUSES = {Status.COMPLETED.value, Status.FAILED.value, Status.ABORTED.value}
 
 s3 = boto3.client("s3")
 job_service = create_job_service()
@@ -41,7 +42,12 @@ def handler(event, context):
     workflow_status = event["detail"]["status"]
 
     # Map workflow status to file status
-    file_status = "COMPLETED" if workflow_status == "SUCCEEDED" else "FAILED"
+    if workflow_status == "SUCCEEDED":
+        file_status = Status.COMPLETED
+    elif workflow_status == "ABORTED":
+        file_status = Status.ABORTED
+    else:
+        file_status = Status.FAILED
 
     # Update job file status and get updated Files map
     files = job_service.update_file_status(job_id, filename, file_status)
@@ -49,7 +55,7 @@ def handler(event, context):
         logger.error(f"Job not found: {job_id}")
         return {"statusCode": 404, "body": "Job not found"}
 
-    logger.info(f"Updated job {job_id} file {filename} to {file_status}")
+    logger.info(f"Updated job {job_id} file {filename} to {file_status.value}")
 
     # Check if all files are in terminal state
     if not all(s in TERMINAL_STATUSES for s in files.values()):

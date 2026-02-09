@@ -8,10 +8,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Add idp_common to path and import real Status
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../lib/idp_common_pkg"))
+from idp_common.models import Status
+
 # Mock idp_common before importing index
+mock_models_module = MagicMock()
+mock_models_module.Status = Status
+
 sys.modules["idp_common"] = MagicMock()
 sys.modules["idp_common.dynamodb"] = MagicMock()
 sys.modules["idp_common.dynamodb.job_service"] = MagicMock()
+sys.modules["idp_common.job_service"] = MagicMock()
+sys.modules["idp_common.models"] = mock_models_module
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +89,7 @@ class TestHandler:
         mock_job_service.update_job_files.assert_called_once()
         call_args = mock_job_service.update_job_files.call_args
         assert call_args[0][0] == "test-uuid"
-        assert call_args[0][1] == {"doc1.pdf": "IN_PROGRESS", "doc2.pdf": "IN_PROGRESS"}
+        assert call_args[0][1] == {"doc1.pdf": Status.IN_PROGRESS, "doc2.pdf": Status.IN_PROGRESS}
 
     def test_handler_skips_non_zip(self, mock_s3, mock_job_service):
         """Test handler skips non-ZIP files."""
@@ -155,3 +164,21 @@ class TestExtractAndUpload:
         assert files == ["doc.pdf"]
         call_args = mock_s3.put_object.call_args
         assert call_args[1]["Key"] == "jobs/uuid/doc.pdf"
+
+    def test_handles_filename_collisions(self, mock_s3):
+        """Test duplicate filenames in different folders get renamed."""
+        from index import extract_and_upload
+
+        zip_content = create_test_zip({
+            "invoices/report.pdf": b"invoice",
+            "contracts/report.pdf": b"contract",
+            "other/report.pdf": b"other",
+        })
+        mock_s3.download_fileobj.side_effect = lambda b, k, f: f.write(zip_content.read())
+
+        files = extract_and_upload("staging", "jobs/uuid/test.zip", "uuid")
+
+        assert len(files) == 3
+        assert "report.pdf" in files
+        assert "report_1.pdf" in files
+        assert "report_2.pdf" in files

@@ -15,7 +15,8 @@ import zipfile
 
 import boto3
 
-from idp_common.dynamodb.job_service import JobDynamoDBService
+from idp_common.job_service import create_job_service
+from idp_common.models import Status
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -25,7 +26,7 @@ s3 = boto3.client("s3")
 INPUT_BUCKET = os.environ.get("INPUT_BUCKET_NAME", "")
 TRACKING_TABLE = os.environ.get("TRACKING_TABLE", "")
 
-job_service = JobDynamoDBService(table_name=TRACKING_TABLE) if TRACKING_TABLE else None
+job_service = create_job_service()
 
 
 def handler(event, context):
@@ -56,7 +57,7 @@ def handler(event, context):
 
         # Update job record with file list
         if job_service and files:
-            file_status = {f: "IN_PROGRESS" for f in files}
+            file_status = {f: Status.IN_PROGRESS for f in files}
             job_service.update_job_files(job_id, file_status)
             logger.info(f"Updated job {job_id} with {len(files)} files")
 
@@ -75,6 +76,7 @@ def extract_and_upload(staging_bucket: str, zip_key: str, job_id: str) -> list[s
         List of uploaded filenames
     """
     uploaded_files = []
+    seen_names = {}
 
     with tempfile.NamedTemporaryFile() as temp_file:
         s3.download_fileobj(staging_bucket, zip_key, temp_file)
@@ -85,11 +87,19 @@ def extract_and_upload(staging_bucket: str, zip_key: str, job_id: str) -> list[s
                 if file_info.is_dir():
                     continue
 
-                filename = os.path.basename(file_info.filename)
-                if not filename:
+                basename = os.path.basename(file_info.filename)
+                if not basename:
                     continue
 
-                # Upload to input bucket: jobs/{uuid}/{filename}
+                # Handle filename collisions
+                if basename in seen_names:
+                    seen_names[basename] += 1
+                    name, ext = os.path.splitext(basename)
+                    filename = f"{name}_{seen_names[basename]}{ext}"
+                else:
+                    seen_names[basename] = 0
+                    filename = basename
+
                 dest_key = f"jobs/{job_id}/{filename}"
                 file_content = zip_ref.read(file_info.filename)
 

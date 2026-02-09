@@ -1,8 +1,6 @@
 import os
 import uuid
-import zipfile
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
 
 import boto3
 from aws_lambda_powertools import Logger
@@ -16,6 +14,7 @@ from botocore.exceptions import ClientError
 
 from idp_common.docs_service import create_document_service
 from idp_common.job_service import create_job_service
+from idp_common.models import Status
 
 from models import (
     GetJobResponse,
@@ -36,8 +35,8 @@ s3_client = boto3.client("s3", config=boto3.session.Config(signature_version="s3
 STAGING_BUCKET = os.environ.get("STAGING_BUCKET_NAME", "")
 OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET_NAME", "")
 DATA_RETENTION_DAYS = int(os.environ.get("DATA_RETENTION_IN_DAYS", "30"))
-MAX_FILE_SIZE_BYTES = int(os.environ.get("MAX_FILE_SIZE_BYTES", "4294967296"))  # 4GB
-PRESIGNED_URL_EXPIRY_SECONDS = int(os.environ.get("PRESIGNED_URL_EXPIRY_SECONDS", "900"))  # 15 minutes
+MAX_FILE_SIZE_BYTES = int(os.environ.get("MAX_FILE_SIZE_BYTES", "5368709120"))  # 5GB
+PRESIGNED_URL_EXPIRY_SECONDS = int(os.environ.get("PRESIGNED_URL_EXPIRY_SECONDS", "3600"))  # 1 hour
 
 # Initialize services
 document_service = create_document_service()
@@ -51,23 +50,23 @@ def get_content_type(filename: str) -> str:
     raise ValueError("Unsupported file type. Only .zip files are supported")
 
 
-def compute_job_status(files: dict[str, str]) -> str:
+def compute_job_status(files: dict[str, Status]) -> str:
     """Compute overall job status from file statuses."""
     if not files:
         return "PENDING_UPLOAD"
 
     statuses = set(files.values())
-    terminal = {"COMPLETED", "FAILED", "ABORTED"}
+    terminal = {Status.COMPLETED, Status.FAILED, Status.ABORTED}
 
     if not all(s in terminal for s in statuses):
         return "IN_PROGRESS"
-    if all(s == "COMPLETED" for s in statuses):
+    if all(s == Status.COMPLETED for s in statuses):
         return "SUCCEEDED"
-    if all(s == "FAILED" for s in statuses):
-        return "FAILED"
-    if all(s == "ABORTED" for s in statuses):
+    if Status.COMPLETED in statuses:
+        return "PARTIALLY_SUCCEEDED"
+    if all(s == Status.ABORTED for s in statuses):
         return "ABORTED"
-    return "PARTIALLY_SUCCEEDED"
+    return "FAILED"
 
 
 @app.post("/jobs")
@@ -88,7 +87,6 @@ def create_job(job: PostJobRequest) -> PostJobResponse:
         metadata_dict = job.metadata.model_dump() if job.metadata else None
         job_service.create_job_record(
             job_id=job_id,
-            files={},
             expires_after=expires_after,
             metadata=metadata_dict,
         )
@@ -157,7 +155,7 @@ def get_job(job_id: str) -> GetJobResponse:
                 createdAt=job_record.get("CreatedAt", ""),
                 updatedAt=job_record.get("UpdatedAt", ""),
             ),
-            files=files,
+            files={k: v.value for k, v in files.items()},
             result=result
         )
     except ValueError as e:
@@ -176,23 +174,27 @@ def generate_presigned_url(job_id: str):
         "get_object", Params={"Bucket": OUTPUT_BUCKET, "Key": object_key}, ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS)
 
 
-def enrich_file_statuses(job_id: str, files: dict[str, str]) -> dict[str, str]:
+def enrich_file_statuses(job_id: str, files: dict[str, Status]) -> dict[str, Status]:
     """Enrich IN_PROGRESS files with actual document status from tracking table."""
-    processing_files = [f for f, status in files.items() if status == "IN_PROGRESS"]
+    # Get all the files associated with job currently in progress
+    processing_files = [f for f, status in files.items() if status == Status.IN_PROGRESS]
     if not processing_files:
         return files
 
+    # Partition the files in batches of 100 (hard limit for batch_get calls to DDB)
     enriched = dict(files)
     for i in range(0, len(processing_files), 100):
-        chunk = processing_files[i:i + 100]
-        doc_ids = [f"jobs/{job_id}/{f}" for f in chunk]
+        batch = processing_files[i:i + 100]
+        # Create list of PKs for the first x00 files 
+        doc_ids = [f"jobs/{job_id}/{f}" for f in batch]
         docs = document_service.batch_get_documents(doc_ids)
-
+        # Get the current status for each file in batch from DDB
         for doc in docs:
             filename = doc.get("document_id", "").split("/")[-1]
             if filename and filename in enriched:
-                enriched[filename] = doc.get("status", "IN_PROGRESS")
+                enriched[filename] = Status(doc.get("status", Status.IN_PROGRESS.value))
 
+    # Return list of all in progress files and their current status per DDB
     return enriched
 
 def handler(event: dict, context: LambdaContext) -> dict:

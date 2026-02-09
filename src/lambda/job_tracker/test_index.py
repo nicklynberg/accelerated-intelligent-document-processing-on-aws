@@ -7,13 +7,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Add idp_common to path and import real Status
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../lib/idp_common_pkg"))
+from idp_common.models import Status
+
 # Mock idp_common before importing index
 mock_job_service = MagicMock()
 mock_job_service_module = MagicMock()
 mock_job_service_module.create_job_service = MagicMock(return_value=mock_job_service)
+mock_models_module = MagicMock()
+mock_models_module.Status = Status
 
 sys.modules["idp_common"] = MagicMock()
 sys.modules["idp_common.job_service"] = mock_job_service_module
+sys.modules["idp_common.models"] = mock_models_module
 
 
 @pytest.fixture(autouse=True)
@@ -77,7 +84,7 @@ class TestHandler:
         response = handler(event, None)
 
         assert response["statusCode"] == 200
-        job_svc.update_file_status.assert_called_once_with("test-uuid", "doc.pdf", "COMPLETED")
+        job_svc.update_file_status.assert_called_once_with("test-uuid", "doc.pdf", Status.COMPLETED)
 
     def test_updates_file_status_failed(self, mock_s3, job_svc):
         """Test handler updates file status to FAILED on FAILED."""
@@ -88,7 +95,18 @@ class TestHandler:
         event = make_event("jobs/test-uuid/doc.pdf", "FAILED")
         handler(event, None)
 
-        job_svc.update_file_status.assert_called_once_with("test-uuid", "doc.pdf", "FAILED")
+        job_svc.update_file_status.assert_called_once_with("test-uuid", "doc.pdf", Status.FAILED)
+
+    def test_updates_file_status_aborted(self, mock_s3, job_svc):
+        """Test handler updates file status to ABORTED on ABORTED."""
+        from index import handler
+
+        job_svc.update_file_status.return_value = {"doc.pdf": "ABORTED"}
+
+        event = make_event("jobs/test-uuid/doc.pdf", "ABORTED")
+        handler(event, None)
+
+        job_svc.update_file_status.assert_called_once_with("test-uuid", "doc.pdf", Status.ABORTED)
 
     def test_job_not_found(self, mock_s3, job_svc):
         """Test handler returns 404 when job not found."""

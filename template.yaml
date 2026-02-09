@@ -1998,8 +1998,8 @@ Resources:
   StagingBucket:
     Type: AWS::S3::Bucket
     Condition: DeployApiGateway
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
     Properties:
       NotificationConfiguration:
         EventBridgeConfiguration:

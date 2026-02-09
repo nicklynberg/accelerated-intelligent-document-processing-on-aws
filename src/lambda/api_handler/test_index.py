@@ -8,6 +8,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
+# Add idp_common to path and import real Status
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../lib/idp_common_pkg"))
+from idp_common.models import Status
+
 # Mock idp_common before importing index
 mock_document_service = MagicMock()
 mock_job_service = MagicMock()
@@ -15,10 +19,13 @@ mock_docs_service_module = MagicMock()
 mock_docs_service_module.create_document_service = MagicMock(return_value=mock_document_service)
 mock_job_service_module = MagicMock()
 mock_job_service_module.create_job_service = MagicMock(return_value=mock_job_service)
+mock_models_module = MagicMock()
+mock_models_module.Status = Status
 
 sys.modules["idp_common"] = MagicMock()
 sys.modules["idp_common.docs_service"] = mock_docs_service_module
 sys.modules["idp_common.job_service"] = mock_job_service_module
+sys.modules["idp_common.models"] = mock_models_module
 sys.modules["idp_common.dynamodb"] = MagicMock()
 sys.modules["idp_common.dynamodb.job_service"] = MagicMock()
 
@@ -31,7 +38,7 @@ def mock_env():
         "OUTPUT_BUCKET_NAME": "test-output-bucket",
         "TRACKING_TABLE": "test-table",
         "DATA_RETENTION_IN_DAYS": "30",
-        "MAX_FILE_SIZE_BYTES": "4294967296",
+        "MAX_FILE_SIZE_BYTES": "5368709120",
         "PRESIGNED_URL_EXPIRY_SECONDS": "900",
     }
     with patch.dict(os.environ, env_vars):
@@ -94,52 +101,52 @@ class TestComputeJobStatus:
         """Test all COMPLETED returns SUCCEEDED."""
         from index import compute_job_status
 
-        files = {"a.pdf": "COMPLETED", "b.pdf": "COMPLETED"}
+        files = {"a.pdf": Status.COMPLETED, "b.pdf": Status.COMPLETED}
         assert compute_job_status(files) == "SUCCEEDED"
 
     def test_all_failed(self):
         """Test all FAILED returns FAILED."""
         from index import compute_job_status
 
-        files = {"a.pdf": "FAILED", "b.pdf": "FAILED"}
+        files = {"a.pdf": Status.FAILED, "b.pdf": Status.FAILED}
         assert compute_job_status(files) == "FAILED"
 
     def test_all_aborted(self):
         """Test all ABORTED returns ABORTED."""
         from index import compute_job_status
 
-        files = {"a.pdf": "ABORTED", "b.pdf": "ABORTED"}
+        files = {"a.pdf": Status.ABORTED, "b.pdf": Status.ABORTED}
         assert compute_job_status(files) == "ABORTED"
 
     def test_mixed_terminal(self):
         """Test mixed terminal states returns PARTIALLY_SUCCEEDED."""
         from index import compute_job_status
 
-        files = {"a.pdf": "COMPLETED", "b.pdf": "FAILED"}
+        files = {"a.pdf": Status.COMPLETED, "b.pdf": Status.FAILED}
         assert compute_job_status(files) == "PARTIALLY_SUCCEEDED"
 
     def test_in_progress(self):
         """Test non-terminal states returns IN_PROGRESS."""
         from index import compute_job_status
 
-        files = {"a.pdf": "COMPLETED", "b.pdf": "EXTRACTING"}
+        files = {"a.pdf": Status.COMPLETED, "b.pdf": Status.IN_PROGRESS}
         assert compute_job_status(files) == "IN_PROGRESS"
 
-        files = {"a.pdf": "PENDING_UPLOAD", "b.pdf": "PENDING_UPLOAD"}
+        files = {"a.pdf": Status.IN_PROGRESS, "b.pdf": Status.IN_PROGRESS}
         assert compute_job_status(files) == "IN_PROGRESS"
 
 
-class TestEnrichFileStatuses:
+class TestEnrichStatuses:
     """Tests for enrich_file_statuses function."""
 
     def test_no_pending_files(self):
         """Test returns unchanged when no IN_PROGRESS files."""
         import index
 
-        files = {"a.pdf": "COMPLETED", "b.pdf": "FAILED"}
+        files = {"a.pdf": Status.COMPLETED, "b.pdf": Status.FAILED}
         result = index.enrich_file_statuses("job-123", files)
 
-        assert result == files
+        assert result == {"a.pdf": Status.COMPLETED, "b.pdf": Status.FAILED}
 
     def test_enriches_in_progress_files(self):
         """Test enriches IN_PROGRESS files with actual status."""
@@ -150,10 +157,10 @@ class TestEnrichFileStatuses:
             {"document_id": "jobs/job-123/b.pdf", "status": "CLASSIFYING"},
         ]
 
-        files = {"a.pdf": "IN_PROGRESS", "b.pdf": "IN_PROGRESS", "c.pdf": "COMPLETED"}
+        files = {"a.pdf": Status.IN_PROGRESS, "b.pdf": Status.IN_PROGRESS, "c.pdf": Status.COMPLETED}
         result = index.enrich_file_statuses("job-123", files)
 
-        assert result == {"a.pdf": "EXTRACTING", "b.pdf": "CLASSIFYING", "c.pdf": "COMPLETED"}
+        assert result == {"a.pdf": Status.EXTRACTING, "b.pdf": Status.CLASSIFYING, "c.pdf": Status.COMPLETED}
 
     def test_keeps_in_progress_if_doc_not_found(self):
         """Test keeps IN_PROGRESS if document record not found."""
@@ -163,20 +170,20 @@ class TestEnrichFileStatuses:
             {"document_id": "jobs/job-123/a.pdf", "status": "EXTRACTING"},
         ]
 
-        files = {"a.pdf": "IN_PROGRESS", "b.pdf": "IN_PROGRESS"}
+        files = {"a.pdf": Status.IN_PROGRESS, "b.pdf": Status.IN_PROGRESS}
         result = index.enrich_file_statuses("job-123", files)
 
-        assert result == {"a.pdf": "EXTRACTING", "b.pdf": "IN_PROGRESS"}
+        assert result == {"a.pdf": Status.EXTRACTING, "b.pdf": Status.IN_PROGRESS}
 
     def test_preserves_terminal_states(self):
         """Test does not query for terminal state files."""
         import index
 
         index.document_service.batch_get_documents.reset_mock()
-        files = {"a.pdf": "COMPLETED", "b.pdf": "FAILED", "c.pdf": "ABORTED"}
+        files = {"a.pdf": Status.COMPLETED, "b.pdf": Status.FAILED, "c.pdf": Status.ABORTED}
         result = index.enrich_file_statuses("job-123", files)
 
-        assert result == files
+        assert result == {"a.pdf": Status.COMPLETED, "b.pdf": Status.FAILED, "c.pdf": Status.ABORTED}
         index.document_service.batch_get_documents.assert_not_called()
 
 
@@ -266,7 +273,7 @@ class TestGetJob:
         from index import handler
 
         job_svc.get_job_record.return_value = {
-            "Files": {"a.pdf": "COMPLETED", "b.pdf": "EXTRACTING"},
+            "Files": {"a.pdf": Status.COMPLETED, "b.pdf": Status.IN_PROGRESS},
             "CreatedAt": "2026-01-23T10:00:00Z",
             "UpdatedAt": "2026-01-23T10:05:00Z",
         }
@@ -290,7 +297,7 @@ class TestGetJob:
         from index import handler
 
         job_svc.get_job_record.return_value = {
-            "Files": {"a.pdf": "COMPLETED", "b.pdf": "COMPLETED"},
+            "Files": {"a.pdf": Status.COMPLETED, "b.pdf": Status.COMPLETED},
             "CreatedAt": "2026-01-23T10:00:00Z",
             "UpdatedAt": "2026-01-23T10:10:00Z",
         }

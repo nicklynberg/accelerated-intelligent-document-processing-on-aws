@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from idp_common.dynamodb.client import DynamoDBClient
+from idp_common.models import Status
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,6 @@ class JobDynamoDBService:
     def create_job_record(
         self,
         job_id: str,
-        files: Optional[Dict[str, str]] = None,
         expires_after: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
@@ -46,7 +46,7 @@ class JobDynamoDBService:
         item = {
             "PK": f"job#{job_id}",
             "SK": "metadata",
-            "Files": files or {},
+            "Files": {},
             "CreatedAt": timestamp,
             "UpdatedAt": timestamp,
         }
@@ -63,23 +63,27 @@ class JobDynamoDBService:
         return job_id
 
     def get_job_record(self, job_id: str) -> Optional[Dict[str, Any]]:
-        """Get a job record by job_id."""
+        """Get a job record by job_id. Files map values are converted to Status enum."""
         key = {"PK": f"job#{job_id}", "SK": "metadata"}
-        return self.client.get_item(key)
+        item = self.client.get_item(key)
+        if item and "Files" in item:
+            item["Files"] = {k: Status(v) for k, v in item["Files"].items()}
+        return item
 
-    def update_job_files(self, job_id: str, files: Dict[str, str]) -> None:
+    def update_job_files(self, job_id: str, files: Dict[str, Status]) -> None:
         """Update the Files map on a job record."""
         timestamp = datetime.now(timezone.utc).isoformat()
+        files_str = {k: v.value for k, v in files.items()}
         self.client.update_item(
             key={"PK": f"job#{job_id}", "SK": "metadata"},
             update_expression="SET Files = :files, UpdatedAt = :ts",
             expression_attribute_names={},
-            expression_attribute_values={":files": files, ":ts": timestamp},
+            expression_attribute_values={":files": files_str, ":ts": timestamp},
         )
         logger.info(f"Updated job files: {job_id}")
 
     def update_file_status(
-        self, job_id: str, filename: str, status: str
+        self, job_id: str, filename: str, status: Status
     ) -> Optional[Dict[str, str]]:
         """
         Update a single file's status in the job record.
@@ -92,7 +96,7 @@ class JobDynamoDBService:
             Key={"PK": f"job#{job_id}", "SK": "metadata"},
             UpdateExpression="SET Files.#filename = :status, UpdatedAt = :ts",
             ExpressionAttributeNames={"#filename": filename},
-            ExpressionAttributeValues={":status": status, ":ts": timestamp},
+            ExpressionAttributeValues={":status": status.value, ":ts": timestamp},
             ReturnValues="ALL_NEW",
         )
         item = response.get("Attributes")
