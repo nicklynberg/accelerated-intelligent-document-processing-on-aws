@@ -6,7 +6,7 @@ from __future__ import annotations
 import boto3
 import json
 import os
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 from botocore.exceptions import ClientError
 import logging
 
@@ -351,8 +351,8 @@ class ConfigurationManager:
         ):
             old_default = self.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
             versions = self.list_config_versions()
-            for version in versions:
-                version_name = version.get("versionName")
+            for version_dict in versions:
+                version_name: Optional[str] = str(version_dict.get("versionName")) if version_dict.get("versionName") else None
                 old_version = self.get_configuration(CONFIG_TYPE_CONFIG, version=version_name)
                 if (
                     old_default
