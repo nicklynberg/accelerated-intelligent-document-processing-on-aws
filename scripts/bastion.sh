@@ -85,7 +85,6 @@ function cleanhosts() {
 
 trap "cleanhosts" SIGINT SIGTERM
 
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text --no-cli-pager)
 BASTION_NAME="${STACK_NAME}BastionHost"
 
 BASTION_ID=$(aws ec2 describe-instances --filters Name=tag:Name,Values=$BASTION_NAME Name=instance-state-name,Values=running --query "Reservations[*].Instances[*].InstanceId" --output text --no-cli-pager)
