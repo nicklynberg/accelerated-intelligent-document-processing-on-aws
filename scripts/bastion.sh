@@ -92,7 +92,7 @@ BASTION_AZ=$(aws ec2 describe-instances --filters Name=tag:Name,Values=$BASTION_
 VPC_ID=$(aws ec2 describe-instances --filters Name=tag:Name,Values=$BASTION_NAME Name=instance-state-name,Values=running --query "Reservations[*].Instances[*].VpcId" --output text --no-cli-pager)
 
 if [ ! -n "$BASTION_ID" ]; then
-  echo "Unable to connect - Bastion not found for namespace $STACK_NAME"
+  echo "Unable to connect - Bastion not found for CloudFormation stack $STACK_NAME"
   exit 1
 fi
 
@@ -113,12 +113,12 @@ else
     API_VPCE_DOMAIN="${API_GW_ID}-${API_GW_VPCE_ID}.execute-api.${REGION}.amazonaws.com"
     echo "Using API Gateway VPC Endpoint: $API_VPCE_DOMAIN"
   else
-    echo "Warning: No VPC Endpoint ID found for API Gateway, using regular domain"
+    echo "Warning: No VPC Endpoint ID found for API Gateway, using regular domain only"
     API_VPCE_DOMAIN=$API_DOMAIN
   fi
 fi
 
-# set /etc/hosts - map the original API domain to localhost
+# set /etc/hosts - map the API domains to localhost
 addhost $API_DOMAIN 127.0.0.101
 addhost $API_VPCE_DOMAIN 127.0.0.102
 
@@ -152,7 +152,7 @@ else
   interactive="-N -vvv"
 fi
 
-# Build the SSH command as an array to handle quoting properly
+# Build the SSH command
 tunnel_command=(
     sudo -E $sshcmd
     -o ExitOnForwardFailure=yes
