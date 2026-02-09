@@ -79,6 +79,30 @@ aws cloudformation deploy \
   --s3-bucket {s3-bucket-govcloud}
 ```
 
+### Optional: Deploy with REST API
+
+To enable the Batch Jobs REST API (`/jobs` endpoints), add the following VPC parameters:
+
+```bash
+aws cloudformation deploy \
+  --template-file .aws-sam/idp-govcloud.yaml \
+  --stack-name my-idp-govcloud-stack \
+  --region us-gov-west-1 \
+  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --parameter-overrides \
+    IDPPattern="Pattern2 - Packet processing with Textract and Bedrock" \
+    VpcId=vpc-xxxxxxxxx \
+    PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,subnet-xxxxx \
+    ApiGatewayVpcEndpointId=vpce-xxxxxxxxx \
+    LambdaSecurityGroupId=sg-xxxxxxxxx
+```
+
+**VPC Parameters (required for REST API):**
+- `VpcId` - VPC for Lambda functions
+- `PrivateSubnetIds` - Comma-separated private subnet IDs (minimum 2 for HA)
+- `ApiGatewayVpcEndpointId` - VPC endpoint for private API Gateway access
+- `LambdaSecurityGroupId` - Security group for VPC-enabled Lambda functions
+
 ## Services Removed in GovCloud
 
 The following services are automatically removed from the GovCloud template:
@@ -173,9 +197,35 @@ Without the web UI, you can interact with the system through:
 ````bash
 # Upload documents directly to input bucket
 aws s3 cp my-document.pdf s3://InputBucket/my-document.pdf
+````
 
+### 2. Batch Jobs REST API (requires VPC parameters)
 
-### 2. Check progress
+Submit multiple documents as a ZIP file and retrieve results programmatically:
+
+```bash
+# Create a job and get presigned upload URL
+curl -X POST https://{api-gateway-url}/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"fileName": "documents.zip"}'
+
+# Response includes uploadUrl and requiredHeaders for presigned POST
+# Upload ZIP using multipart/form-data with all requiredHeaders as form fields
+
+# Check job status
+curl https://{api-gateway-url}/jobs/{job_id}
+
+# When status is SUCCEEDED or PARTIALLY_SUCCEEDED, response includes downloadUrl for results.zip
+```
+
+**Job Status Values:**
+- `PENDING_UPLOAD` - Job created, awaiting ZIP upload
+- `IN_PROGRESS` - Files being processed
+- `SUCCEEDED` - All files completed
+- `PARTIALLY_SUCCEEDED` - Some files completed, some failed
+- `FAILED` - All files failed
+
+### 3. Check Progress
 Using the lookup script
 ```bash
 # Use the lookup script to check document status
