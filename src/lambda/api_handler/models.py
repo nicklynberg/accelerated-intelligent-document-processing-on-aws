@@ -9,15 +9,8 @@ from pydantic import BaseModel
 class Metadata(BaseModel):
     source: str
 
-
-class Files(BaseModel):
-    pdfFileName: str
-    jsonFileName: str
-
-
 class PostJobRequest(BaseModel):
-    documentType: str
-    files: str  # Filename with extension (.pdf or .json)
+    fileName: str  # Filename with extension (.zip)
     metadata: Optional[Metadata] = None
 
 
@@ -38,11 +31,6 @@ class Timestamps(BaseModel):
     updatedAt: str
 
 
-class Progress(BaseModel):
-    stage: str
-    percent: int
-
-
 class Result(BaseModel):
     downloadUrl: str
     expiresInSeconds: int
@@ -52,6 +40,6 @@ class GetJobResponse(BaseModel):
     jobId: str
     status: str
     timestamps: Timestamps
-    progress: Progress
+    files: Optional[Dict[str, str]] = None
     result: Optional[Result] = None
     error: Optional[str] = None

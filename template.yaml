@@ -439,10 +439,10 @@ Parameters:
     Default: ""
     Description: Optional - Existing VPC Endpoint ID for execute-api service (required if VpcId is provided)
 
-  ApiHandlerSecurityGroupId:
+  LambdaSecurityGroupId:
     Type: String
     Default: ""
-    Description: Optional - Existing Security Group ID for Jobs API Lambda (required if VpcId is provided)
+    Description: Optional - Existing Security Group ID for VPC-enabled Lambda functions (required if VpcId is provided)
 
 Rules:
   Pattern3UDOPModelArtifactPath:
@@ -456,7 +456,7 @@ Rules:
         AssertDescription: UDOP Model Artifact Path is required when IDPPattern is 'Pattern1'
 
 Conditions:
-  DeployApiHandler: !Not [!Equals [!Ref VpcId, ""]]
+  DeployApiGateway: !Not [!Equals [!Ref VpcId, ""]]
   
   IsPattern1:
     !Equals [
@@ -715,14 +715,14 @@ Resources:
 
   ApiHandlerLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: DeployApiHandler
+    Condition: DeployApiGateway
     Properties:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
       RetentionInDays: !Ref LogRetentionDays
 
-  ApiHandler:
+  ApiGateway:
     Type: AWS::Serverless::Api
-    Condition: DeployApiHandler
+    Condition: DeployApiGateway
     Properties:
       StageName: prod
       EndpointConfiguration:
@@ -746,7 +746,7 @@ Resources:
 
   ApiHandlerFunction:
     Type: AWS::Serverless::Function
-    Condition: DeployApiHandler
+    Condition: DeployApiGateway
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -762,30 +762,36 @@ Resources:
       CodeUri: src/lambda/api_handler/
       Handler: index.handler
       Runtime: python3.12
-      MemorySize: 512
+      MemorySize: 4096
       Timeout: 30
+      Layers:
+        - !Ref IDPCommonBaseLayer
       VpcConfig:
         SecurityGroupIds:
-          - !Ref ApiHandlerSecurityGroupId
+          - !Ref LambdaSecurityGroupId
         SubnetIds: !Ref PrivateSubnetIds
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
-          TRACKING_TABLE_NAME: !Ref TrackingTable
+          TRACKING_TABLE: !Ref TrackingTable
+          DOCUMENT_TRACKING_MODE: dynamodb
           INPUT_BUCKET_NAME: !Ref InputBucket
+          OUTPUT_BUCKET_NAME: !Ref OutputBucket
+          STAGING_BUCKET_NAME: !Ref StagingBucket
+          DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
       LoggingConfig:
         LogGroup: !Ref ApiHandlerLogGroup
       Events:
         PostJob:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiHandler
+            RestApiId: !Ref ApiGateway
             Path: /jobs
             Method: POST
         GetJob:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiHandler
+            RestApiId: !Ref ApiGateway
             Path: /jobs/{job_id}
             Method: GET
       Policies:
@@ -793,6 +799,10 @@ Resources:
             TableName: !Ref TrackingTable
         - S3WritePolicy:
             BucketName: !Ref InputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - S3WritePolicy:
+            BucketName: !Ref StagingBucket
         - Statement:
             - Effect: Allow
               Action:
@@ -801,6 +811,69 @@ Resources:
                 - kms:ReEncrypt*
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  BatchPreProcessorFunction:
+    Type: AWS::Serverless::Function
+    Condition: DeployApiGateway
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W92
+            reason: Reserved concurrency not required
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      CodeUri: src/lambda/batch_pre_processor/
+      Handler: index.handler
+      Runtime: python3.12
+      MemorySize: 3008
+      Timeout: 900
+      EphemeralStorage:
+        Size: 5120
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+        SubnetIds: !Ref PrivateSubnetIds
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          INPUT_BUCKET_NAME: !Ref InputBucket
+          TRACKING_TABLE: !Ref TrackingTable
+      Events:
+        S3Event:
+          Type: CloudWatchEvent
+          Properties:
+            Pattern:
+              source:
+                - aws.s3
+              detail-type:
+                - "Object Created"
+              detail:
+                bucket:
+                  name:
+                    - !Ref StagingBucket
+                object:
+                  key:
+                    - suffix: .zip
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref StagingBucket
+        - S3WritePolicy:
+            BucketName: !Ref InputBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
 
   ConfigurationCopyFunction:
@@ -1932,6 +2005,57 @@ Resources:
             Resource:
               - !Sub "${InputBucket.Arn}/*"
               - !Sub "${InputBucket.Arn}"
+            Condition:
+              Bool:
+                "aws:SecureTransport": false
+
+  StagingBucket:
+    Type: AWS::S3::Bucket
+    Condition: DeployApiGateway
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref CustomerManagedEncryptionKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: staging-bucket-logs/
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteAfterNDays
+            Status: Enabled
+            ExpirationInDays: !Ref DataRetentionInDays
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  StagingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: DeployApiGateway
+    Properties:
+      Bucket: !Ref StagingBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnforceSSLOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "${StagingBucket.Arn}/*"
+              - !Sub "${StagingBucket.Arn}"
             Condition:
               Bool:
                 "aws:SecureTransport": false
@@ -3833,12 +3957,85 @@ Resources:
           Id: TrackWorkflowCompletion
           RetryPolicy:
             MaximumRetryAttempts: 3
+        - Arn: !If [DeployApiGateway, !GetAtt JobTracker.Arn, !Ref "AWS::NoValue"]
+          Id: TrackJobCompletion
+          RetryPolicy:
+            MaximumRetryAttempts: 3
 
   WorkflowTrackerPermission:
     Type: AWS::Lambda::Permission
     Properties:
       Action: lambda:InvokeFunction
       FunctionName: !Ref WorkflowTracker
+      Principal: !Sub "events.${AWS::URLSuffix}"
+      SourceArn: !GetAtt WorkflowStateChangeRule.Arn
+
+  ##########################################################################
+  # Job Tracker - tracks batch job completion and creates results ZIP
+  ##########################################################################
+
+  JobTrackerDLQ:
+    Type: AWS::SQS::Queue
+    Condition: DeployApiGateway
+    Properties:
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKey
+
+  JobTrackerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: DeployApiGateway
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  JobTracker:
+    Type: AWS::Serverless::Function
+    Condition: DeployApiGateway
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+      CodeUri: src/lambda/job_tracker/
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 3008
+      EphemeralStorage:
+        Size: 5120
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      Tracing: Active
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt JobTrackerDLQ.Arn
+      LoggingConfig:
+        LogGroup: !Ref JobTrackerLogGroup
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref LambdaSecurityGroupId
+        SubnetIds: !Ref PrivateSubnetIds
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE: !Ref TrackingTable
+          OUTPUT_BUCKET: !Ref OutputBucket
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  JobTrackerPermission:
+    Type: AWS::Lambda::Permission
+    Condition: DeployApiGateway
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref JobTracker
       Principal: !Sub "events.${AWS::URLSuffix}"
       SourceArn: !GetAtt WorkflowStateChangeRule.Arn
 
@@ -7102,7 +7299,7 @@ Outputs:
     Condition: CreateAgentCoreLambda
     Description: MCP Authorization URL
     Value: !Sub "https://${GetDomain.OutputString}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize"
-  ApiHandlerEndpoint:
-    Condition: DeployApiHandler
+  ApiGatewayEndpoint:
+    Condition: DeployApiGateway
     Description: Jobs API endpoint URL
-    Value: !Sub "https://${ApiHandler}.execute-api.${AWS::Region}.${AWS::URLSuffix}/prod"
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.${AWS::URLSuffix}/prod"
