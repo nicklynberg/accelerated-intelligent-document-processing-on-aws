@@ -2,22 +2,18 @@
 
 ROOT=$(realpath $(dirname $0)/..)
 # source $ROOT/.env
-STACK_NAME="nlynberg-idp-stack"
 
 usage() {
-  echo "Usage: $0 [--debug] [-h]" 1>&2
-  echo "> $0 --debug" 1>&2
+  echo "Usage: $0 <STACK_NAME> [--debug] [-h]" 1>&2
+  echo "  STACK_NAME: CloudFormation stack name" 1>&2
+  echo "  --debug: Enable debug mode" 1>&2
+  echo "  -h: Show this help" 1>&2
+  echo "" 1>&2
+  echo "Examples:" 1>&2
+  echo "  $0 my-idp-stack" 1>&2
+  echo "  $0 my-idp-stack --debug" 1>&2
   exit 1
 }
-
-if [ ! -n "$STACK_NAME" ]; then
-  usage
-fi
-
-if ! [[ $STACK_NAME =~ ^[A-Za-z0-9-]+$ ]] ; then
-  echo "Namespace should be alphanumeric characters or dashes only"
-  exit 1
-fi
 
 DEBUG=
 
@@ -40,6 +36,27 @@ while getopts ":hv-:" o; do
       ;;
   esac
 done
+
+# Shift past the options
+shift $((OPTIND-1))
+
+# Now get the stack name from remaining arguments
+if [ $# -eq 0 ]; then
+  echo "Error: STACK_NAME is required"
+  usage
+fi
+
+STACK_NAME="$1"
+
+if [ ! -n "$STACK_NAME" ]; then
+  echo "Error: STACK_NAME cannot be empty"
+  usage
+fi
+
+if ! [[ $STACK_NAME =~ ^[A-Za-z0-9-]+$ ]] ; then
+  echo "Error: Stack name should be alphanumeric characters or dashes only"
+  exit 1
+fi
 
 function addhost() {
   HOSTNAME=$1
@@ -87,14 +104,12 @@ fi
 ### API Gateway
 API_GW_ENDPOINT=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='ApiGatewayEndpoint'].OutputValue" --output text --no-cli-pager)
 API_DOMAIN=$(echo $API_GW_ENDPOINT | sed 's|https://||' | sed 's|/.*||')
-echo $API_DOMAIN
 
 if [ ! -n "$API_GW_ENDPOINT" ]; then
   echo "Warning: Unable to retrieve ApiGatewayEndpoint from stack $STACK_NAME"
 else
   # Get the VPC endpoint ID for API Gateway
   API_GW_VPCE_ID=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Parameters[?ParameterKey=='ApiGatewayVpcEndpointId'].ParameterValue" --output text --no-cli-pager)
-  echo $API_GW_VPCE_ID
 
   if [ -n "$API_GW_VPCE_ID" ]; then
     # Use VPC Endpoint DNS format: {vpce-id}.execute-api.{region}.amazonaws.com
@@ -142,36 +157,23 @@ else
   interactive="-N -vvv"
 fi
 
-echo 'bastion command:'
-echo sudo -E $sshcmd \
-        -o ExitOnForwardFailure=yes \
-        -o ProxyCommand="sh -c \"aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p'\"" \
-        -o ServerAliveInterval=30 \
-        -o ServerAliveCountMax=2 \
-        -i $BASTION_FN \
-        ec2-user@$BASTION_ID \
-        -L 127.0.0.101:443:$API_DOMAIN:443 \
-        -L 127.0.0.102:443:$API_VPCE_DOMAIN:443 \
-        $interactive
-# sudo -E $sshcmd \
-#         -o ExitOnForwardFailure=yes \
-#         -o ProxyCommand="sh -c \"aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p'\"" \
-#         -o ServerAliveInterval=30 \
-#         -o ServerAliveCountMax=2 \
-#         -i $BASTION_FN \
-#         ec2-user@$BASTION_ID \
-#         -L 127.0.0.101:443:${API_VPCE_DOMAIN:-$API_DOMAIN}:443 \
-#         $interactive
+# Build the SSH command as an array to handle quoting properly
+tunnel_command=(
+    sudo -E $sshcmd
+    -o ExitOnForwardFailure=yes
+    -o "ProxyCommand=sh -c \"aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p'\""
+    -o ServerAliveInterval=30
+    -o ServerAliveCountMax=2
+    -i "$BASTION_FN"
+    "ec2-user@$BASTION_ID"
+    -L "127.0.0.101:443:$API_DOMAIN:443"
+    -L "127.0.0.102:443:$API_VPCE_DOMAIN:443"
+    $interactive
+)
 
-sudo -E $sshcmd \
-        -o ExitOnForwardFailure=yes \
-        -o ProxyCommand="sh -c \"aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p'\"" \
-        -o ServerAliveInterval=30 \
-        -o ServerAliveCountMax=2 \
-        -i $BASTION_FN \
-        ec2-user@$BASTION_ID \
-        -L 127.0.0.101:443:$API_DOMAIN:443 \
-        -L 127.0.0.102:443:$API_VPCE_DOMAIN:443 \
-        $interactive
+echo 'tunnel command:'
+echo "${tunnel_command[@]}"
+
+"${tunnel_command[@]}"
 
 cleanhosts
