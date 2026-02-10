@@ -232,30 +232,29 @@ class BatchOperation:
 
     def get_status(
         self,
-        batch_id: Optional[str] = None,
-        document_id: Optional[str] = None,
+        batch_id: str,
         stack_name: Optional[str] = None,
     ) -> BatchStatus:
-        """Get status of a batch or single document."""
+        """Get status of a batch.
+
+        Args:
+            batch_id: Batch identifier
+            stack_name: Optional stack name override
+
+        Returns:
+            BatchStatus with batch processing information
+        """
         from idp_sdk.core.batch_processor import BatchProcessor
         from idp_sdk.core.progress_monitor import ProgressMonitor
 
         name = self._client._require_stack(stack_name)
-
-        if not batch_id and not document_id:
-            raise IDPConfigurationError("Must specify either batch_id or document_id")
-
         processor = BatchProcessor(stack_name=name, region=self._client._region)
 
-        if batch_id:
-            batch_info = processor.get_batch_info(batch_id)
-            if not batch_info:
-                raise IDPResourceNotFoundError(f"Batch not found: {batch_id}")
-            document_ids = batch_info["document_ids"]
-            identifier = batch_id
-        else:
-            document_ids = [document_id]
-            identifier = document_id
+        batch_info = processor.get_batch_info(batch_id)
+        if not batch_info:
+            raise IDPResourceNotFoundError(f"Batch not found: {batch_id}")
+
+        document_ids = batch_info["document_ids"]
 
         monitor = ProgressMonitor(
             stack_name=name, resources=processor.resources, region=self._client._region
@@ -282,7 +281,7 @@ class BatchOperation:
                 )
 
         return BatchStatus(
-            batch_id=identifier,
+            batch_id=batch_id,
             documents=documents,
             total=stats.get("total", len(documents)),
             completed=stats.get("completed", 0),
@@ -316,7 +315,7 @@ class BatchOperation:
             for b in batches
         ]
 
-    def download(
+    def download_results(
         self,
         batch_id: str,
         output_dir: str,
@@ -343,30 +342,88 @@ class BatchOperation:
             output_dir=result.get("output_dir", output_dir),
         )
 
+    def download_sources(
+        self,
+        batch_id: str,
+        output_dir: str,
+        stack_name: Optional[str] = None,
+    ) -> BatchDownloadResult:
+        """Download original source files from InputBucket for all documents in a batch.
+
+        Args:
+            batch_id: Batch identifier
+            output_dir: Local directory to save source files
+            stack_name: Optional stack name override
+
+        Returns:
+            BatchDownloadResult with download statistics
+        """
+        import os
+
+        import boto3
+
+        from idp_sdk.core.batch_processor import BatchProcessor
+
+        name = self._client._require_stack(stack_name)
+        resources = self._client._get_stack_resources(name)
+        input_bucket = resources["InputBucket"]
+
+        processor = BatchProcessor(stack_name=name, region=self._client._region)
+        batch_info = processor.get_batch_info(batch_id)
+        if not batch_info:
+            raise IDPResourceNotFoundError(f"Batch not found: {batch_id}")
+
+        document_ids = batch_info["document_ids"]
+        s3_client = boto3.client("s3", region_name=self._client._region)
+
+        os.makedirs(output_dir, exist_ok=True)
+        files_downloaded = 0
+
+        try:
+            for doc_id in document_ids:
+                local_path = os.path.join(output_dir, doc_id)
+                local_dir = os.path.dirname(local_path)
+                os.makedirs(local_dir, exist_ok=True)
+
+                s3_client.download_file(
+                    Bucket=input_bucket, Key=doc_id, Filename=local_path
+                )
+                files_downloaded += 1
+
+            return BatchDownloadResult(
+                files_downloaded=files_downloaded,
+                documents_downloaded=files_downloaded,
+                output_dir=output_dir,
+            )
+        except Exception as e:
+            raise IDPProcessingError(f"Failed to download sources: {e}") from e
+
     def delete_documents(
         self,
-        document_ids: Optional[List[str]] = None,
-        batch_id: Optional[str] = None,
+        batch_id: str,
         status_filter: Optional[str] = None,
         stack_name: Optional[str] = None,
         dry_run: bool = False,
         continue_on_error: bool = True,
     ) -> BatchDeletionResult:
-        """Permanently delete documents and all their associated data."""
+        """Permanently delete all documents in a batch and their associated data.
+
+        Args:
+            batch_id: Batch identifier
+            status_filter: Optional status filter (e.g., 'FAILED', 'COMPLETED')
+            stack_name: Optional stack name override
+            dry_run: If True, only simulate deletion without actually deleting
+            continue_on_error: If True, continue deleting other documents if one fails
+
+        Returns:
+            BatchDeletionResult with deletion statistics
+        """
         import boto3
         from idp_common.delete_documents import delete_documents, get_documents_by_batch
 
         name = self._client._require_stack(stack_name)
-
-        if not document_ids and not batch_id:
-            raise IDPConfigurationError("Must specify either document_ids or batch_id")
-
-        if document_ids and batch_id:
-            raise IDPConfigurationError(
-                "Specify only one of document_ids or batch_id, not both"
-            )
-
         resources = self._client._get_stack_resources(name)
+
         input_bucket = resources.get("InputBucket")
         output_bucket = resources.get("OutputBucket")
         documents_table_name = resources.get("DocumentsTable")
@@ -381,22 +438,21 @@ class BatchOperation:
         s3_client = boto3.client("s3", region_name=self._client._region)
 
         try:
-            if batch_id:
-                document_ids = get_documents_by_batch(
-                    tracking_table=tracking_table,
-                    batch_id=batch_id,
-                    status_filter=status_filter,
-                )
+            document_ids = get_documents_by_batch(
+                tracking_table=tracking_table,
+                batch_id=batch_id,
+                status_filter=status_filter,
+            )
 
-                if not document_ids:
-                    return BatchDeletionResult(
-                        success=True,
-                        deleted_count=0,
-                        failed_count=0,
-                        total_count=0,
-                        dry_run=dry_run,
-                        results=[],
-                    )
+            if not document_ids:
+                return BatchDeletionResult(
+                    success=True,
+                    deleted_count=0,
+                    failed_count=0,
+                    total_count=0,
+                    dry_run=dry_run,
+                    results=[],
+                )
 
             result = delete_documents(
                 object_keys=document_ids,
@@ -427,7 +483,7 @@ class BatchOperation:
                 results=single_results,
             )
         except Exception as e:
-            raise IDPProcessingError(f"Document deletion failed: {e}") from e
+            raise IDPProcessingError(f"Batch deletion failed: {e}") from e
 
     def stop_workflows(
         self,

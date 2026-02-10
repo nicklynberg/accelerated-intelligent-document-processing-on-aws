@@ -130,7 +130,7 @@ def main():
         print(f"  Features: {args.features}")
         print(f"  Pattern: {args.pattern}")
 
-        result = client.config_create(
+        result = client.config.create(
             features=args.features,
             pattern=args.pattern,
             output=args.output,
@@ -155,7 +155,7 @@ def main():
         print(f"Validating configuration: {args.config_file}")
         print(f"  Pattern: {args.pattern}")
 
-        result = client.config_validate(
+        result = client.config.validate(
             config_file=args.config_file,
             pattern=args.pattern,
             show_merged=args.show_merged,
@@ -187,7 +187,7 @@ def main():
         print(f"Downloading configuration from: {args.stack_name}")
         print(f"  Format: {args.format}")
 
-        result = client.config_download(
+        result = client.config.download(
             output=args.output,
             format=args.format,
         )
@@ -213,7 +213,7 @@ def main():
         print(f"  Config file: {args.config_file}")
         print(f"  Validate: {not args.no_validate}")
 
-        result = client.config_upload(
+        result = client.config.upload(
             config_file=args.config_file,
             validate=not args.no_validate,
         )

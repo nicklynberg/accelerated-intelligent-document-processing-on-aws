@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from .base import DocumentState
+from .base import DocumentState, RerunStep
 
 
 class DocumentStatus(BaseModel):
@@ -30,6 +30,30 @@ class DocumentStatus(BaseModel):
         default=None, description="Number of extracted sections"
     )
     error: Optional[str] = Field(default=None, description="Error message if failed")
+
+
+class DocumentUploadResult(BaseModel):
+    """Result of uploading a single document."""
+
+    document_id: str = Field(description="Document identifier (S3 key)")
+    status: str = Field(description="Initial status (typically 'queued')")
+    timestamp: datetime = Field(description="Upload timestamp")
+
+
+class DocumentDownloadResult(BaseModel):
+    """Result of downloading a single document's results."""
+
+    document_id: str = Field(description="Document identifier")
+    files_downloaded: int = Field(description="Number of files downloaded")
+    output_dir: str = Field(description="Local output directory path")
+
+
+class DocumentRerunResult(BaseModel):
+    """Result of rerunning a single document."""
+
+    document_id: str = Field(description="Document identifier")
+    step: RerunStep = Field(description="Pipeline step being rerun")
+    queued: bool = Field(description="Whether document was successfully queued")
 
 
 class DocumentDeletionResult(BaseModel):

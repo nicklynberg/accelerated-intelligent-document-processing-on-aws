@@ -20,12 +20,16 @@ from idp_sdk import IDPClient
 # Create client with stack configuration
 client = IDPClient(stack_name="my-idp-stack", region="us-west-2")
 
-# Process documents using namespaced API
-result = client.batch.run(source="./documents/")
-print(f"Batch: {result.batch_id}, Queued: {result.documents_queued}")
+# Upload and process a single document
+result = client.document.upload(file_path="./invoice.pdf")
+print(f"Document ID: {result.document_id}, Status: {result.status}")
+
+# Process a batch of documents
+batch_result = client.batch.run(source="./documents/")
+print(f"Batch: {batch_result.batch_id}, Queued: {batch_result.queued}")
 
 # Check status
-status = client.batch.get_status(batch_id=result.batch_id)
+status = client.batch.get_status(batch_id=batch_result.batch_id)
 print(f"Progress: {status.completed}/{status.total}")
 ```
 
@@ -41,17 +45,22 @@ client.stack.deploy(...)
 client.stack.delete()
 client.stack.get_resources()
 
-# Batch operations
+# Batch operations (multiple documents)
 client.batch.run(...)
 client.batch.get_status(...)
 client.batch.list()
-client.batch.download(...)
+client.batch.download_results(...)
+client.batch.download_sources(...)
 client.batch.delete_documents(...)
 client.batch.rerun(...)
 client.batch.stop_workflows()
 
-# Document operations
+# Document operations (single document)
+client.document.upload(...)
 client.document.get_status(...)
+client.document.download_results(...)
+client.document.download_source(...)
+client.document.rerun(...)
 client.document.delete(...)
 
 # Configuration operations
@@ -80,7 +89,7 @@ client = IDPClient(stack_name="my-stack", region="us-west-2")
 client = IDPClient()
 
 # Stack can be set later
-client._stack_name = "new-stack"
+client.stack_name = "new-stack"
 ```
 
 ### Parameters
@@ -89,6 +98,349 @@ client._stack_name = "new-stack"
 |-----------|------|----------|-------------|
 | `stack_name` | str | No | CloudFormation stack name |
 | `region` | str | No | AWS region (defaults to boto3 default) |
+
+---
+
+## Document Operations
+
+Operations for processing individual documents.
+
+### document.upload()
+
+Upload and process a single document.
+
+**Parameters:**
+- `file_path` (str, required): Path to local file to upload
+- `document_id` (str, optional): Custom document ID (defaults to filename without extension)
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `DocumentUploadResult` with `document_id`, `status`, and `timestamp`
+
+```python
+result = client.document.upload(
+    file_path="/path/to/invoice.pdf",
+    document_id="custom-id"  # Optional
+)
+
+print(f"Document ID: {result.document_id}")
+print(f"Status: {result.status}")  # "queued"
+print(f"Timestamp: {result.timestamp}")
+```
+
+### document.get_status()
+
+Get processing status for a single document.
+
+**Parameters:**
+- `document_id` (str, required): Document identifier (S3 key format: batch-id/filename)
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `DocumentStatus` with processing information including status, duration, pages, sections, and errors
+
+```python
+status = client.document.get_status(document_id="batch-123/invoice.pdf")
+
+print(f"Status: {status.status.value}")
+print(f"Pages: {status.num_pages}")
+print(f"Duration: {status.duration_seconds}s")
+```
+
+### document.download_results()
+
+Download processing results (processed outputs) from OutputBucket for a single document.
+
+**Parameters:**
+- `document_id` (str, required): Document identifier (S3 key)
+- `output_dir` (str, required): Local directory to save results
+- `file_types` (list[str], optional): File types to download - "pages", "sections", "summary", "evaluation" (defaults to all)
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `DocumentDownloadResult` with `document_id`, `files_downloaded`, and `output_dir`
+
+```python
+result = client.document.download_results(
+    document_id="batch-123/invoice.pdf",
+    output_dir="./results",
+    file_types=["pages", "sections", "summary"]  # Optional
+)
+
+print(f"Downloaded {result.files_downloaded} files")
+```
+
+### document.download_source()
+
+Download original document source file from InputBucket.
+
+**Parameters:**
+- `document_id` (str, required): Document identifier (S3 key)
+- `output_path` (str, required): Local file path to save document
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `str` - Local file path where document was saved
+
+```python
+file_path = client.document.download_source(
+    document_id="batch-123/invoice.pdf",
+    output_path="./downloads/invoice.pdf"
+)
+
+print(f"Downloaded to: {file_path}")
+```
+
+### document.rerun()
+
+Rerun processing for a single document from a specific pipeline step.
+
+**Parameters:**
+- `document_id` (str, required): Document identifier (S3 key)
+- `step` (str or RerunStep, required): Pipeline step to rerun from (e.g., "classification", "extraction", RerunStep.EXTRACTION)
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `DocumentRerunResult` with `document_id`, `step`, and `queued` status
+
+```python
+from idp_sdk import RerunStep
+
+result = client.document.rerun(
+    document_id="batch-123/invoice.pdf",
+    step=RerunStep.EXTRACTION
+)
+
+print(f"Queued: {result.queued}")
+```
+
+### document.delete()
+
+Permanently delete a single document and all associated data from InputBucket, OutputBucket, and DynamoDB.
+
+**Parameters:**
+- `document_id` (str, required): Document identifier (S3 key)
+- `stack_name` (str, optional): Stack name override
+- `dry_run` (bool, optional): If True, simulate deletion without actually deleting (default: False)
+
+**Returns:** `DocumentDeletionResult` with `success`, `object_key`, `deleted` (dict of deleted items), and `errors`
+
+```python
+result = client.document.delete(
+    document_id="batch-123/invoice.pdf",
+    dry_run=False
+)
+
+print(f"Success: {result.success}")
+print(f"Deleted: {result.deleted}")
+```
+
+---
+
+## Batch Operations
+
+Operations for processing multiple documents.
+
+### batch.run()
+
+Process multiple documents through the IDP pipeline.
+
+**Parameters:**
+- `source` (str, optional): Auto-detected source - directory path, manifest file, or S3 URI
+- `manifest` (str, optional): Path to manifest CSV file
+- `directory` (str, optional): Local directory path
+- `s3_uri` (str, optional): S3 URI (s3://bucket/prefix/)
+- `test_set` (str, optional): Test set identifier
+- `batch_prefix` (str, optional): Batch ID prefix (default: "sdk-batch")
+- `file_pattern` (str, optional): File pattern for filtering (default: "*.pdf")
+- `recursive` (bool, optional): Recursively process subdirectories (default: True)
+- `number_of_files` (int, optional): Limit number of files to process
+- `config_path` (str, optional): Path to custom configuration file
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `BatchResult` with `batch_id`, `document_ids`, `queued`, `uploaded`, `failed`, and `timestamp`
+
+```python
+# From directory
+result = client.batch.run(source="./documents/")
+
+# From manifest
+result = client.batch.run(source="./manifest.csv")
+
+# From S3
+result = client.batch.run(source="s3://bucket/path/")
+
+# With options
+result = client.batch.run(
+    source="./documents/",
+    batch_prefix="my-batch",
+    file_pattern="*.pdf",
+    recursive=True,
+    number_of_files=10,
+    config_path="./config.yaml"
+)
+
+print(f"Batch ID: {result.batch_id}")
+print(f"Documents queued: {result.queued}")
+```
+
+### batch.get_status()
+
+Get processing status for all documents in a batch.
+
+**Parameters:**
+- `batch_id` (str, required): Batch identifier
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `BatchStatus` with `batch_id`, `documents` (list of DocumentStatus), `total`, `completed`, `failed`, `in_progress`, `queued`, `success_rate`, and `all_complete`
+
+```python
+status = client.batch.get_status(batch_id="batch-20250123-123456")
+
+print(f"Total: {status.total}")
+print(f"Completed: {status.completed}")
+print(f"Failed: {status.failed}")
+print(f"Success Rate: {status.success_rate:.1%}")
+
+for doc in status.documents:
+    print(f"  {doc.document_id}: {doc.status.value}")
+```
+
+### batch.list()
+
+List recent batch processing jobs.
+
+**Parameters:**
+- `limit` (int, optional): Maximum number of batches to return (default: 10)
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `list[BatchInfo]` with batch metadata including `batch_id`, `document_ids`, `queued`, `failed`, and `timestamp`
+
+```python
+batches = client.batch.list(limit=10)
+
+for batch in batches:
+    print(f"{batch.batch_id}: {batch.queued} docs")
+```
+
+### batch.download_results()
+
+Download processing results (processed outputs) from OutputBucket for all documents in a batch.
+
+**Parameters:**
+- `batch_id` (str, required): Batch identifier
+- `output_dir` (str, required): Local directory to save results
+- `file_types` (list[str], optional): File types to download - "pages", "sections", "summary", "evaluation", or "all" (default: ["all"])
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `BatchDownloadResult` with `files_downloaded`, `documents_downloaded`, and `output_dir`
+
+```python
+result = client.batch.download_results(
+    batch_id="batch-20250123-123456",
+    output_dir="./results",
+    file_types=["summary", "sections"]
+)
+
+print(f"Downloaded {result.files_downloaded} files")
+```
+
+### batch.download_sources()
+
+Download original source files from InputBucket for all documents in a batch.
+
+**Parameters:**
+- `batch_id` (str, required): Batch identifier
+- `output_dir` (str, required): Local directory to save source files
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `BatchDownloadResult` with `files_downloaded`, `documents_downloaded`, and `output_dir`
+
+```python
+result = client.batch.download_sources(
+    batch_id="batch-20250123-123456",
+    output_dir="./source_files"
+)
+
+print(f"Downloaded {result.files_downloaded} source files")
+```
+
+### batch.delete_documents()
+
+Permanently delete all documents in a batch and their associated data from InputBucket, OutputBucket, and DynamoDB.
+
+**Parameters:**
+- `batch_id` (str, required): Batch identifier
+- `status_filter` (str, optional): Filter by document status (e.g., "FAILED", "COMPLETED")
+- `stack_name` (str, optional): Stack name override
+- `dry_run` (bool, optional): If True, simulate deletion without actually deleting (default: False)
+- `continue_on_error` (bool, optional): Continue deleting if one document fails (default: True)
+
+**Returns:** `BatchDeletionResult` with `success`, `deleted_count`, `failed_count`, `total_count`, `dry_run`, and `results` (list of DocumentDeletionResult)
+
+```python
+# Delete entire batch
+result = client.batch.delete_documents(batch_id="batch-123")
+
+# Delete with status filter
+result = client.batch.delete_documents(
+    batch_id="batch-123",
+    status_filter="FAILED"
+)
+
+# Dry run
+result = client.batch.delete_documents(
+    batch_id="batch-123",
+    dry_run=True
+)
+
+print(f"Deleted: {result.deleted_count}/{result.total_count}")
+```
+
+### batch.rerun()
+
+Rerun processing for multiple documents from a specific pipeline step.
+
+**Parameters:**
+- `step` (str or RerunStep, required): Pipeline step to rerun from (e.g., "classification", "extraction", RerunStep.EXTRACTION)
+- `document_ids` (list[str], optional): Specific document IDs to rerun
+- `batch_id` (str, optional): Batch ID to rerun all documents in batch
+- `stack_name` (str, optional): Stack name override
+
+**Note:** Must specify either `document_ids` or `batch_id`
+
+**Returns:** `BatchRerunResult` with `documents_queued`, `documents_failed`, `failed_documents`, and `step`
+
+```python
+from idp_sdk import RerunStep
+
+# Rerun batch
+result = client.batch.rerun(
+    step=RerunStep.EXTRACTION,
+    batch_id="batch-20250123-123456"
+)
+
+# Rerun specific documents
+result = client.batch.rerun(
+    step="classification",
+    document_ids=["batch/doc1.pdf", "batch/doc2.pdf"]
+)
+
+print(f"Queued: {result.documents_queued}")
+```
+
+### batch.stop_workflows()
+
+Stop all running Step Functions workflows and purge the SQS queue.
+
+**Parameters:**
+- `stack_name` (str, optional): Stack name override
+- `skip_purge` (bool, optional): Skip purging the SQS queue (default: False)
+- `skip_stop` (bool, optional): Skip stopping executions (default: False)
+
+**Returns:** `StopWorkflowsResult` with `executions_stopped`, `documents_aborted`, and `queue_purged`
+
+```python
+result = client.batch.stop_workflows()
+
+print(f"Queue purged: {result.queue_purged}")
+print(f"Executions stopped: {result.executions_stopped}")
+```
 
 ---
 
@@ -140,173 +492,6 @@ resources = client.stack.get_resources()
 print(f"Input Bucket: {resources.input_bucket}")
 print(f"Output Bucket: {resources.output_bucket}")
 print(f"Queue URL: {resources.document_queue_url}")
-```
-
----
-
-## Batch Operations
-
-Operations for processing multiple documents.
-
-### batch.run()
-
-Process documents through the IDP pipeline.
-
-```python
-# From directory
-result = client.batch.run(source="./documents/")
-
-# From manifest
-result = client.batch.run(source="./manifest.csv")
-
-# From S3
-result = client.batch.run(source="s3://bucket/path/")
-
-# With options
-result = client.batch.run(
-    source="./documents/",
-    batch_prefix="my-batch",
-    file_pattern="*.pdf",
-    recursive=True,
-    number_of_files=10,
-    config_path="./config.yaml"
-)
-
-print(f"Batch ID: {result.batch_id}")
-print(f"Documents queued: {result.documents_queued}")
-```
-
-### batch.get_status()
-
-Get processing status for a batch.
-
-```python
-status = client.batch.get_status(batch_id="batch-20250123-123456")
-
-print(f"Total: {status.total}")
-print(f"Completed: {status.completed}")
-print(f"Failed: {status.failed}")
-print(f"Success Rate: {status.success_rate:.1%}")
-
-for doc in status.documents:
-    print(f"  {doc.document_id}: {doc.status.value}")
-```
-
-### batch.list()
-
-List recent batch processing jobs.
-
-```python
-batches = client.batch.list(limit=10)
-
-for batch in batches:
-    print(f"{batch.batch_id}: {batch.queued} docs")
-```
-
-### batch.download()
-
-Download processing results.
-
-```python
-result = client.batch.download(
-    batch_id="batch-20250123-123456",
-    output_dir="./results",
-    file_types=["summary", "sections"]
-)
-
-print(f"Downloaded {result.files_downloaded} files")
-```
-
-### batch.delete_documents()
-
-Delete documents and all associated data.
-
-```python
-# Delete by batch ID
-result = client.batch.delete_documents(batch_id="batch-123")
-
-# Delete specific documents
-result = client.batch.delete_documents(
-    document_ids=["batch-123/doc1.pdf", "batch-123/doc2.pdf"]
-)
-
-# Delete with status filter
-result = client.batch.delete_documents(
-    batch_id="batch-123",
-    status_filter="FAILED"
-)
-
-# Dry run
-result = client.batch.delete_documents(
-    batch_id="batch-123",
-    dry_run=True
-)
-
-print(f"Deleted: {result.deleted_count}/{result.total_count}")
-```
-
-### batch.rerun()
-
-Rerun processing from a specific step.
-
-```python
-from idp_sdk import RerunStep
-
-# Rerun batch
-result = client.batch.rerun(
-    step=RerunStep.EXTRACTION,
-    batch_id="batch-20250123-123456"
-)
-
-# Rerun specific documents
-result = client.batch.rerun(
-    step="classification",
-    document_ids=["batch/doc1.pdf", "batch/doc2.pdf"]
-)
-
-print(f"Queued: {result.documents_queued}")
-```
-
-### batch.stop_workflows()
-
-Stop all running workflows.
-
-```python
-result = client.batch.stop_workflows()
-
-print(f"Queue purged: {result.queue_purged}")
-print(f"Executions stopped: {result.executions_stopped}")
-```
-
----
-
-## Document Operations
-
-Operations for individual documents.
-
-### document.get_status()
-
-Get status for a single document.
-
-```python
-status = client.document.get_status(
-    document_id="batch-123/invoice.pdf"
-)
-
-print(f"Status: {status.status.value}")
-print(f"Progress: {status.progress}")
-```
-
-### document.delete()
-
-Delete a single document and its data.
-
-```python
-result = client.document.delete(
-    document_id="batch-123/invoice.pdf"
-)
-
-print(f"Success: {result.success}")
 ```
 
 ---
@@ -440,55 +625,55 @@ All operations return typed Pydantic models:
 
 ```python
 from idp_sdk import (
-    # Results
-    BatchResult,
-    BatchStatusResult,
-    DeploymentResult,
-    DeletionResult,
+    # Document models
+    DocumentUploadResult,
+    DocumentStatus,
+    DocumentDownloadResult,
+    DocumentRerunResult,
     DocumentDeletionResult,
-    RerunResult,
-    DownloadResult,
-    ManifestResult,
-    ValidationResult,
+    
+    # Batch models
+    BatchResult,
+    BatchStatus,
+    BatchInfo,
+    BatchRerunResult,
+    BatchDownloadResult,
+    BatchDeletionResult,
+    
+    # Stack models
+    StackDeploymentResult,
+    StackDeletionResult,
+    StackResources,
+    
+    # Config models
     ConfigCreateResult,
     ConfigValidationResult,
     ConfigUploadResult,
     ConfigDownloadResult,
+    
+    # Manifest models
+    ManifestResult,
+    ManifestValidationResult,
+    
+    # Testing models
     LoadTestResult,
     StopWorkflowsResult,
     
     # Enums
-    DocumentStatus,
+    DocumentState,
     Pattern,
     RerunStep,
-    StackStatus,
+    StackState,
     
     # Exceptions
     IDPError,
     IDPConfigurationError,
     IDPStackError,
     IDPProcessingError,
+    IDPResourceNotFoundError,
     IDPValidationError,
+    IDPTimeoutError,
 )
-```
-
-### Common Result Fields
-
-Most result models include:
-- `success: bool` - Operation success status
-- `error: Optional[str]` - Error message if failed
-- Additional operation-specific fields
-
-### Document Status Enum
-
-```python
-from idp_sdk import DocumentStatus
-
-DocumentStatus.QUEUED
-DocumentStatus.PROCESSING
-DocumentStatus.COMPLETED
-DocumentStatus.FAILED
-DocumentStatus.ABORTED
 ```
 
 ---
@@ -496,158 +681,80 @@ DocumentStatus.ABORTED
 ## Error Handling
 
 ```python
-from idp_sdk import IDPError, IDPStackError, IDPValidationError
+from idp_sdk import IDPClient, IDPProcessingError, IDPResourceNotFoundError
+
+client = IDPClient(stack_name="my-stack")
 
 try:
-    result = client.batch.run(source="./documents/")
-except IDPStackError as e:
-    print(f"Stack error: {e}")
-except IDPValidationError as e:
-    print(f"Validation error: {e}")
-except IDPError as e:
-    print(f"General error: {e}")
+    result = client.document.upload(file_path="./invoice.pdf")
+except IDPProcessingError as e:
+    print(f"Processing error: {e}")
+except IDPResourceNotFoundError as e:
+    print(f"Resource not found: {e}")
+except Exception as e:
+    print(f"Unexpected error: {e}")
 ```
 
 ---
 
-## Advanced Usage
-
-### Custom Configuration
+## Complete Example
 
 ```python
-# Create and upload custom config
-config_result = client.config.create(
-    features="classification,extraction",
-    pattern="pattern-2",
-    output="custom-config.yaml"
-)
-
-# Validate before upload
-validation = client.config.validate(config_file="custom-config.yaml")
-if validation.valid:
-    client.config.upload(config_file="custom-config.yaml")
-```
-
-### Batch Processing with Monitoring
-
-```python
-# Start batch
-result = client.batch.run(source="./documents/")
-batch_id = result.batch_id
-
-# Monitor progress
+from idp_sdk import IDPClient, RerunStep
 import time
+
+# Initialize client
+client = IDPClient(stack_name="my-idp-stack", region="us-west-2")
+
+# Upload single document
+doc_result = client.document.upload(file_path="./invoice.pdf")
+doc_id = doc_result.document_id
+
+# Monitor document processing
 while True:
-    status = client.batch.get_status(batch_id=batch_id)
-    print(f"Progress: {status.completed}/{status.total}")
+    status = client.document.get_status(document_id=doc_id)
+    print(f"Status: {status.status.value}")
     
-    if status.all_complete:
+    if status.status.value in ["COMPLETED", "FAILED"]:
         break
+    
     time.sleep(5)
 
-# Download results
-client.batch.download(batch_id=batch_id, output_dir="./results")
-```
-
-### Reprocessing Failed Documents
-
-```python
-# Get batch status
-status = client.batch.get_status(batch_id="batch-123")
-
-# Find failed documents
-failed_docs = [
-    doc.document_id 
-    for doc in status.documents 
-    if doc.status == DocumentStatus.FAILED
-]
-
-# Rerun from classification
-if failed_docs:
-    client.batch.rerun(
-        step=RerunStep.CLASSIFICATION,
-        document_ids=failed_docs
+# Download results if successful
+if status.status.value == "COMPLETED":
+    client.document.download_results(
+        document_id=doc_id,
+        output_dir="./results"
     )
-```
+    print("Results downloaded successfully")
 
----
+# Process a batch
+batch_result = client.batch.run(source="./documents/")
+batch_id = batch_result.batch_id
 
-## Migration from Old API
-
-The SDK now uses namespaced operations. Old flat methods still work but are deprecated:
-
-```python
-# Old (deprecated)
-client.run_inference(source="./docs/")
-client.get_status(batch_id="batch-123")
-client.deploy(stack_name="my-stack", ...)
-
-# New (recommended)
-client.batch.run(source="./docs/")
-client.batch.get_status(batch_id="batch-123")
-client.stack.deploy(stack_name="my-stack", ...)
-```
-
----
-
-## Examples
-
-### Complete Workflow
-
-```python
-from idp_sdk import IDPClient, Pattern
-
-# Initialize
-client = IDPClient(stack_name="my-idp-stack")
-
-# Deploy stack (if needed)
-# client.stack.deploy(
-#     pattern=Pattern.PATTERN_2,
-#     admin_email="admin@example.com"
-# )
-
-# Generate manifest
-manifest = client.manifest.generate(
-    directory="./documents/",
-    output="manifest.csv"
-)
-
-# Validate manifest
-validation = client.manifest.validate(manifest_path="manifest.csv")
-if not validation.valid:
-    raise ValueError(f"Invalid manifest: {validation.error}")
-
-# Process documents
-result = client.batch.run(source="manifest.csv")
-print(f"Batch started: {result.batch_id}")
-
-# Monitor progress
-import time
+# Monitor batch progress
 while True:
-    status = client.batch.get_status(batch_id=result.batch_id)
-    print(f"Progress: {status.completed}/{status.total}")
+    batch_status = client.batch.get_status(batch_id=batch_id)
+    print(f"Progress: {batch_status.completed}/{batch_status.total}")
     
-    if status.all_complete:
+    if batch_status.all_complete:
         break
+    
     time.sleep(10)
 
-# Download results
-client.batch.download(
-    batch_id=result.batch_id,
-    output_dir="./results"
+# Download batch results
+client.batch.download_results(
+    batch_id=batch_id,
+    output_dir="./batch_results"
 )
 
-print(f"Success rate: {status.success_rate:.1%}")
+print(f"Batch complete! Success rate: {batch_status.success_rate:.1%}")
 ```
 
 ---
 
-## API Reference
+## See Also
 
-For detailed API documentation, see the inline docstrings:
-
-```python
-from idp_sdk import IDPClient
-help(IDPClient.batch.run)
-help(IDPClient.stack.deploy)
-```
+- [IDP CLI Documentation](./idp-cli.md) - Command-line interface
+- [SDK Examples](../lib/idp_sdk/examples/) - Code examples
+- [API Reference](../lib/idp_sdk/README.md) - Detailed API documentation

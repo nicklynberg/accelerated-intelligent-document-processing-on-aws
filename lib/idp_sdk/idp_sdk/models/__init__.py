@@ -18,7 +18,13 @@ from .config import (
     ConfigUploadResult,
     ConfigValidationResult,
 )
-from .document import DocumentDeletionResult, DocumentStatus
+from .document import (
+    DocumentDeletionResult,
+    DocumentDownloadResult,
+    DocumentRerunResult,
+    DocumentStatus,
+    DocumentUploadResult,
+)
 from .manifest import ManifestDocument, ManifestResult, ManifestValidationResult
 from .stack import StackDeletionResult, StackDeploymentResult, StackResources
 from .testing import LoadTestResult, StopWorkflowsResult
@@ -42,6 +48,9 @@ __all__ = [
     "BatchDeletionResult",
     # Document models
     "DocumentStatus",
+    "DocumentUploadResult",
+    "DocumentDownloadResult",
+    "DocumentRerunResult",
     "DocumentDeletionResult",
     # Config models
     "ConfigCreateResult",
