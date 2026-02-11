@@ -145,7 +145,7 @@ class TestClassesDiscovery:
 
             # Mock the ConfigurationReader to return the mock config
             mock_reader_instance = mock_config_reader.return_value
-            mock_reader_instance.get_configuration.return_value = mock_config
+            mock_reader_instance.get_merged_configuration.return_value = mock_config
 
             # Mock the ConfigurationManager
             mock_manager_instance = mock_config_manager.return_value
@@ -179,7 +179,7 @@ class TestClassesDiscovery:
         ):
             # Mock the ConfigurationReader to return the mock config
             mock_reader_instance = mock_config_reader.return_value
-            mock_reader_instance.get_configuration.return_value = mock_config
+            mock_reader_instance.get_merged_configuration.return_value = mock_config
 
             service = ClassesDiscovery(
                 input_bucket="test-bucket",
@@ -218,7 +218,7 @@ class TestClassesDiscovery:
         ):
             # Mock the ConfigurationReader to return the mock config
             mock_reader_instance = mock_config_reader.return_value
-            mock_reader_instance.get_configuration.return_value = mock_config
+            mock_reader_instance.get_merged_configuration.return_value = mock_config
 
             service = ClassesDiscovery(
                 input_bucket="test-bucket",

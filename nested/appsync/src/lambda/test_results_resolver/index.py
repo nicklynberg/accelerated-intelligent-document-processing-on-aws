@@ -668,7 +668,7 @@ def _build_config_comparison(configs):
     def get_all_paths(dictionary, prefix=""):
         """Get all nested paths from dictionary"""
         paths = []
-        ignored_fields = {'UpdatedAt', 'Description', 'CreatedAt', 'IsActive', 'Configuration', 'version_name'}
+        ignored_fields = {'UpdatedAt', 'Description', 'CreatedAt', 'IsActive', 'Configuration', 'version_name', 'classes'}
         
         for key, value in dictionary.items():
             # Skip ignored metadata fields

@@ -174,7 +174,7 @@ class TestClassesDiscoveryIntegration:
                 )
             )
             mock_reader_instance = mock_config_reader.return_value
-            mock_reader_instance.get_configuration.return_value = mock_config
+            mock_reader_instance.get_merged_configuration.return_value = mock_config
 
             service = ClassesDiscovery(
                 input_bucket="test-discovery-bucket",

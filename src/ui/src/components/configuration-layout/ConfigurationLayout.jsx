@@ -197,13 +197,11 @@ const ConfigurationLayout = () => {
   const handleActivateVersion = async (versionName) => {
     try {
       await setActiveVersion(versionName);
-      await fetchVersions(); // Refresh table
 
       // Small delay to ensure backend consistency before fetching config
       await new Promise((resolve) => setTimeout(resolve, 500));
 
-      await fetchConfiguration(versionName); // Reload form with activated version's config
-      setSelectedVersion(versionName); // Select the activated version in the table
+      setSelectedVersion(versionName); // Select the activated version (useEffect will fetch config)
     } catch (error) {
       console.error('Failed to activate version:', error);
     }

@@ -20,7 +20,7 @@ const ConfigurationComparison = ({ versions, configs }) => {
   // Find differences between configurations - using backend logic
   const findDifferences = (configsToCompare) => {
     const differences = [];
-    const ignoredFields = new Set(['UpdatedAt', 'Description', 'CreatedAt', 'IsActive', 'Configuration', 'version_name']);
+    const ignoredFields = new Set(['UpdatedAt', 'Description', 'CreatedAt', 'IsActive', 'Configuration', 'version_name', 'classes']);
 
     // Get all nested paths from dictionary - backend style
     const getAllPaths = (dictionary, prefix = '') => {

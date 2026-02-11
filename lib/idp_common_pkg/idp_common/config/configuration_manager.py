@@ -142,8 +142,9 @@ class ConfigurationManager:
                 logger.info(f"Raw configuration not found: {config_type}")
                 return None
 
-            # Remove the DynamoDB partition key - return only the config data
-            config_data = {k: v for k, v in item.items() if k != "Configuration"}
+            # Remove the DynamoDB partition key and metadata fields - return only the config data
+            metadata_fields = {"Configuration", "CreatedAt", "UpdatedAt", "IsActive", "Description"}
+            config_data = {k: v for k, v in item.items() if k not in metadata_fields}
 
             logger.info(f"Retrieved raw configuration for {config_type}")
             return config_data
@@ -732,7 +733,12 @@ class ConfigurationManager:
             # Normal version config update - merge deltas into existing version
             # IMPORTANT: Use RAW version (no Pydantic defaults!) to preserve sparse pattern
             existing_version_dict = self.get_raw_configuration(CONFIG_TYPE_CONFIG, version=version)
-            descriptionUpdated = existing_version_dict.get("Description") != description
+            
+            # Check if description changed by getting the existing record (includes metadata)
+            existing_record = self._read_record(CONFIG_TYPE_CONFIG, version)
+            existing_description = existing_record.description if existing_record else None
+            descriptionUpdated = existing_description != description
+            
             if not descriptionUpdated and (not config_dict or (isinstance(config_dict, dict) and len(config_dict) == 0)):
                 logger.info(
                     "Empty configuration update with no special flags - no changes made"
