@@ -79,22 +79,27 @@ aws cloudformation deploy \
   --s3-bucket {s3-bucket-govcloud}
 ```
 
-### Optional: Deploy with REST API
+### Optional: Deploy with REST API and Bastion Host
 
-To enable the Batch Jobs REST API (`/jobs` endpoints), add the following VPC parameters:
+To enable the Batch Jobs REST API (`/jobs` endpoints) with local development access via a bastion host, add the following VPC and bastion parameters:
 
 ```bash
 aws cloudformation deploy \
   --template-file .aws-sam/idp-govcloud.yaml \
   --stack-name my-idp-govcloud-stack \
   --region us-gov-west-1 \
+  --s3-bucket {s3-bucket-govcloud} \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameter-overrides \
     IDPPattern="Pattern2 - Packet processing with Textract and Bedrock" \
     VpcId=vpc-xxxxxxxxx \
     PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,subnet-xxxxx \
     ApiGatewayVpcEndpointId=vpce-xxxxxxxxx \
-    LambdaSecurityGroupId=sg-xxxxxxxxx
+    LambdaSecurityGroupId=sg-xxxxxxxxx \
+    ApiStageName=prod \
+    DeployBastionHost=true \
+    BastionHostSubnetId=subnet-xxxxxxxxx \
+    BastionHostSecurityGroupId=sg-xxxxxxxxx
 ```
 
 **VPC Parameters (required for REST API):**
@@ -102,6 +107,53 @@ aws cloudformation deploy \
 - `PrivateSubnetIds` - Comma-separated private subnet IDs (minimum 2 for HA)
 - `ApiGatewayVpcEndpointId` - VPC endpoint for private API Gateway access
 - `LambdaSecurityGroupId` - Security group for VPC-enabled Lambda functions
+- `ApiStageName` - API Gateway deployment stage name (default: `prod`)
+
+**Bastion Parameters (optional, for local development access):**
+- `DeployBastionHost` - Set to `true` to deploy the bastion EC2 instance
+- `BastionHostSubnetId` - A **public** subnet for the bastion host
+- `BastionHostSecurityGroupId` - Security group for the bastion host (no special inbound rules required — the tunnel operates via AWS SSM Session Manager)
+
+### Local API Access via Bastion Tunnel
+
+After deploying with bastion enabled, you can access the private API Gateway from your local machine.
+
+**Prerequisites:**
+- AWS CLI configured with credentials for the target account
+- [AWS Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) — required for the SSM-based SSH tunnel
+- SSH client
+
+
+**Step 1: Start the tunnel**
+
+```bash
+./scripts/bastion.sh <STACK_NAME>
+```
+
+**Step 2: Generate a bearer token**
+
+In a separate terminal, generate an OAuth token for API authentication:
+
+```bash
+# Print token to stdout
+./scripts/get_api_token.sh <STACK_NAME>
+
+# Copy to clipboard (macOS)
+./scripts/get_api_token.sh <STACK_NAME> | pbcopy
+```
+
+The token is a Cognito client credentials grant with `idp-api/jobs.read` and `idp-api/jobs.write` scopes.
+
+**Step 3: Invoke the API**
+
+Using curl:
+
+```bash
+curl -s ${API_GATEWAY_ENDPOINT}/jobs \
+  -H "Authorization: Bearer $(./scripts/get_api_token.sh <STACK_NAME>)"
+```
+
+The `API_GATEWAY_ENDPOINT` is the `ApiGatewayEndpoint` value from your CloudFormation stack outputs, in the format `https://{restapi-id}.execute-api.{region}.amazonaws.com/{stage}`.
 
 ## Services Removed in GovCloud
 
@@ -199,40 +251,137 @@ Without the web UI, you can interact with the system through:
 aws s3 cp my-document.pdf s3://InputBucket/my-document.pdf
 ````
 
+Monitor progress using the lookup script:
+```bash
+./scripts/lookup_file_status.sh documents/my-document.pdf MyStack
+```
+
+Or navigate to the AWS Step Functions workflow using the link in the stack Outputs tab in CloudFormation, to visually monitor workflow progress.
+
 ### 2. Batch Jobs REST API (requires VPC parameters)
 
-Submit multiple documents as a ZIP file and retrieve results programmatically:
+Requires a bearer token for authentication. See [Local API Access via Bastion Tunnel](#local-api-access-via-bastion-tunnel) for setup, or generate a token directly:
 
 ```bash
+# Generate a bearer token
+TOKEN=$(./scripts/get_api_token.sh <STACK_NAME>)
+
+# API_GATEWAY_ENDPOINT is the ApiGatewayEndpoint value from CloudFormation stack outputs
+# Format: https://{api-id}.execute-api.{region}.amazonaws.com/{stage}
+
 # Create a job and get presigned upload URL
-curl -X POST https://{api-gateway-url}/jobs \
+curl -X POST ${API_GATEWAY_ENDPOINT}/jobs \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"fileName": "documents.zip"}'
 
-# Response includes uploadUrl and requiredHeaders for presigned POST
-# Upload ZIP using multipart/form-data with all requiredHeaders as form fields
+# Upload ZIP using the presigned URL and requiredHeaders from the response
+curl -X POST "<uploadUrl from response>" \
+  -F "Content-Type=<Content-Type from requiredHeaders>" \
+  -F "key=<key from requiredHeaders>" \
+  -F "x-amz-algorithm=<x-amz-algorithm from requiredHeaders>" \
+  -F "x-amz-credential=<x-amz-credential from requiredHeaders>" \
+  -F "x-amz-date=<x-amz-date from requiredHeaders>" \
+  -F "x-amz-security-token=<x-amz-security-token from requiredHeaders>" \
+  -F "policy=<policy from requiredHeaders>" \
+  -F "x-amz-signature=<x-amz-signature from requiredHeaders>" \
+  -F "file=@documents.zip"
 
 # Check job status
-curl https://{api-gateway-url}/jobs/{job_id}
-
-# When status is SUCCEEDED or PARTIALLY_SUCCEEDED, response includes downloadUrl for results.zip
+curl ${API_GATEWAY_ENDPOINT}/jobs/{job_id} \
+  -H "Authorization: Bearer $TOKEN"
 ```
+
+**POST /jobs response:**
+
+```json
+{
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "upload": {
+    "uploadUrl": "https://input-bucket.s3.amazonaws.com",
+    "expiresInSeconds": 3600,
+    "requiredHeaders": {
+      "key": "jobs/a1b2c3d4-e5f6-7890-abcd-ef1234567890/archive.zip",
+      "Content-Type": "application/zip",
+      "x-amz-credential": "...",
+      "x-amz-date": "...",
+      "x-amz-security-token": "...",
+      "x-amz-algorithm": "...",
+      "policy": "...",
+      "x-amz-signature": "..."
+    }
+  }
+}
+```
+
+**GET /jobs/{job_id} response (in progress):**
+
+```json
+{
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "IN_PROGRESS",
+  "timestamps": {
+    "createdAt": "2026-01-23T10:00:00Z",
+    "updatedAt": "2026-01-23T10:05:00Z"
+  },
+  "files": {
+    "document_a.pdf": "COMPLETED",
+    "document_b.pdf": "IN_PROGRESS"
+  }
+}
+```
+
+**GET /jobs/{job_id} response (succeeded):**
+
+```json
+{
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "SUCCEEDED",
+  "timestamps": {
+    "createdAt": "2026-01-23T10:00:00Z",
+    "updatedAt": "2026-01-23T10:10:00Z"
+  },
+  "files": {
+    "document_a.pdf": "COMPLETED",
+    "document_b.pdf": "COMPLETED"
+  },
+  "result": {
+    "downloadUrl": "https://output-bucket.s3.amazonaws.com/jobs/.../results.zip?...",
+    "expiresInSeconds": 3600
+  }
+}
+```
+
+**GET /jobs/{job_id} response (partially succeeded):**
+
+```json
+{
+  "jobId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "status": "PARTIALLY_SUCCEEDED",
+  "timestamps": {
+    "createdAt": "2026-01-23T10:00:00Z",
+    "updatedAt": "2026-01-23T10:10:00Z"
+  },
+  "files": {
+    "document_a.pdf": "COMPLETED",
+    "document_b.pdf": "FAILED"
+  },
+  "result": {
+    "downloadUrl": "https://output-bucket.s3.amazonaws.com/jobs/.../results.zip?...",
+    "expiresInSeconds": 3600
+  }
+}
+```
+
+> **Note:** The `{stage}` defaults to `prod` unless overridden via the `ApiStageName` parameter.
 
 **Job Status Values:**
 - `PENDING_UPLOAD` - Job created, awaiting ZIP upload
 - `IN_PROGRESS` - Files being processed
 - `SUCCEEDED` - All files completed
-- `PARTIALLY_SUCCEEDED` - Some files completed, some failed
+- `PARTIALLY_SUCCEEDED` - Some files completed, some failed/aborted. The results.zip file for these jobs will not include output data from the documents that did not complete processing
+- `ABORTED` - All files aborted
 - `FAILED` - All files failed
-
-### 3. Check Progress
-Using the lookup script
-```bash
-# Use the lookup script to check document status
-./scripts/lookup_file_status.sh documents/my-document.pdf MyStack
-````
-
-Or navigate to the AWS Step Functions workflow using the link in the stack Outputs tab in CloudFormation, to visually monitor workflow progress.
 
 ## Monitoring & Troubleshooting
 
