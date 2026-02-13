@@ -3297,6 +3297,7 @@ def config_validate(
 )
 @click.option(
     "--config-version",
+    required=True,
     help="Configuration version to update (e.g., v1, v2). If version doesn't exist, it will be created.",
 )
 @click.option(
