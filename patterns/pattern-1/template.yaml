@@ -148,6 +148,21 @@ Parameters:
     AllowedPattern: "^(|arn:aws[a-z-]*:iam::[0-9]{12}:policy/.+)$"
     ConstraintDescription: Must be empty or a valid IAM policy ARN
 
+  VpcId:
+    Type: String
+    Default: ""
+    Description: "Optional - VPC ID for VPC-secured deployment"
+
+  LambdaSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: "Optional - Security Group ID for VPC-enabled Lambda functions"
+
+  PrivateSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: "Optional - Comma-separated list of private subnet IDs"
+
   EnableECRImageScanning:
     Type: String
     Default: 'true'
@@ -159,6 +174,7 @@ Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasAppSyncApi: !Not [!Equals [!Ref AppSyncApiArn, ""]]
   IsECRImageScanningEnabled: !Equals [!Ref EnableECRImageScanning, "true"]
+  DeployInVPC: !Not [!Equals [!Ref VpcId, ""]]
 
 Resources:
 
@@ -945,6 +961,16 @@ Resources:
                 Action:
                   - kms:Decrypt
                   - kms:CreateGrant
+              # Required for VPC-enabled CodeBuild projects
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                Resource: "*"
 
   DockerBuildProject:
     Type: AWS::CodeBuild::Project
@@ -955,6 +981,14 @@ Resources:
         Pattern-1 Docker image builder for GenAIIDP stack - ${AWS::StackName}
       ServiceRole: !GetAtt DockerBuildRole.Arn
       EncryptionKey: !Ref CustomerManagedEncryptionKeyArn
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - VpcId: !Ref VpcId
+            Subnets: !Ref PrivateSubnetIds
+            SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+          - !Ref AWS::NoValue
       Artifacts:
         Type: NO_ARTIFACTS
       Source:
@@ -1051,11 +1085,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       PermissionsBoundary:
@@ -1067,6 +1101,13 @@ Resources:
       Role: !GetAtt CodeBuildExecutionRole.Arn
       Runtime: python3.12
       Timeout: 60
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       MemorySize: 128
       Handler: index.handler
       CodeUri: ../../src/lambda/start_codebuild
@@ -1168,12 +1209,12 @@ Resources:
           - id: W11
             reason: "Cloudwatch does not support resource-level permissions"
           - id: W89
-            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
@@ -1182,6 +1223,13 @@ Resources:
       Architectures:
         - arm64
       Timeout: 900
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       MemorySize: 4096
       Tracing: Active
       Environment:
@@ -1237,12 +1285,12 @@ Resources:
           - id: W11
             reason: "Cloudwatch does not support resource-level permissions"
           - id: W89
-            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"    
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
@@ -1251,6 +1299,13 @@ Resources:
       Architectures:
         - arm64
       Timeout: 900
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       MemorySize: 4096
       Tracing: Active
       Environment:
@@ -1333,12 +1388,12 @@ Resources:
           - id: W11
             reason: "Cloudwatch does not support resource-level permissions"
           - id: W89
-            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"    
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
@@ -1347,6 +1402,13 @@ Resources:
       Architectures:
         - arm64
       Timeout: 900
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       MemorySize: 4096
       Tracing: Active
       Environment:
@@ -1429,11 +1491,11 @@ Resources:
           - id: W11
             reason: "Cloudwatch, Bedrock, and other AWS services do not support resource-level permissions for all actions"
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for this function as it is invoked synchronously by Step Functions"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values"
     Properties:
@@ -1443,6 +1505,13 @@ Resources:
       Architectures:
         - arm64
       Timeout: 900
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       MemorySize: 1024
       Environment:
         Variables:
@@ -1552,11 +1621,11 @@ Resources:
           - id: W11
             reason: "Cloudwatch does not support resource-level permissions"
           - id: W89
-            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
@@ -1566,6 +1635,13 @@ Resources:
         - arm64
       Timeout: 900
       MemorySize: 4096
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Tracing: Active
       Environment:
         Variables:
