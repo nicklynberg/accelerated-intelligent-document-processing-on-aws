@@ -373,6 +373,19 @@ Resources:
                   - lambda:RemovePermission
                 Resource:
                   - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
+        - !If
+          - DeployInVPC
+          - PolicyName: VpcNetworking
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                  Resource: "*"
+          - !Ref AWS::NoValue
 
   CodeBuildTrigger:
     Type: AWS::Serverless::Function
