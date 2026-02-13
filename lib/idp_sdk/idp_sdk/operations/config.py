@@ -111,6 +111,7 @@ class ConfigOperation:
         output: Optional[str] = None,
         format: str = "full",
         pattern: Optional[str] = None,
+        config_version: Optional[str] = None,
         **kwargs,
     ) -> ConfigDownloadResult:
         """Download configuration from a deployed IDP stack.
@@ -120,6 +121,7 @@ class ConfigOperation:
             output: Optional output file path
             format: Format type ('full' or 'minimal')
             pattern: Pattern override
+            config_version: Configuration version to download (default: active version)
             **kwargs: Additional parameters
 
         Returns:
@@ -148,7 +150,10 @@ class ConfigOperation:
         from idp_common.config import ConfigurationReader
 
         reader = ConfigurationReader(table_name=config_table)
-        config_data = reader.get_merged_configuration(as_model=False)
+        # config_data = reader.get_merged_configuration(as_model=False)
+        config_data = reader.get_merged_configuration(
+            version=config_version, as_model=False
+        )
 
         if format == "minimal":
             from idp_common.config.merge_utils import (
@@ -194,6 +199,8 @@ class ConfigOperation:
         stack_name: Optional[str] = None,
         validate: bool = True,
         pattern: Optional[str] = None,
+        config_version: Optional[str] = None,
+        description: Optional[str] = None,
         **kwargs,
     ) -> ConfigUploadResult:
         """Upload a configuration file to a deployed IDP stack.
@@ -203,6 +210,8 @@ class ConfigOperation:
             stack_name: Optional stack name override
             validate: Validate before uploading
             pattern: Pattern for validation
+            config_version: Configuration version to upload to (default: active version)
+            description: Description for the configuration version
             **kwargs: Additional parameters
 
         Returns:
@@ -260,7 +269,10 @@ class ConfigOperation:
 
             manager = ConfigurationManager()
             config_json = json.dumps(user_config)
-            success = manager.handle_update_custom_configuration(config_json)
+            # success = manager.handle_update_custom_configuration(config_json)
+            success = manager.handle_update_custom_configuration(
+                config_json, version=config_version, description=description
+            )
 
             return ConfigUploadResult(
                 success=success, error=None if success else "Upload failed"

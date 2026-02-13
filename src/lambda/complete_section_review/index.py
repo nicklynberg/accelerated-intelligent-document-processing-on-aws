@@ -9,13 +9,15 @@ import os
 from datetime import datetime, timezone
 
 import boto3
+from idp_common.docs_service import create_document_service
+from idp_common.models import Status
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 dynamodb = boto3.resource("dynamodb")
 s3_client = boto3.client("s3")
-sfn_client = boto3.client("stepfunctions")
+sqs_client = boto3.client("sqs")
 
 TRACKING_TABLE_NAME = os.environ.get("TRACKING_TABLE_NAME", "")
 OUTPUT_BUCKET = os.environ.get("OUTPUT_BUCKET", "")
@@ -71,40 +73,37 @@ def complete_section_review(
         f"Completing review for section {section_id} of document {object_key} by user {username}"
     )
 
-    table = dynamodb.Table(TRACKING_TABLE_NAME)
-
-    # Get current document - use lowercase 'doc#' prefix
-    response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
-
-    if "Item" not in response:
+    # Load document using document service
+    document_service = create_document_service(mode='dynamodb')
+    document = document_service.get_document(object_key)
+    
+    if not document:
         raise ValueError(f"Document {object_key} not found")
-
-    doc = response["Item"]
-    sections = doc.get("Sections", [])
 
     # Find the section and get its output URI
     section_output_uri = None
-    for section in sections:
-        if section.get("Id") == section_id:
-            section_output_uri = section.get("OutputJSONUri")
+    for section in document.sections:
+        if section.section_id == section_id:
+            section_output_uri = section.extraction_result_uri
             break
 
     # Save edited data to S3 if provided
     if edited_data and section_output_uri:
         save_edited_data_to_s3(section_output_uri, edited_data)
 
-    # Get current pending and completed sections
-    pending = set(doc.get("HITLSectionsPending", []) or [])
-    completed = set(doc.get("HITLSectionsCompleted", []) or [])
+    # Get current pending and completed sections from document model
+    pending = set(document.hitl_sections_pending or [])
+    completed = set(document.hitl_sections_completed or [])
+    
+    # Get skipped from DynamoDB (not in document model)
+    table = dynamodb.Table(TRACKING_TABLE_NAME)
+    response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
+    doc = response.get("Item", {})
     skipped = set(doc.get("HITLSectionsSkipped", []) or [])
 
     # If HITLSectionsPending was never initialized, initialize it from all sections
-    # (excluding the current section being completed and any already completed/skipped)
     if not pending and not completed and not skipped:
-        # Initialize pending with all section IDs except the one being completed
-        all_section_ids = {
-            section.get("Id") for section in sections if section.get("Id")
-        }
+        all_section_ids = {section.section_id for section in document.sections if section.section_id}
         pending = all_section_ids - {section_id}
         logger.info(f"Initialized HITLSectionsPending from sections: {pending}")
 
@@ -117,93 +116,55 @@ def complete_section_review(
     all_completed = len(pending) == 0
     has_skipped = len(skipped) > 0
 
-    # Create review record for this section
+    # Determine new Review Status
+    if all_completed:
+        new_hitl_status = "Skipped" if has_skipped else "Completed"
+    else:
+        new_hitl_status = "InProgress"
+
+    # Update document model with Review Status
+    document.hitl_status = new_hitl_status
+    document.hitl_sections_pending = list(pending)
+    document.hitl_sections_completed = list(completed)
+    
+    # Update via document service
+    document_service.update_document(document)
+    logger.info(
+        f"Updated HITLStatus to '{new_hitl_status}' for document {object_key}. "
+        f"Pending: {list(pending)}, Completed: {list(completed)}, All done: {all_completed}"
+    )
+
+    # Update review-specific fields in DynamoDB (not in document model)
     review_record = {
         "sectionId": section_id,
         "reviewedBy": username or "unknown",
         "reviewedByEmail": user_email or "",
         "reviewedAt": datetime.now(timezone.utc).isoformat(),
     }
-
-    # Get existing review history or initialize empty list
     review_history = doc.get("HITLReviewHistory", []) or []
     review_history.append(review_record)
 
-    # Build update expression
-    update_expr = "SET HITLSectionsPending = :pending, HITLSectionsCompleted = :completed, HITLReviewHistory = :history, #status = :status"
-    expr_values = {
-        ":pending": list(pending),
-        ":completed": list(completed),
-        ":history": review_history,
-    }
-    expr_names = {"#status": "HITLStatus"}
-
+    update_expr = "SET HITLReviewHistory = :history"
+    expr_values = {":history": review_history}
+    
     if all_completed:
-        update_expr += ", HITLCompleted = :hitlCompleted, ObjectStatus = :objStatus"
+        update_expr += ", HITLCompleted = :hitlCompleted"
         expr_values[":hitlCompleted"] = True
-        # If any sections were skipped, set status to "Skipped", otherwise "Completed"
-        expr_values[":status"] = "Skipped" if has_skipped else "Completed"
-        expr_values[":objStatus"] = "SUMMARIZING"
-    else:
-        expr_values[":status"] = "InProgress"
 
-    logger.info(
-        f"Updating HITLStatus to '{expr_values[':status']}' for document {object_key}. "
-        f"Pending: {list(pending)}, Completed: {list(completed)}, All done: {all_completed}"
+    table.update_item(
+        Key={"PK": f"doc#{object_key}", "SK": "none"},
+        UpdateExpression=update_expr,
+        ExpressionAttributeValues=expr_values,
     )
 
-    update_kwargs = {
-        "Key": {"PK": f"doc#{object_key}", "SK": "none"},
-        "UpdateExpression": update_expr,
-        "ExpressionAttributeValues": expr_values,
-    }
-    if expr_names:
-        update_kwargs["ExpressionAttributeNames"] = expr_names
+    logger.info(f"Section {section_id} marked complete. Remaining: {len(pending)}. All done: {all_completed}")
 
-    table.update_item(**update_kwargs)
-
-    logger.info(
-        f"Section {section_id} marked complete. Remaining: {len(pending)}. All done: {all_completed}"
-    )
-
-    # If all sections are completed, trigger workflow continuation
+    # If all sections are completed, trigger reprocessing for summarization/evaluation
     if all_completed:
-        trigger_workflow_continuation(doc, object_key)
+        trigger_reprocessing(object_key)
 
-    # Return full document data for subscription to work
-    # Get the updated document from DynamoDB
-    updated_response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
-    updated_doc = updated_response.get("Item", {})
-
-    # Use HITLStatus from updated document, fallback to calculated value
-    if all_completed:
-        hitl_status = updated_doc.get("HITLStatus", "Skipped" if has_skipped else "Completed")
-    else:
-        hitl_status = updated_doc.get("HITLStatus", "InProgress")
-
-    return {
-        "ObjectKey": object_key,
-        "ObjectStatus": updated_doc.get("ObjectStatus", ""),
-        "InitialEventTime": updated_doc.get("InitialEventTime", ""),
-        "QueuedTime": updated_doc.get("QueuedTime", ""),
-        "WorkflowStartTime": updated_doc.get("WorkflowStartTime", ""),
-        "CompletionTime": updated_doc.get("CompletionTime", ""),
-        "WorkflowExecutionArn": updated_doc.get("WorkflowExecutionArn", ""),
-        "WorkflowStatus": updated_doc.get("WorkflowStatus", ""),
-        "PageCount": updated_doc.get("PageCount", 0),
-        "Sections": updated_doc.get("Sections", []),
-        "Pages": updated_doc.get("Pages", []),
-        "Metering": updated_doc.get("Metering", ""),
-        "EvaluationReportUri": updated_doc.get("EvaluationReportUri", ""),
-        "EvaluationStatus": updated_doc.get("EvaluationStatus", ""),
-        "SummaryReportUri": updated_doc.get("SummaryReportUri", ""),
-        "HITLStatus": hitl_status,
-        "HITLReviewURL": updated_doc.get("HITLReviewURL", ""),
-        "HITLSectionsPending": list(pending),
-        "HITLSectionsCompleted": list(completed),
-        "HITLSectionsSkipped": updated_doc.get("HITLSectionsSkipped", []),
-        "TraceId": updated_doc.get("TraceId", ""),
-    }
+    # Return document data
+    return build_document_response(object_key)
 
 
 def save_edited_data_to_s3(s3_uri, edited_data):
@@ -243,61 +204,80 @@ def save_edited_data_to_s3(s3_uri, edited_data):
         raise
 
 
-def trigger_workflow_continuation(doc, object_key):
-    """Trigger continuation of the Step Functions workflow after HITL completion."""
-    task_token = doc.get("HITLTaskToken")
-
-    if not task_token:
-        logger.warning(
-            f"No task token found for document {object_key}, cannot continue workflow"
-        )
-        return
-
+def trigger_reprocessing(object_key):
+    """Trigger reprocessing via SQS queue after HITL completion.
+    
+    Uses the same pattern as processChanges - sends document to queue,
+    workflow runs with intelligent skip logic (OCR/Classification/Extraction/Assessment
+    are skipped since data exists), only Summarization and Evaluation re-run.
+    """
     try:
-        logger.info(
-            f"Sending task success to continue workflow for document {object_key}"
-        )
-        sfn_client.send_task_success(
-            taskToken=task_token,
-            output=json.dumps(
-                {
-                    "HITLCompleted": True,
-                    "HITLStatus": "Completed",
-                    "ObjectKey": object_key,
-                }
-            ),
-        )
-        logger.info(f"Successfully triggered workflow continuation for {object_key}")
+        # Load document from DynamoDB
+        dynamodb_service = create_document_service(mode='dynamodb')
+        document = dynamodb_service.get_document(object_key)
+        
+        if not document:
+            logger.error(f"Document {object_key} not found for reprocessing")
+            return
+        
+        # Set bucket names from environment
+        document.input_bucket = os.environ.get('INPUT_BUCKET')
+        document.output_bucket = os.environ.get('OUTPUT_BUCKET')
+        
+        # Reset status for reprocessing
+        document.status = Status.QUEUED
+        document.start_time = None
+        document.completion_time = None
+        document.workflow_execution_arn = None
+        
+        # Compress and send to queue (same pattern as processChanges)
+        working_bucket = os.environ.get('WORKING_BUCKET')
+        if working_bucket:
+            sqs_message = document.serialize_document(working_bucket, "hitl_complete", logger)
+        else:
+            sqs_message = document.to_dict()
+        
+        queue_url = os.environ.get('QUEUE_URL')
+        if queue_url:
+            sqs_client.send_message(
+                QueueUrl=queue_url,
+                MessageBody=json.dumps(sqs_message, default=str)
+            )
+            logger.info(f"Queued document {object_key} for reprocessing after HITL completion")
+        else:
+            logger.warning("QUEUE_URL not configured, skipping reprocessing trigger")
+            
     except Exception as e:
-        logger.error(f"Failed to continue workflow for document {object_key}: {str(e)}")
+        logger.error(f"Failed to trigger reprocessing for {object_key}: {str(e)}")
 
 
 def skip_all_sections_review(object_key, username="", user_email=""):
     """Skip all pending section reviews and mark document as complete (Admin only)."""
     logger.info(f"Skipping all sections review for document {object_key} by admin {username}")
 
-    table = dynamodb.Table(TRACKING_TABLE_NAME)
+    # Load document using document service to verify it exists
+    document_service = create_document_service(mode='dynamodb')
+    document = document_service.get_document(object_key)
 
-    # Get current document
-    response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
-
-    if "Item" not in response:
+    if not document:
         raise ValueError(f"Document {object_key} not found")
 
-    doc = response["Item"]
-    completed = set(doc.get("HITLSectionsCompleted", []) or [])
+    completed = set(document.hitl_sections_completed or [])
+
+    # Get skipped from DynamoDB (not in document model)
+    table = dynamodb.Table(TRACKING_TABLE_NAME)
+    response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
+    doc = response.get("Item", {})
     existing_skipped = set(doc.get("HITLSectionsSkipped", []) or [])
-    
+
     # Get all section IDs from the document
-    sections = doc.get("Sections", [])
-    all_section_ids = {section.get("Id") for section in sections if section.get("Id")}
-    
+    all_section_ids = {section.section_id for section in document.sections if section.section_id}
+
     # Sections to skip = all sections that are not already completed
     sections_to_skip = all_section_ids - completed - existing_skipped
-    # Combine with any existing skipped sections
     all_skipped = list(sections_to_skip | existing_skipped)
 
-    # Create review record for skip action
+    # Update review-specific fields directly in DynamoDB
     review_record = {
         "sectionId": "ALL_SKIPPED",
         "reviewedBy": username or "unknown",
@@ -306,88 +286,60 @@ def skip_all_sections_review(object_key, username="", user_email=""):
         "action": "skip_all",
         "skippedSections": list(sections_to_skip),
     }
-
     review_history = doc.get("HITLReviewHistory", []) or []
     review_history.append(review_record)
 
-    # Update document - mark pending sections as skipped, keep completed as is
     table.update_item(
         Key={"PK": f"doc#{object_key}", "SK": "none"},
-        UpdateExpression="SET HITLSectionsPending = :pending, HITLSectionsCompleted = :completed, "
-        "HITLSectionsSkipped = :skipped, HITLReviewHistory = :history, #status = :status, "
-        "HITLCompleted = :hitlCompleted, ObjectStatus = :objStatus",
+        UpdateExpression="SET HITLStatus = :status, HITLSectionsPending = :pending, HITLSectionsSkipped = :skipped, HITLReviewHistory = :history, HITLCompleted = :hitlCompleted, HITLReviewedBy = :reviewedBy, HITLReviewedByEmail = :reviewedByEmail",
         ExpressionAttributeValues={
+            ":status": "Review Skipped",
             ":pending": [],
-            ":completed": list(completed),
             ":skipped": all_skipped,
             ":history": review_history,
-            ":status": "Skipped",
             ":hitlCompleted": True,
-            ":objStatus": "SUMMARIZING",
+            ":reviewedBy": username or "unknown",
+            ":reviewedByEmail": user_email or "",
         },
-        ExpressionAttributeNames={"#status": "HITLStatus"},
     )
 
     logger.info(f"All sections skipped for document {object_key}. Skipped: {all_skipped}, Completed: {list(completed)}")
 
-    # Trigger workflow continuation
-    trigger_workflow_continuation(doc, object_key)
-
-    # Return updated document
-    updated_response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
-    updated_doc = updated_response.get("Item", {})
-
-    return {
-        "ObjectKey": object_key,
-        "ObjectStatus": updated_doc.get("ObjectStatus", ""),
-        "InitialEventTime": updated_doc.get("InitialEventTime", ""),
-        "QueuedTime": updated_doc.get("QueuedTime", ""),
-        "WorkflowStartTime": updated_doc.get("WorkflowStartTime", ""),
-        "CompletionTime": updated_doc.get("CompletionTime", ""),
-        "WorkflowExecutionArn": updated_doc.get("WorkflowExecutionArn", ""),
-        "WorkflowStatus": updated_doc.get("WorkflowStatus", ""),
-        "PageCount": updated_doc.get("PageCount", 0),
-        "Sections": updated_doc.get("Sections", []),
-        "Pages": updated_doc.get("Pages", []),
-        "Metering": updated_doc.get("Metering", ""),
-        "EvaluationReportUri": updated_doc.get("EvaluationReportUri", ""),
-        "EvaluationStatus": updated_doc.get("EvaluationStatus", ""),
-        "SummaryReportUri": updated_doc.get("SummaryReportUri", ""),
-        "HITLStatus": "Skipped",
-        "HITLReviewURL": updated_doc.get("HITLReviewURL", ""),
-        "HITLSectionsPending": [],
-        "HITLSectionsCompleted": list(completed),
-        "HITLSectionsSkipped": all_skipped,
-        "HITLReviewOwner": updated_doc.get("HITLReviewOwner", ""),
-        "HITLReviewOwnerEmail": updated_doc.get("HITLReviewOwnerEmail", ""),
-        "HITLReviewHistory": updated_doc.get("HITLReviewHistory", []),
-        "TraceId": updated_doc.get("TraceId", ""),
-    }
+    return build_document_response(object_key)
 
 
 def claim_review(object_key, username="", user_email=""):
     """Claim a document for review (assigns reviewer as owner)."""
     logger.info(f"Claiming review for document {object_key} by {username}")
 
-    table = dynamodb.Table(TRACKING_TABLE_NAME)
-    response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
-
-    if "Item" not in response:
+    # Load document using document service to verify it exists
+    document_service = create_document_service(mode='dynamodb')
+    document = document_service.get_document(object_key)
+    
+    if not document:
         raise ValueError(f"Document {object_key} not found")
 
-    doc = response["Item"]
+    table = dynamodb.Table(TRACKING_TABLE_NAME)
+    response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
+    doc = response.get("Item", {})
     current_owner = doc.get("HITLReviewOwner", "")
 
     if current_owner and current_owner != username:
         raise ValueError(f"Document is already claimed by {current_owner}")
 
+    # Update Review Status and review owner directly in DynamoDB
+    # This avoids re-serializing metering data which could cause issues
     table.update_item(
         Key={"PK": f"doc#{object_key}", "SK": "none"},
-        UpdateExpression="SET HITLReviewOwner = :owner, HITLReviewOwnerEmail = :email",
-        ExpressionAttributeValues={":owner": username, ":email": user_email},
+        UpdateExpression="SET HITLStatus = :status, HITLReviewOwner = :owner, HITLReviewOwnerEmail = :email",
+        ExpressionAttributeValues={
+            ":status": "InProgress",
+            ":owner": username,
+            ":email": user_email,
+        },
     )
 
-    logger.info(f"Review claimed for document {object_key} by {username}")
+    logger.info(f"Review claimed for document {object_key} by {username}, HITLStatus set to InProgress")
     return build_document_response(object_key)
 
 
@@ -395,25 +347,45 @@ def release_review(object_key, username="", user_email="", is_admin=False):
     """Release a document review (removes owner assignment)."""
     logger.info(f"Releasing review for document {object_key} by {username}")
 
-    table = dynamodb.Table(TRACKING_TABLE_NAME)
-    response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
-
-    if "Item" not in response:
+    # Load document using document service to verify it exists
+    document_service = create_document_service(mode='dynamodb')
+    document = document_service.get_document(object_key)
+    
+    if not document:
         raise ValueError(f"Document {object_key} not found")
 
-    doc = response["Item"]
+    table = dynamodb.Table(TRACKING_TABLE_NAME)
+    response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
+    doc = response.get("Item", {})
     current_owner = doc.get("HITLReviewOwner", "")
 
     if not is_admin and current_owner and current_owner != username:
         raise ValueError("Only the review owner or an admin can release this review")
 
+    # Update Review Status and remove review owner directly in DynamoDB
+    # This avoids re-serializing metering data which could cause issues
     table.update_item(
         Key={"PK": f"doc#{object_key}", "SK": "none"},
-        UpdateExpression="REMOVE HITLReviewOwner, HITLReviewOwnerEmail",
+        UpdateExpression="SET HITLStatus = :status REMOVE HITLReviewOwner, HITLReviewOwnerEmail",
+        ExpressionAttributeValues={":status": "Review Pending"},
     )
 
-    logger.info(f"Review released for document {object_key}")
+    logger.info(f"Review released for document {object_key}, HITLStatus set to Review Pending")
     return build_document_response(object_key)
+
+
+def _convert_decimals(obj):
+    """Recursively convert Decimal values to int/float for JSON serialization."""
+    from decimal import Decimal
+    if isinstance(obj, Decimal):
+        return int(obj) if obj % 1 == 0 else float(obj)
+    elif isinstance(obj, dict):
+        return {k: _convert_decimals(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_convert_decimals(i) for i in obj]
+    elif isinstance(obj, set):
+        return [_convert_decimals(i) for i in obj]
+    return obj
 
 
 def build_document_response(object_key):
@@ -422,7 +394,10 @@ def build_document_response(object_key):
     response = table.get_item(Key={"PK": f"doc#{object_key}", "SK": "none"})
     doc = response.get("Item", {})
 
-    return {
+    # Convert all Decimal values for JSON serialization
+    doc = _convert_decimals(doc)
+
+    result = {
         "ObjectKey": object_key,
         "ObjectStatus": doc.get("ObjectStatus", ""),
         "InitialEventTime": doc.get("InitialEventTime", ""),
@@ -439,12 +414,18 @@ def build_document_response(object_key):
         "EvaluationStatus": doc.get("EvaluationStatus", ""),
         "SummaryReportUri": doc.get("SummaryReportUri", ""),
         "HITLStatus": doc.get("HITLStatus", ""),
+        "HITLTriggered": doc.get("HITLTriggered", False),
+        "HITLCompleted": doc.get("HITLCompleted", False),
         "HITLReviewURL": doc.get("HITLReviewURL", ""),
         "HITLSectionsPending": doc.get("HITLSectionsPending", []),
         "HITLSectionsCompleted": doc.get("HITLSectionsCompleted", []),
         "HITLSectionsSkipped": doc.get("HITLSectionsSkipped", []),
         "HITLReviewOwner": doc.get("HITLReviewOwner", ""),
         "HITLReviewOwnerEmail": doc.get("HITLReviewOwnerEmail", ""),
+        "HITLReviewedBy": doc.get("HITLReviewedBy", ""),
+        "HITLReviewedByEmail": doc.get("HITLReviewedByEmail", ""),
         "HITLReviewHistory": doc.get("HITLReviewHistory", []),
         "TraceId": doc.get("TraceId", ""),
     }
+    # Final safety conversion to ensure no Decimals slip through
+    return _convert_decimals(result)

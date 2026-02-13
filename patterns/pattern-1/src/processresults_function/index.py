@@ -32,10 +32,10 @@ ssm_client = boto3.client("ssm")
 bedrock_client = boto3.client("bedrock-data-automation")
 
 
-def is_hitl_enabled():
+def is_hitl_enabled(config_version=None):
     """Check if HITL is enabled from configuration."""
     try:
-        config = get_config(as_model=True)
+        config = get_config(as_model=True, version=config_version)
         hitl_enabled = config.assessment.hitl_enabled
         logger.info(f"HITL enabled check: {hitl_enabled}")
         return hitl_enabled
@@ -149,7 +149,9 @@ def create_pdf_page_images(bda_result_bucket, output_bucket, object_key):
             img_bytes = pix.tobytes("jpeg")
 
             # Upload the image to S3 using the common library
-            image_key = f"{object_key}/pages/{page_num}/image.jpg"
+            # Use 1-based page numbering for consistency with pattern-2 and ground truth
+            page_id_1based = page_num + 1
+            image_key = f"{object_key}/pages/{page_id_1based}/image.jpg"
             s3_client.upload_fileobj(
                 io.BytesIO(img_bytes),
                 output_bucket,
@@ -206,8 +208,9 @@ def process_bda_sections(
             if not section_path:
                 continue
 
-            # Extract section ID from path
-            section_id = section_path.rstrip("/").split("/")[-1]
+            # Extract section ID from path (BDA uses 0-based, convert to 1-based)
+            raw_section_id = section_path.rstrip("/").split("/")[-1]
+            section_id = str(int(raw_section_id) + 1)  # Convert to 1-based
             target_section_path = f"{sections_output_prefix}{section_id}/"
 
             # List all files in the section folder
@@ -231,6 +234,9 @@ def process_bda_sections(
                         result_data = json.loads(
                             result_obj["Body"].read().decode("utf-8")
                         )
+
+                        # Note: page_indices remain 0-based in result.json (consistent with BDA and pattern-2)
+                        # Only page_ids and S3 paths use 1-based numbering
 
                         # Add confidence thresholds to explainability_info if present
                         if "explainability_info" in result_data:
@@ -290,7 +296,8 @@ def process_bda_sections(
                 page_indices = result_data.get("split_document", {}).get(
                     "page_indices", []
                 )
-                page_ids = [str(idx) for idx in (page_indices or [])]
+                # page_indices are 0-based, convert to 1-based page_ids
+                page_ids = [str(idx + 1) for idx in (page_indices or [])]
 
                 # Create the OutputJSONUri using the utility function
                 extraction_result_uri = build_s3_uri(output_bucket, result_path)
@@ -408,10 +415,10 @@ def extract_page_from_multipage_json(raw_json, page_index, confidence_threshold=
     # Create a copy of the JSON with just metadata
     single_page_json = {"metadata": raw_json.get("metadata", {})}
 
-    # Update metadata to reflect single page
+    # Update metadata to reflect single page (keep 0-based indexing for consistency)
     if "metadata" in single_page_json:
-        single_page_json["metadata"]["start_page_index"] = page_index
-        single_page_json["metadata"]["end_page_index"] = page_index
+        single_page_json["metadata"]["start_page_index"] = page_index  # 0-based
+        single_page_json["metadata"]["end_page_index"] = page_index    # 0-based
         single_page_json["metadata"]["number_of_pages"] = 1
 
     # Include document level info
@@ -535,7 +542,8 @@ def process_bda_pages(
                             logger.warning(f"Page in {obj_key} has no page_index")
                             continue
 
-                        page_id = str(page_index)
+                        # Convert from 0-based (BDA) to 1-based (consistency with pattern-2)
+                        page_id = str(page_index + 1)
 
                         # Extract a single page result.json for this page with confidence threshold
                         single_page_json = extract_page_from_multipage_json(
@@ -663,11 +671,11 @@ def process_keyvalue_details(
     last_page = str(page_indices[-1]) if page_indices else "0"
 
     def get_page(raw_page: int) -> str:
-        """Convert 1-based page to 0-based index and validate."""
+        """Get page number (geometry.page is already 1-based, and we now use 1-based page_indices)."""
         if raw_page is None:
             return last_page
-        adjusted = raw_page - 1
-        return str(adjusted) if adjusted in page_indices else last_page
+        # No adjustment needed - geometry.page is already 1-based and page_indices are now 1-based
+        return str(raw_page) if raw_page in page_indices else last_page
 
     def process_entry(key_path: list, entry: dict, page: int):
         target_page = get_page(page)
@@ -764,6 +772,7 @@ def process_segments(
     confidence_threshold: float,
     execution_id: str,
     document,
+    config_version: str = None,
 ):
     """
     Process each segment, extract key-value details, and invoke human review if needed.
@@ -806,8 +815,10 @@ def process_segments(
             page_indices = custom_output.get("split_document", {}).get(
                 "page_indices", []
             )
+            # Convert page_indices from 0-based (BDA) to 1-based for consistency
+            page_indices_1based = [idx + 1 for idx in page_indices]
             pagespecific_details = process_keyvalue_details(
-                explainability_data, page_indices, confidence_threshold
+                explainability_data, page_indices_1based, confidence_threshold
             )
 
             # Create confidence threshold alerts for UI display
@@ -816,8 +827,8 @@ def process_segments(
             )
 
             # Update the corresponding document section with confidence alerts
-            # Find the section that contains these page indices
-            page_ids_str = [str(idx) for idx in page_indices]
+            # Find the section that contains these page indices (now 1-based)
+            page_ids_str = [str(idx) for idx in page_indices_1based]
             for section in document.sections:
                 # Check if this section's pages match the current segment's pages
                 if set(section.page_ids) == set(page_ids_str):
@@ -831,7 +842,7 @@ def process_segments(
 
             # Check if any key-value or blueprint confidence is below threshold
             # Use confidence_threshold_alerts to determine if HITL should be triggered
-            if is_hitl_enabled():
+            if is_hitl_enabled(config_version):
                 low_confidence = (
                     len(confidence_threshold_alerts) > 0
                     or float(bp_confidence) < confidence_threshold
@@ -872,7 +883,7 @@ def process_segments(
                 # HITL review will be handled via portal, not A2I
                 item.update({"hitl_corrected_result": custom_decimal_output})
         else:
-            if is_hitl_enabled():
+            if is_hitl_enabled(config_version):
                 std_hitl = "true"
                 # std_hitl = None # HITL for standard output blueprint match is disabled until we have option to choose Blueprint in A2I
             else:
@@ -883,6 +894,7 @@ def process_segments(
             metadata = std_output.get("metadata", {})
             start_page = metadata.get("start_page_index", 0)
             end_page = metadata.get("end_page_index", 0)
+            # page_array stays 0-based (for internal use), page_ids are 1-based for display/S3 paths
             page_array = list(range(start_page, end_page + 1))
             item.update(
                 {
@@ -937,70 +949,7 @@ def process_segments(
     return document, overall_hitl_triggered
 
 
-def handle_hitl_wait(event):
-    """
-    Handle HITL wait action by storing the task token for later workflow continuation.
-
-    Args:
-        event: Event containing task token and document information
-
-    Returns:
-        Dict confirming HITL wait setup
-    """
-    task_token = event.get("taskToken")
-    document = event.get("document", {})
-    # Support document_id, input_key, and object_key for compatibility with compressed/uncompressed formats
-    object_key = (
-        document.get("document_id")
-        or document.get("input_key")
-        or document.get("object_key")
-    )
-
-    if not task_token or not object_key:
-        raise ValueError(
-            f"taskToken and document key are required for HITL wait. Got taskToken={bool(task_token)}, document keys={list(document.keys())}"
-        )
-
-    logger.info(f"Setting up HITL wait for document {object_key}")
-
-    try:
-        # Store the task token directly in DynamoDB
-        tracking_table = os.environ.get("TRACKING_TABLE_NAME") or os.environ.get(
-            "TRACKING_TABLE"
-        )
-        if not tracking_table:
-            raise ValueError(
-                "TRACKING_TABLE_NAME or TRACKING_TABLE environment variable not set"
-            )
-
-        dynamodb = boto3.resource("dynamodb")
-        table = dynamodb.Table(tracking_table)
-        table.update_item(
-            Key={"PK": f"doc#{object_key}", "SK": "none"},
-            UpdateExpression="SET HITLTaskToken = :token, HITLStatus = :status",
-            ExpressionAttributeValues={
-                ":token": task_token,
-                ":status": "WaitingForReview",
-            },
-        )
-
-        logger.info(
-            f"Task token stored for document {object_key}, workflow will wait for HITL completion"
-        )
-
-        # Return immediately - the workflow will wait for send_task_success
-        return {
-            "HITLWaitSetup": True,
-            "ObjectKey": object_key,
-            "Message": "Workflow waiting for HITL completion",
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to store task token for document {object_key}: {str(e)}")
-        raise
-
-
-def handle_skip_bda(event, config):
+def handle_skip_bda(event):
     """
     Handle the skip_bda scenario where document already has pages/sections data.
     This is used for reprocessing documents to re-run summarization and evaluation
@@ -1008,7 +957,6 @@ def handle_skip_bda(event, config):
 
     Args:
         event: Event containing document data
-        config: Configuration object
 
     Returns:
         Dict containing the processed document ready for summarization/evaluation
@@ -1019,12 +967,23 @@ def handle_skip_bda(event, config):
     working_bucket = os.environ.get("WORKING_BUCKET")
     document = Document.load_document(event.get("document"), working_bucket, logger)
     
+    # Load configuration - use document's version if specified, otherwise use active version
+    config_version = getattr(document, 'config_version', None)
+    config = get_config(as_model=True, version=config_version)
+    
     # Update document status to POSTPROCESSING
     document.status = Status.POSTPROCESSING
     document.workflow_execution_arn = event.get("execution_arn")
     
     # Update document in AppSync
     document_service = create_document_service()
+    
+    # Fetch current HITL status from DynamoDB (may have been updated by reviewer)
+    current_doc = document_service.get_document(document.input_key)
+    if current_doc:
+        document.hitl_status = current_doc.hitl_status
+        logger.info(f"Current HITL status from DynamoDB: {document.hitl_status}")
+    
     logger.info(f"Updating document status to {document.status} for skip_bda scenario")
     document_service.update_document(document)
     
@@ -1034,7 +993,7 @@ def handle_skip_bda(event, config):
     
     # Check if HITL should be triggered based on existing confidence alerts
     hitl_triggered = False
-    if is_hitl_enabled():
+    if is_hitl_enabled(config_version):
         # Check each section for confidence alerts below threshold
         for section in document.sections:
             alerts = section.confidence_threshold_alerts or []
@@ -1044,16 +1003,6 @@ def handle_skip_bda(event, config):
                 break
     
     logger.info(f"Skip BDA - hitl_triggered: {hitl_triggered}")
-    
-    # Update document status based on HITL requirement
-    if hitl_triggered:
-        document.status = Status.HITL_IN_PROGRESS
-        logger.info(f"Document requires human review, setting status to {document.status}")
-        document_service.update_document(document)
-    else:
-        # Don't update to COMPLETED here - let the workflow continue to Summarization/Evaluation
-        # The final status will be set after those steps complete
-        logger.info(f"Document will proceed to summarization/evaluation (skip_bda)")
     
     # Add metering information for skip scenario
     document.metering = document.metering or {}
@@ -1080,27 +1029,20 @@ def handler(event, context):
     """
     Process the BDA results and build a Document object with pages and sections.
     Can handle both single BDA response and arrays of BDA responses from blueprint changes.
-    Also handles HITL wait action to store task token for workflow continuation.
     Also handles skip_bda scenario for reprocessing with existing document data.
 
     Args:
-        event: Event containing BDA response information (single or array) or HITL wait action or skip_bda flag
+        event: Event containing BDA response information (single or array) or skip_bda flag
         context: Lambda context
 
     Returns:
-        Dict containing the processed document or HITL wait confirmation
+        Dict containing the processed document
     """
     logger.info(f"Processing event: {json.dumps(event)}")
-
-    # Check if this is a HITL wait action
-    if event.get("action") == "wait_for_hitl":
-        return handle_hitl_wait(event)
-
-    config = get_config(as_model=True)
     
     # Check if this is a skip_bda scenario (reprocessing with existing data)
     if event.get("skip_bda"):
-        return handle_skip_bda(event, config)
+        return handle_skip_bda(event)
 
     # Check if we have a single BDA response or an array of responses
     bda_responses = []
@@ -1116,6 +1058,24 @@ def handler(event, context):
 
     # Extract required information from the first response
     first_response = bda_responses[0]
+    
+    # Handle skipped BDA case (HITL reprocessing)
+    if first_response.get("metadata", {}).get("skipped"):
+        logger.info("BDA was skipped - document already has extraction data (HITL reprocessing)")
+        working_bucket = first_response["metadata"]["working_bucket"]
+        document = Document.load_document(first_response.get("document", {}), working_bucket, logger)
+        
+        # Check if HITL review is needed
+        config_version = getattr(document, 'config_version', None)
+        hitl_triggered = is_hitl_enabled(config_version) and any(
+            section.confidence_threshold_alerts for section in document.sections
+        )
+        
+        return {
+            "document": document.serialize_document(working_bucket, "processresults_skip", logger),
+            "hitl_triggered": hitl_triggered
+        }
+    
     output_bucket = first_response.get("output_bucket")
 
     # Handle different response formats
@@ -1149,6 +1109,14 @@ def handler(event, context):
         workflow_execution_arn=first_response.get("execution_arn"),
     )
 
+    # Get existing document record to extract config version
+    document_service = create_document_service()
+    existing_document = document_service.get_document(object_key)
+    input_config_version = getattr(existing_document, 'config_version', None) if existing_document else None
+
+    # Load configuration using the input document's version
+    config = get_config(as_model=True, version=input_config_version)
+
     # Get confidence threshold from configuration
     # Used for both creating confidence alerts and triggering HITL
     confidence_threshold = config.assessment.default_confidence_threshold
@@ -1156,6 +1124,13 @@ def handler(event, context):
 
     # Update document status
     document_service = create_document_service()
+    
+    # Fetch current HITL status from DynamoDB (may have been updated by reviewer during reprocess)
+    current_doc = document_service.get_document(document.input_key)
+    if current_doc and current_doc.hitl_status:
+        document.hitl_status = current_doc.hitl_status
+        logger.info(f"Current HITL status from DynamoDB: {document.hitl_status}")
+    
     logger.info(f"Updating document status to {document.status}")
     document_service.update_document(document)
 
@@ -1276,6 +1251,7 @@ def handler(event, context):
                             confidence_threshold,
                             execution_id,
                             document,
+                            config_version,
                         )
                         logger.info(f"process_segments returned hitl_result: {hitl_result}")
                         if hitl_result or hitl_triggered:
@@ -1290,6 +1266,7 @@ def handler(event, context):
                             confidence_threshold,
                             execution_id,
                             document,
+                            config_version,
                         )
                         logger.info(f"process_segments returned hitl_result: {hitl_result}")
                         if hitl_result or hitl_triggered:
@@ -1319,48 +1296,21 @@ def handler(event, context):
         "BDAProject/bda/documents-standard": {"pages": standard_pages_count},
     }
 
-    # Update document status based on HITL requirement
-    if hitl_triggered:
-        # Set status to HITL_IN_PROGRESS when HITL is triggered
-        document.status = Status.HITL_IN_PROGRESS
-        logger.info(
-            f"Document requires human review, setting status to {document.status}"
-        )
-    else:
-        # Only mark as COMPLETED if no human review is needed
-        document.status = Status.COMPLETED
-        document.completion_time = datetime.datetime.now(
-            datetime.timezone.utc
-        ).isoformat()
-        logger.info(
-            f"Document processing complete, setting status to {document.status}"
-        )
-
-    document_service.update_document(document)
-
-    # Update HITLSectionsPending in DynamoDB if HITL is triggered
+    # Set Review Status on document model if HITL review is needed
+    # Only set to PendingReview if not already reviewed (preserve completed/skipped status on reprocess)
     if hitl_triggered and document.sections:
-        try:
-            tracking_table = os.environ.get("TRACKING_TABLE_NAME")
-            if tracking_table:
-                hitl_sections_pending = [
-                    section.section_id for section in document.sections
-                ]
-                dynamodb = boto3.resource("dynamodb")
-                table = dynamodb.Table(tracking_table)
-                table.update_item(
-                    Key={"PK": f"doc#{document.input_key}", "SK": "none"},
-                    UpdateExpression="SET HITLSectionsPending = :pending, HITLSectionsCompleted = :completed",
-                    ExpressionAttributeValues={
-                        ":pending": hitl_sections_pending,
-                        ":completed": [],
-                    },
-                )
-                logger.info(
-                    f"Updated HITLSectionsPending for document {document.input_key}: {hitl_sections_pending}"
-                )
-        except Exception as e:
-            logger.error(f"Failed to update HITLSectionsPending: {str(e)}")
+        existing_status = document.hitl_status
+        if existing_status not in ("Review Completed", "Review Skipped", "Completed", "Skipped"):
+            hitl_sections_pending = [section.section_id for section in document.sections]
+            document.hitl_status = "PendingReview"
+            document.hitl_sections_pending = hitl_sections_pending
+            document.hitl_sections_completed = []
+            logger.info(f"Document requires human review. Sections pending: {hitl_sections_pending}")
+        else:
+            logger.info(f"Document already reviewed (status: {existing_status}), preserving HITL status on reprocess")
+
+    # Update document (includes Review Status)
+    document_service.update_document(document)
 
     # Prepare response using new serialization method
     # Use working bucket for document compression

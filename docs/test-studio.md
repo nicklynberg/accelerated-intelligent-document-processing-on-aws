@@ -17,7 +17,7 @@ The accelerator automatically deploys **three benchmark datasets** from HuggingF
 
 1. **RealKIE-FCC-Verified**: 75 FCC invoice documents
 2. **OmniAI-OCR-Benchmark**: 293 diverse document images across 9 formats
-3. **RVL-CDIP-N-MP-Packets**: 500 multi-page packets with 13 document types
+3. **DocSplit-Poly-Seq**: 500 multi-page packets with 13 document types
 
 All datasets are deployed automatically with zero manual steps required.
 
@@ -133,7 +133,7 @@ All test sets are immediately available after stack deployment:
 2. Select the test set from the **Select Test Set** dropdown:
    - "RealKIE-FCC-Verified" for invoice extraction testing
    - "OmniAI-OCR-Benchmark" for multi-format document testing
-   - "RVL-CDIP-N-MP-Packets" for document splitting and classification testing
+   - "DocSplit-Poly-Seq" for document splitting and classification testing
 3. Enter a description in the **Context** field
 4. Click **Run Test** to start processing
 5. Monitor progress and view results when complete
@@ -148,11 +148,12 @@ All test sets are immediately available after stack deployment:
 - Evaluating extraction on complex nested schemas
 - Benchmarking multi-format document processing pipelines
 
-**RVL-CDIP-N-MP-Packets** is ideal for:
+**DocSplit-Poly-Seq** is ideal for:
 - Evaluating document splitting and classification accuracy
 - Testing multi-document packet processing capabilities
 - Benchmarking page-level classification across diverse document types
 - Assessing document boundary detection in complex packets
+
 **OmniAI-OCR-Benchmark** is ideal for:
 - Testing classification across diverse document types
 - Evaluating extraction on complex nested schemas
@@ -160,11 +161,18 @@ All test sets are immediately available after stack deployment:
 
 ---
 
-### RVL-CDIP-N-MP-Packets
+### DocSplit-Poly-Seq
 
-**Source**: https://huggingface.co/datasets/jordyvl/rvl_cdip_n_mp
+**DocSplit Dataset**: https://huggingface.co/datasets/amazon/doc_split  
+**Documents Source**: https://huggingface.co/datasets/jordyvl/rvl_cdip_n_mp
 
-This dataset contains 500 multi-page packet PDFs created by combining pages from 13 different document types. Each packet contains multiple subdocuments of different types to test classification and document splitting capabilities.
+The DocSplit dataset contains 500 multi-page packet PDFs created by combining pages from 13 different document types. Documents are sourced from the RVL-CDIP-N-MP dataset. Each packet contains multiple subdocuments of different types to test classification and document splitting capabilities.
+
+#### Benchmark Methodology
+
+**DocSplit-Poly-Seq (Multi Category Documents Concatenation Sequentially):** Creates document packets by first determining a target page count (5-20 pages), then sequentially selecting documents from different categories without repetition. For each selected document, all of its pages are included while preserving the original page ordering, and this process continues until the target page count is reached.
+
+This benchmark simulates the most common real-world scenario where heterogeneous documents are assembled into packets, as observed in medical claims processing where prescription records, laboratory results, and insurance forms are concatenated. The varying document types test models' ability to detect inter-document boundaries based on content and structural transitions, a fundamental requirement for accurate packet splitting.
 
 #### Document Types
 
@@ -177,11 +185,13 @@ The dataset includes 13 document types spanning common business and administrati
 
 | Metric | Value |
 |--------|-------|
-| Total Packets | 500 |
+| Total Document Packets | 500 |
 | Total Pages | 7,330 |
 | Total Sections | 2,027 |
 | Avg Pages/Packet | 14.7 |
+| Avg Pages/Sections | 3.62 |
 | Avg Sections/Packet | 4.1 |
+| Avg Unique Document Type/Packet | 3.67 |
 
 #### Deployment Details
 
@@ -189,9 +199,9 @@ During stack deployment, the system automatically:
 
 1. **Downloads Dataset** from HuggingFace (data.tar.gz containing source PDFs)
 2. **Creates Packet PDFs** by merging pages from source documents based on bundled manifest
-3. **Uploads Packets** to `s3://TestSetBucket/rvl-cdip-n-mp/input/`
+3. **Uploads Packets** to `s3://TestSetBucket/docsplit/input/`
 4. **Generates Ground Truth** with document class and page split information
-5. **Uploads Baselines** to `s3://TestSetBucket/rvl-cdip-n-mp/baseline/`
+5. **Uploads Baselines** to `s3://TestSetBucket/docsplit/baseline/`
 6. **Registers Test Set** in DynamoDB with metadata and document type distribution
 
 #### Key Features
@@ -213,7 +223,7 @@ This test set enables evaluation of:
 - **Document Splitting**: Accuracy of identifying document boundaries within packets
 - **Split Order**: Accuracy of maintaining correct page order within each split section
 
-**RVL-CDIP-N-MP-Packets** is ideal for:
+**DocSplit-Poly-Seq** is ideal for:
 - Evaluating document splitting and classification accuracy
 - Testing multi-document packet processing capabilities
 - Benchmarking page-level classification across diverse document types
@@ -229,7 +239,7 @@ Both datasets share these deployment characteristics:
 - Evaluating extraction on complex nested schemas
 - Benchmarking multi-format document processing pipelines
 
-**RVL-CDIP-N-MP-Packets** is ideal for:
+**DocSplit-Poly-Seq** is ideal for:
 - Evaluating document splitting and classification accuracy
 - Testing multi-document packet processing capabilities
 - Benchmarking page-level classification across diverse document types
@@ -355,11 +365,19 @@ my-test-set/
 
 ### Running Tests
 1. Select test set from dropdown
-2. **Optional**: Enter number of files to limit processing (useful for quick testing)
-3. **Optional**: Add context description for the test run
-4. Click "Run Test" (single test execution only)
-5. Monitor progress via TestRunnerStatus
-6. View results in integrated listing
+2. **Optional**: Select configuration version to use for processing
+3. **Optional**: Enter number of files to limit processing (useful for quick testing)
+4. **Optional**: Add context description for the test run
+5. Click "Run Test" (single test execution only)
+6. Monitor progress via TestRunnerStatus
+7. View results in integrated listing
+
+### Configuration Versioning
+The Test Studio supports running tests with specific configuration versions:
+- **Version Selection**: Choose from available configuration versions (v0, v1, v2, etc.)
+- **Version Tracking**: Test results display which configuration version was used
+- **Version Comparison**: Compare test runs across different configuration versions
+- **Context Generation**: Test context automatically includes the selected version information
 
 ### Test States
 - **QUEUED**: File copying jobs queued in SQS
@@ -392,6 +410,7 @@ my-test-set/
 
 ### Results Analysis
 - Comprehensive metrics display including:
+  - **Test run metadata**: Configuration version, duration, context, file counts
   - **Overall accuracy and confidence metrics**
   - **Accuracy breakdown** (precision, recall, F1-score, false alarm rate, false discovery rate)
   - **Average Document Split Classification Metrics**:
@@ -401,6 +420,6 @@ my-test-set/
     - Total Pages, Total Splits (sums across documents)
     - Correctly Classified Pages, Correctly Split counts (sums across documents)
   - **Cost breakdown** by service and context
-- Side-by-side test comparison with all metrics
+- Side-by-side test comparison with all metrics including configuration versions
 - Export capabilities (JSON/CSV downloads include all metrics)
 - Integrated delete operations

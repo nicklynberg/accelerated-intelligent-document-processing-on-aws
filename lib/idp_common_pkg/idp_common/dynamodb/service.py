@@ -249,7 +249,7 @@ class DocumentDynamoDBService:
         if document.metering:
             set_expressions.append("#Metering = :Metering")
             expression_names["#Metering"] = "Metering"
-            expression_values[":Metering"] = json.dumps(document.metering)
+            expression_values[":Metering"] = json.dumps(document.metering, default=str)
 
         # Add evaluation status & report if available
         if document.evaluation_status:
@@ -273,6 +273,22 @@ class DocumentDynamoDBService:
             set_expressions.append("#TraceId = :TraceId")
             expression_names["#TraceId"] = "TraceId"
             expression_values[":TraceId"] = document.trace_id
+
+        # Add Review Status fields if available
+        if document.hitl_status:
+            set_expressions.append("#HITLStatus = :HITLStatus")
+            expression_names["#HITLStatus"] = "HITLStatus"
+            expression_values[":HITLStatus"] = document.hitl_status
+        if document.hitl_sections_pending:
+            set_expressions.append("#HITLSectionsPending = :HITLSectionsPending")
+            expression_names["#HITLSectionsPending"] = "HITLSectionsPending"
+            expression_values[":HITLSectionsPending"] = document.hitl_sections_pending
+        if document.hitl_sections_completed:
+            set_expressions.append("#HITLSectionsCompleted = :HITLSectionsCompleted")
+            expression_names["#HITLSectionsCompleted"] = "HITLSectionsCompleted"
+            expression_values[":HITLSectionsCompleted"] = (
+                document.hitl_sections_completed
+            )
 
         update_expression = "SET " + ", ".join(set_expressions)
         # Convert any float values to Decimal for DynamoDB compatibility
@@ -381,6 +397,11 @@ class DocumentDynamoDBService:
                         confidence_threshold_alerts=confidence_threshold_alerts,
                     )
                 )
+
+        # Convert Review Status fields
+        doc.hitl_status = item.get("HITLStatus")
+        doc.hitl_sections_pending = item.get("HITLSectionsPending", [])
+        doc.hitl_sections_completed = item.get("HITLSectionsCompleted", [])
 
         return doc
 

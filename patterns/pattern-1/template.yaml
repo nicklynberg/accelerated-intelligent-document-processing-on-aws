@@ -456,7 +456,7 @@ Resources:
                     order: 4
                   max_tokens:
                     type: number
-                    description: Max tokens
+                    description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     order: 5
                   system_prompt:
                     type: string
@@ -552,7 +552,7 @@ Resources:
                 order: 4
               max_tokens:
                 type: number
-                description: Max tokens
+                description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 5
               system_prompt:
                 type: string
@@ -636,7 +636,7 @@ Resources:
                     order: 2
                   max_tokens:
                     type: number
-                    description: Maximum number of tokens to generate
+                    description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     minimum: 1000
                     maximum: 20000
                     default: 10000
@@ -719,7 +719,7 @@ Resources:
                     order: 2
                   max_tokens:
                     type: number
-                    description: Maximum number of tokens to generate
+                    description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     minimum: 1000
                     maximum: 20000
                     default: 10000

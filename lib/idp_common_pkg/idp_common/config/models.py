@@ -111,7 +111,11 @@ class ExtractionConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(default=10000, gt=0)
+    max_tokens: int = Field(
+        default=10000,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
     image: ImageConfig = Field(default_factory=ImageConfig)
     agentic: AgenticConfig = Field(default_factory=AgenticConfig)
     custom_prompt_lambda_arn: Optional[str] = Field(
@@ -159,7 +163,11 @@ class ClassificationConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
     maxPagesForClassification: str = Field(
         default="ALL",
         description="Max pages to use for classification. 'ALL' = all pages, or a number to limit to N pages",
@@ -288,7 +296,11 @@ class AssessmentConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(default=10000, gt=0)
+    max_tokens: int = Field(
+        default=10000,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
     default_confidence_threshold: float = Field(
         default=0.8,
         ge=0.0,
@@ -339,7 +351,11 @@ class SummarizationConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
     top_k: float = Field(default=5.0, ge=0.0)
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -755,7 +771,11 @@ class FactExtractionConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
     top_k: float = Field(default=20.0, ge=0.0)
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -784,7 +804,11 @@ class RuleValidationOrchestratorConfig(BaseModel):
     temperature: float = Field(default=0.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.01, ge=0.0, le=1.0)
     top_k: float = Field(default=20.0, ge=0.0)
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
 
     @field_validator("temperature", "top_p", "top_k", mode="before")
     @classmethod
@@ -850,7 +874,11 @@ class EvaluationLLMMethodConfig(BaseModel):
     """Evaluation LLM method configuration"""
 
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
-    max_tokens: int = Field(default=4096, gt=0)
+    max_tokens: int = Field(
+        default=4096,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
     top_k: float = Field(default=5.0, ge=0.0)
     task_prompt: str = Field(
         default="""
@@ -925,7 +953,11 @@ class DiscoveryModelConfig(BaseModel):
     system_prompt: str = Field(default="", description="System prompt for discovery")
     temperature: float = Field(default=1.0, ge=0.0, le=1.0)
     top_p: float = Field(default=0.1, ge=0.0, le=1.0)
-    max_tokens: int = Field(default=10000, gt=0)
+    max_tokens: int = Field(
+        default=10000,
+        gt=0,
+        description="Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details.",
+    )
     user_prompt: str = Field(
         default="", description="User prompt template for discovery"
     )
@@ -1015,8 +1047,8 @@ class IDPConfig(BaseModel):
             temperature = config.extraction.temperature
     """
 
-    config_type: Literal["Default", "Custom"] = Field(
-        default="Default", description="Discriminator for config type"
+    config_type: Literal["Config"] = Field(
+        default="Config", description="Configuration type"
     )
 
     notes: Optional[str] = Field(default=None, description="Configuration notes")
@@ -1143,7 +1175,6 @@ class ConfigMetadata(BaseModel):
 
     created_at: Optional[str] = Field(default=None, description="Creation timestamp")
     updated_at: Optional[str] = Field(default=None, description="Update timestamp")
-    version: Optional[str] = Field(default=None, description="Configuration version")
 
 
 class ConfigurationRecord(BaseModel):
@@ -1157,7 +1188,7 @@ class ConfigurationRecord(BaseModel):
         # Create from IDPConfig
         config = IDPConfig(...)
         record = ConfigurationRecord(
-            configuration_type="Default",
+            configuration_type="config",
             config=config
         )
 
@@ -1169,9 +1200,18 @@ class ConfigurationRecord(BaseModel):
         idp_config = record.config
     """
 
-    configuration_type: str = Field(
-        description="Configuration type (Schema, Default, Custom, Pricing)"
-    )
+    configuration_type: str = Field(description="Configuration type (Config, Schema, Pricing)")
+    version: Optional[str] = Field(default=None, description="Version Name")
+    is_active: Optional[bool] = Field(default=None, description="Whether this version is active")
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def validate_version(cls, v: Any) -> Optional[str]:
+        """Ensure version field accepts None or string values"""
+        if v is None:
+            return None
+        return str(v) if v else None
+    description: Optional[str] = Field(default=None, description="Version description")
     config: Annotated[
         Union[SchemaConfig, IDPConfig, PricingConfig], Discriminator("config_type")
     ] = Field(
@@ -1196,6 +1236,7 @@ class ConfigurationRecord(BaseModel):
             - Configuration: str (partition key)
             - All config fields stringified (except booleans)
         """
+
         # Get config as dict using Pydantic's model_dump
         config_dict = self.config.model_dump(mode="python")
 
@@ -1205,8 +1246,24 @@ class ConfigurationRecord(BaseModel):
         # Stringify values (preserve booleans, convert numbers to strings)
         stringified = self._stringify_values(config_dict)
 
+        configuration_type = f"{self.configuration_type}#{self.version}" if self.version else self.configuration_type
+
         # Build DynamoDB item
-        item = {"Configuration": self.configuration_type, **stringified}
+        item = {"Configuration": configuration_type, **stringified}
+
+        # Add ConfigurationRecord level fields
+        if self.is_active is not None:
+            item["IsActive"] = self.is_active
+        if self.description is not None:
+            item["Description"] = self.description
+        
+        # Add metadata fields as separate DynamoDB columns
+        if self.metadata:
+            metadata_dict = self.metadata.model_dump(mode="python", exclude_none=True)
+            if "created_at" in metadata_dict:
+                item["CreatedAt"] = metadata_dict["created_at"]
+            if "updated_at" in metadata_dict:
+                item["UpdatedAt"] = metadata_dict["updated_at"]
 
         return item
 
@@ -1217,9 +1274,8 @@ class ConfigurationRecord(BaseModel):
 
         This method:
         1. Extracts the Configuration key
-        2. Removes DynamoDB metadata
-        3. Auto-migrates legacy format if needed
-        4. Validates into IDPConfig (Pydantic handles type conversions)
+        2. Auto-migrates legacy format if needed
+        3. Validates into IDPConfig (Pydantic handles type conversions)
 
         Args:
             item: Raw DynamoDB item dict
@@ -1234,18 +1290,28 @@ class ConfigurationRecord(BaseModel):
 
         logger = logging.getLogger(__name__)
 
-        # Extract configuration type
-        config_type = item.get("Configuration")
-        if not config_type:
+        # Extract configuration key
+        config_key = item.get("Configuration")
+        if not config_key:
             raise ValueError("DynamoDB item missing 'Configuration' key")
+        
+        # Parse configuration type and version from single key
+        if "#" in config_key:
+            # Versioned format: Config#v0, Config#v1, etc.
+            config_type, version = config_key.split("#", 1)
+        else:
+            # Non-versioned format: Schema, Pricing, Default, Custom
+            config_type = config_key
+            version = ""
 
-        # Remove DynamoDB metadata keys
-        config_data = {k: v for k, v in item.items() if k != "Configuration"}
+        # Remove DynamoDB keys and metadata
+        config_data = {k: v for k, v in item.items() 
+                      if k not in ("Configuration", "IsActive", "CreatedAt", "UpdatedAt", "Description")}
 
         # Set config_type discriminator directly from DynamoDB Configuration key
         # DynamoDB keys match Pydantic discriminators exactly:
         # - "Schema" -> SchemaConfig
-        # - "Default", "Custom" -> IDPConfig
+        # - "Config#version" -> IDPConfig
         # - "DefaultPricing", "CustomPricing" -> PricingConfig
         config_data["config_type"] = config_type
 
@@ -1275,10 +1341,7 @@ class ConfigurationRecord(BaseModel):
 
         # Remove legacy pricing field (now stored separately as DefaultPricing/CustomPricing)
         # This handles migration for existing stacks with old embedded pricing
-        if config_data.get("pricing") is not None and config_type in (
-            "Default",
-            "Custom",
-        ):
+        if config_data.get("pricing") is not None and config_type in ("Config", "Default", "Custom"):
             logger.info(
                 f"Removing legacy pricing field from {config_type} configuration"
             )
@@ -1289,7 +1352,17 @@ class ConfigurationRecord(BaseModel):
             {"configuration_type": config_type, "config": config_data}
         ).config
 
-        return cls(configuration_type=config_type, config=config)
+        return cls(
+            configuration_type=config_type,
+            version=version,
+            is_active=item.get("IsActive"),
+            description=item.get("Description"),
+            config=config,
+            metadata=ConfigMetadata(
+                created_at=item.get("CreatedAt"),
+                updated_at=item.get("UpdatedAt")
+            )
+        )
 
     @staticmethod
     def _stringify_values(obj: Any) -> Any:

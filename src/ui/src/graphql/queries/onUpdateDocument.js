@@ -38,13 +38,17 @@ export default gql`
       SummaryReportUri
       ExpiresAfter
       HITLStatus
+      HITLTriggered
       HITLReviewURL
       HITLSectionsPending
       HITLSectionsCompleted
       HITLSectionsSkipped
       HITLReviewOwner
       HITLReviewOwnerEmail
+      HITLReviewedBy
+      HITLReviewedByEmail
       HITLReviewHistory
+      ConfigVersion
       TraceId
     }
   }

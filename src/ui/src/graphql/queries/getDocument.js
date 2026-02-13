@@ -39,13 +39,17 @@ export default gql`
       RuleValidationResultUri
       ExpiresAfter
       HITLStatus
+      HITLTriggered
       HITLReviewURL
       HITLSectionsPending
       HITLSectionsCompleted
       HITLSectionsSkipped
       HITLReviewOwner
       HITLReviewOwnerEmail
+      HITLReviewedBy
+      HITLReviewedByEmail
       HITLReviewHistory
+      ConfigVersion
     }
   }
 `;

@@ -3,7 +3,7 @@ SPDX-License-Identifier: MIT-0
 
 # RVL-CDIP Configuration
 
-This configuration is designed for the RVL-CDIP-N-MP-Packets test set and handles 13 diverse business and administrative document types.
+This configuration is designed for the DocSplit-Poly-Seq test set and handles 13 diverse business and administrative document types.
 
 ## Pattern Association
 
@@ -11,9 +11,9 @@ This configuration is designed for the RVL-CDIP-N-MP-Packets test set and handle
 
 ## Test Set Compatibility
 
-**Compatible Test Set**: RVL-CDIP-N-MP-Packets
+**Compatible Test Set**: DocSplit-Poly-Seq
 
-This configuration should be used with the RVL-CDIP-N-MP-Packets test set, which contains 500 multi-page packets with 13 document types. The test set is automatically deployed during stack deployment and is available in the Test Studio UI. See [docs/test-studio.md](../../../docs/test-studio.md) for details.
+This configuration should be used with the DocSplit-Poly-Seq test set, which contains 500 multi-page packets with 13 document types. The test set is automatically deployed during stack deployment and is available in the Test Studio UI. See [docs/test-studio.md](../../../docs/test-studio.md) for details.
 
 ## Validation Level
 
@@ -89,7 +89,7 @@ The summarization component creates concise summaries of documents with citation
 
 ## Test Set
 
-This configuration is designed to work with the **RVL-CDIP-N-MP-Packets** test set:
+This configuration is designed to work with the **DocSplit-Poly-Seq** test set:
 
 - **500 multi-page packets** containing 2-10 distinct documents each
 - **7,330 total pages** across all packets
@@ -98,6 +98,13 @@ This configuration is designed to work with the **RVL-CDIP-N-MP-Packets** test s
 - **Complete ground truth** for evaluation of page-level classification and document splitting accuracy
 
 The test set is automatically available in the Test Studio UI after stack deployment. See the [Test Studio documentation](../../../docs/test-studio.md) for usage instructions.
+
+### Dataset Information
+
+- **DocSplit Dataset**: https://huggingface.co/datasets/amazon/doc_split
+- **Documents Source**: https://huggingface.co/datasets/jordyvl/rvl_cdip_n_mp
+
+The DocSplit dataset uses documents sourced from the RVL-CDIP-N-MP dataset, which are combined into multi-page packets for document splitting and classification evaluation.
 
 ## How to Use
 

@@ -31,6 +31,8 @@ Mappings:
   Pattern1ConfigurationMap:
     lending-package-sample:
       ConfigPath: "lending-package-sample"
+    docsplit:
+      ConfigPath: "docsplit"
     realkie-fcc-verified:
       ConfigPath: "realkie-fcc-verified"
     ocr-benchmark:
@@ -49,6 +51,8 @@ Mappings:
       ConfigPath: "rvl-cdip-with-few-shot-examples"
     bank-statement-sample:
       ConfigPath: "bank-statement-sample"
+    docsplit:
+      ConfigPath: "docsplit"
     realkie-fcc-verified:
       ConfigPath: "realkie-fcc-verified"
     ocr-benchmark:
@@ -124,6 +128,7 @@ Parameters:
     Default: "lending-package-sample"
     AllowedValues:
       - "lending-package-sample"
+      - "docsplit"
       - "realkie-fcc-verified"
       - "ocr-benchmark"
       - "rvl-cdip"
@@ -141,6 +146,7 @@ Parameters:
       - "rvl-cdip"
       - "rvl-cdip-with-few-shot-examples"
       - "bank-statement-sample"
+      - "docsplit"
       - "realkie-fcc-verified"
       - "ocr-benchmark"
       - "rule-validation"
@@ -1453,6 +1459,7 @@ Resources:
         DiscoveryQueueName: !GetAtt DiscoveryQueue.QueueName
         TestFileCopyQueueName: !GetAtt TestFileCopyQueue.QueueName
         TestSetFileCopyQueueName: !GetAtt TestSetFileCopyQueue.QueueName
+        TestResultCacheUpdateQueueName: !GetAtt TestResultCacheUpdateQueue.QueueName
         
         # Other resources
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
@@ -1781,6 +1788,7 @@ Resources:
               - "x-amz-date"
               - "Authorization"
               - "x-amz-security-token"
+              - "x-amz-meta-config-version"
             AllowedMethods:
               - PUT
               - POST
@@ -2162,7 +2170,7 @@ Resources:
           !Ref AWS::NoValue,
         ]
       FunctionName: !Sub "${AWS::StackName}-RvlCdipNmpDeployer"
-      CodeUri: src/lambda/rvl_cdip_nmp_deployer/
+      CodeUri: src/lambda/docsplit_testset_deployer/
       Handler: index.handler
       Runtime: python3.12
       Timeout: 900
@@ -2201,7 +2209,7 @@ Resources:
       DatasetVersion: "0.1"
       DatasetName: "RVL-CDIP-NMP-Packets"
       DatasetDescription: "Test set with 500 multi-page document packets combining 13 document types (budget, email, form, handwritten, invoice, language, letter, memo, news article, questionnaire, resume, scientific publication, specification) for classification and document splitting evaluation."
-      SourceCodeHash: <RVL_CDIP_NMP_DEPLOYER_HASH_TOKEN>
+      SourceCodeHash: <docsplit_testset_deployer_HASH_TOKEN>
 
   ConfigurationBucket:
     Type: AWS::S3::Bucket
@@ -3451,9 +3459,14 @@ Resources:
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           DATA_RETENTION_IN_DAYS: !Ref DataRetentionInDays
           OUTPUT_BUCKET: !Ref OutputBucket
+          CONFIG_TABLE: !Ref ConfigurationTable
       Policies:
         - SQSSendMessagePolicy:
             QueueName: !GetAtt DocumentQueue.QueueName
+        - DynamoDBReadPolicy:
+            TableName: !Ref ConfigurationTable
+        - S3ReadPolicy:
+            BucketName: !Ref InputBucket
         - Statement:
             - Effect: Allow
               Action:
@@ -6674,10 +6687,16 @@ Resources:
       Description: Lambda function to mark HITL section review as complete
       MemorySize: 512
       Timeout: 60
+      Layers:
+        - !Ref IDPCommonBaseLayer
       Environment:
         Variables:
           TRACKING_TABLE_NAME: !Ref TrackingTable
+          TRACKING_TABLE: !Ref TrackingTable
           OUTPUT_BUCKET: !Ref OutputBucket
+          INPUT_BUCKET: !Ref InputBucket
+          WORKING_BUCKET: !Ref WorkingBucket
+          QUEUE_URL: !Ref DocumentQueue
       LoggingConfig:
         LogGroup: !Ref CompleteSectionReviewFunctionLogGroup
       Policies:
@@ -6685,17 +6704,16 @@ Resources:
             TableName: !Ref TrackingTable
         - S3CrudPolicy:
             BucketName: !Ref OutputBucket
+        - S3CrudPolicy:
+            BucketName: !Ref WorkingBucket
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt DocumentQueue.QueueName
         - Statement:
             - Effect: Allow
               Action:
                 - kms:Decrypt
                 - kms:GenerateDataKey
               Resource: !GetAtt CustomerManagedEncryptionKey.Arn
-            - Effect: Allow
-              Action:
-                - states:SendTaskSuccess
-                - states:SendTaskFailure
-              Resource: "*"
 
   HITLAppSyncServiceRole:
     Type: AWS::IAM::Role

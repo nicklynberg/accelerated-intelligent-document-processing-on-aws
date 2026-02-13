@@ -571,6 +571,9 @@ class OcrService:
                 page_index, pdf_document, output_bucket, prefix
             )
 
+    # Formats supported by Amazon Bedrock multimodal APIs
+    BEDROCK_COMPATIBLE_FORMATS = {"jpeg", "jpg", "png", "gif", "webp"}
+
     def _process_image_file_direct(
         self,
         pdf_document: fitz.Document,
@@ -612,6 +615,47 @@ class OcrService:
             logger.debug(
                 f"Using original file content: {original_width}x{original_height} {img_format}"
             )
+
+            # Check if format needs conversion for Bedrock compatibility
+            # TIFF, BMP, and other non-Bedrock formats must be converted to JPEG
+            if img_format not in self.BEDROCK_COMPATIBLE_FORMATS:
+                logger.info(
+                    f"Converting {img_format.upper()} (mode={pil_img.mode}) to JPEG for Bedrock compatibility"
+                )
+                # Handle high bit-depth modes that need scaling (common in TIFF)
+                # These modes have values outside 0-255 range and need normalization
+                if pil_img.mode in ("I", "I;16", "I;16B", "I;16L", "I;16N"):
+                    # 16/32-bit integer grayscale - scale to 8-bit
+                    import numpy as np
+
+                    arr = np.array(pil_img, dtype=np.float64)
+                    if arr.max() > arr.min():
+                        arr = (arr - arr.min()) / (arr.max() - arr.min()) * 255
+                    arr = arr.astype(np.uint8)
+                    pil_img = PILImage.fromarray(arr, mode="L")
+                    logger.debug(
+                        "Scaled high bit-depth integer image to 8-bit grayscale"
+                    )
+                elif pil_img.mode == "F":
+                    # 32-bit floating point - normalize to 0-255
+                    import numpy as np
+
+                    arr = np.array(pil_img, dtype=np.float64)
+                    if arr.max() > arr.min():
+                        arr = (arr - arr.min()) / (arr.max() - arr.min()) * 255
+                    arr = arr.astype(np.uint8)
+                    pil_img = PILImage.fromarray(arr, mode="L")
+                    logger.debug("Scaled floating point image to 8-bit grayscale")
+                elif pil_img.mode not in ("RGB", "L"):
+                    # Handle other modes (RGBA, CMYK, P, LA, etc.)
+                    pil_img = pil_img.convert("RGB")
+                    logger.debug(f"Converted {pil_img.mode} to RGB")
+                # Save as JPEG
+                img_buffer = io.BytesIO()
+                pil_img.save(img_buffer, format="JPEG", quality=95, optimize=True)
+                img_data = img_buffer.getvalue()
+                img_ext = "jpg"
+                img_format = "jpeg"
 
             # Determine content type
             content_type_map = {

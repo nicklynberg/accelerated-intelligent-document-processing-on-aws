@@ -467,6 +467,7 @@ STDERR:
                     self.print_usage()
                     sys.exit(1)
                 self.lint_enabled = lint_value == "on"
+                i += 1  # increment arg counter to avoid parsing "on/off" as an arg of its own
             elif arg == "--clean-build":
                 self.clean_checksums()
             else:

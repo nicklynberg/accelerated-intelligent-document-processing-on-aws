@@ -23,98 +23,29 @@ logging.getLogger("idp_common.bedrock.client").setLevel(
 s3_client = boto3.client("s3")
 
 
-def is_hitl_enabled():
+def is_hitl_enabled(config_version=None):
     """Check if HITL is enabled from configuration."""
     try:
-        config = get_config(as_model=True)
+        config = get_config(as_model=True, version=config_version)
         return config.assessment.hitl_enabled
     except Exception as e:
         logger.warning(f"Failed to get HITL config: {e}")
         return False  # Default to disabled if config unavailable
 
 
-def handle_hitl_wait(event):
-    """
-    Handle HITL wait action by storing the task token for later workflow continuation.
-
-    Args:
-        event: Event containing task token and document information
-
-    Returns:
-        Dict confirming HITL wait setup
-    """
-    task_token = event.get("taskToken")
-    document = event.get("document", {})
-    # Support document_id, input_key, and object_key for compatibility with compressed/uncompressed formats
-    object_key = (
-        document.get("document_id")
-        or document.get("input_key")
-        or document.get("object_key")
-    )
-
-    if not task_token or not object_key:
-        raise ValueError(
-            f"taskToken and document key are required for HITL wait. Got taskToken={bool(task_token)}, document keys={list(document.keys())}"
-        )
-
-    logger.info(f"Setting up HITL wait for document {object_key}")
-
-    try:
-        # Store the task token directly in DynamoDB
-        tracking_table = os.environ.get("TRACKING_TABLE_NAME") or os.environ.get(
-            "TRACKING_TABLE"
-        )
-        if not tracking_table:
-            raise ValueError(
-                "TRACKING_TABLE_NAME or TRACKING_TABLE environment variable not set"
-            )
-
-        dynamodb = boto3.resource("dynamodb")
-        table = dynamodb.Table(tracking_table)
-        table.update_item(
-            Key={"PK": f"doc#{object_key}", "SK": "none"},
-            UpdateExpression="SET HITLTaskToken = :token, HITLStatus = :status",
-            ExpressionAttributeValues={
-                ":token": task_token,
-                ":status": "WaitingForReview",
-            },
-        )
-
-        logger.info(
-            f"Task token stored for document {object_key}, workflow will wait for HITL completion"
-        )
-
-        # Return immediately - the workflow will wait for send_task_success
-        return {
-            "HITLWaitSetup": True,
-            "ObjectKey": object_key,
-            "Message": "Workflow waiting for HITL completion",
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to store task token for document {object_key}: {str(e)}")
-        raise
-
-
 def handler(event, context):
     """
     Consolidates the results from multiple extraction steps into a single output.
-    Also handles HITL wait action to store task token for workflow continuation.
 
     Args:
-        event: Contains the document metadata and extraction results array or HITL wait action
+        event: Contains the document metadata and extraction results array
         context: Lambda context
 
     Returns:
-        Dict containing the fully processed document or HITL wait confirmation
+        Dict containing the fully processed document
     """
     logger.info(f"Processing event: {json.dumps(event)}")
 
-    # Check if this is a HITL wait action
-    if event.get("action") == "wait_for_hitl":
-        return handle_hitl_wait(event)
-
-    config = get_config(as_model=True)
     # Get the base document from the original classification result - handle both compressed and uncompressed
     working_bucket = os.environ.get("WORKING_BUCKET")
     classification_document_data = event.get("ClassificationResult", {}).get(
@@ -123,6 +54,10 @@ def handler(event, context):
     document = Document.load_document(
         classification_document_data, working_bucket, logger
     )
+
+    # Load configuration - use document's version if specified, otherwise use active version
+    config_version = getattr(document, 'config_version', None)
+    config = get_config(as_model=True, version=config_version)
 
     extraction_results = event.get("ExtractionResults", [])
     execution_arn = event.get("execution_arn", "")
@@ -135,6 +70,13 @@ def handler(event, context):
     # Update document status to POSTPROCESSING
     document.status = Status.POSTPROCESSING
     document_service = create_document_service()
+    
+    # Fetch current HITL status from DynamoDB (may have been updated by reviewer)
+    current_doc = document_service.get_document(document.input_key)
+    if current_doc:
+        document.hitl_status = current_doc.hitl_status
+        logger.info(f"Current HITL status from DynamoDB: {document.hitl_status}")
+    
     logger.info(f"Updating document status to {document.status}")
     document_service.update_document(document)
 
@@ -158,7 +100,7 @@ def handler(event, context):
                 logger.info(
                     f"section.confidence_threshold_alerts: {section.confidence_threshold_alerts}"
                 )
-                hitl_enabled = is_hitl_enabled()
+                hitl_enabled = is_hitl_enabled(config_version)
                 logger.info(f"is_hitl_enabled: {hitl_enabled}")
                 document.sections.append(section)
 
@@ -205,46 +147,27 @@ def handler(event, context):
         if page.raw_text_uri:
             create_metadata_file(page.raw_text_uri, page.classification, "page")
 
-    # Collect section IDs that need HITL review
+    # Collect section IDs that need HITL review and update document model
+    # Only set to PendingReview if not already reviewed (preserve completed/skipped status on reprocess)
     hitl_sections_pending = []
     if hitl_triggered:
-        for section in document.sections:
-            if section.confidence_threshold_alerts:
-                hitl_sections_pending.append(section.section_id)
+        document.hitl_triggered = True
+        existing_status = document.hitl_status
+        if existing_status not in ("Review Completed", "Review Skipped", "Completed", "Skipped"):
+            for section in document.sections:
+                if section.confidence_threshold_alerts:
+                    hitl_sections_pending.append(section.section_id)
+            # Set Review Status on document model
+            document.hitl_status = "PendingReview"
+            document.hitl_sections_pending = hitl_sections_pending
+            document.hitl_sections_completed = []
+            logger.info(f"Document requires human review. Sections pending: {hitl_sections_pending}")
+        else:
+            logger.info(f"Document already reviewed (status: {existing_status}), preserving HITL status on reprocess")
 
-    # Update document status based on HITL requirement
-    if hitl_triggered:
-        # Set status to HITL_IN_PROGRESS when HITL is triggered
-        document.status = Status.HITL_IN_PROGRESS
-        logger.info(
-            f"Document requires human review, setting status to {document.status}"
-        )
-        logger.info(f"Sections pending HITL review: {hitl_sections_pending}")
-
-    # Update final status in AppSync / Document Service
+    # Update final status in AppSync / Document Service (includes Review Status)
     logger.info(f"Updating document status to {document.status}")
     document_service.update_document(document)
-
-    # Update HITLSectionsPending in DynamoDB if HITL is triggered
-    if hitl_triggered and hitl_sections_pending:
-        try:
-            tracking_table = os.environ.get("TRACKING_TABLE_NAME")
-            if tracking_table:
-                dynamodb = boto3.resource("dynamodb")
-                table = dynamodb.Table(tracking_table)
-                table.update_item(
-                    Key={"PK": f"doc#{document.input_key}", "SK": "none"},
-                    UpdateExpression="SET HITLSectionsPending = :pending, HITLSectionsCompleted = :completed",
-                    ExpressionAttributeValues={
-                        ":pending": hitl_sections_pending,
-                        ":completed": [],
-                    },
-                )
-                logger.info(
-                    f"Updated HITLSectionsPending for document {document.input_key}"
-                )
-        except Exception as e:
-            logger.error(f"Failed to update HITLSectionsPending: {str(e)}")
 
     # Check if rule validation is enabled in config AND has rules configured
     rule_validation_enabled = False

@@ -266,6 +266,7 @@ class Document:
     metering: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     trace_id: Optional[str] = None
+    config_version: Optional[str] = None  # Configuration version to use for processing
     evaluation_status: Optional[str] = None
     evaluation_report_uri: Optional[str] = None
     evaluation_results_uri: Optional[str] = None
@@ -276,6 +277,10 @@ class Document:
 
     # HITL metadata
     hitl_metadata: List[HitlMetadata] = field(default_factory=list)
+    hitl_status: Optional[str] = None  # PendingReview, InProgress, Completed, Skipped
+    hitl_triggered: bool = False  # Whether HITL review was triggered for this document
+    hitl_sections_pending: List[str] = field(default_factory=list)
+    hitl_sections_completed: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert document to dictionary representation."""
@@ -299,6 +304,7 @@ class Document:
             "errors": self.errors,
             "metering": self.metering,
             "trace_id": self.trace_id,
+            "config_version": self.config_version,
             # We don't include evaluation_result or summarization_result in the dict since they're objects
         }
 
@@ -349,6 +355,16 @@ class Document:
                 metadata.to_dict() for metadata in self.hitl_metadata
             ]
 
+        # Add Review Status fields
+        if self.hitl_status:
+            result["hitl_status"] = self.hitl_status
+        if self.hitl_triggered:
+            result["hitl_triggered"] = self.hitl_triggered
+        if self.hitl_sections_pending:
+            result["hitl_sections_pending"] = self.hitl_sections_pending
+        if self.hitl_sections_completed:
+            result["hitl_sections_completed"] = self.hitl_sections_completed
+
         return result
 
     @classmethod
@@ -371,6 +387,7 @@ class Document:
             summary_report_uri=data.get("summary_report_uri"),
             metering=data.get("metering", {}),
             trace_id=data.get("trace_id"),
+            config_version=data.get("config_version"),
             errors=data.get("errors", []),
         )
 
@@ -419,6 +436,12 @@ class Document:
         for metadata_item in hitl_metadata_data:
             document.hitl_metadata.append(HitlMetadata.from_dict(metadata_item))
 
+        # Convert Review Status fields
+        document.hitl_status = data.get("hitl_status")
+        document.hitl_triggered = data.get("hitl_triggered", False)
+        document.hitl_sections_pending = data.get("hitl_sections_pending", [])
+        document.hitl_sections_completed = data.get("hitl_sections_completed", [])
+
         # Convert rule_validation_result if present (optional)
         if "rule_validation_result" in data:
             rv_data = data["rule_validation_result"]
@@ -436,9 +459,30 @@ class Document:
     @classmethod
     def from_s3_event(cls, event: Dict[str, Any], output_bucket: str) -> "Document":
         """Create a Document from an S3 event."""
+        import logging
+
+        logger = logging.getLogger(__name__)
+
         input_bucket = event.get("detail", {}).get("bucket", {}).get("name", "")
         input_key = event.get("detail", {}).get("object", {}).get("key", "")
         initial_event_time = event.get("time", "")
+
+        # Read S3 metadata to get configuration version if available
+        config_version = None
+        try:
+            import boto3
+
+            s3_client = boto3.client("s3")
+            response = s3_client.head_object(Bucket=input_bucket, Key=input_key)
+            metadata = response.get("Metadata", {})
+            logger.info(f"S3 metadata for {input_key}: {metadata}")
+            config_version = metadata.get("config-version")
+            if config_version:
+                logger.info(f"Found config version in S3 metadata: {config_version}")
+            else:
+                logger.info(f"No config-version found in metadata for {input_key}")
+        except Exception as e:
+            logger.warning(f"Could not read S3 metadata for {input_key}: {e}")
 
         return cls(
             id=input_key,
@@ -447,6 +491,7 @@ class Document:
             output_bucket=output_bucket,
             initial_event_time=initial_event_time,
             status=Status.QUEUED,
+            config_version=config_version,  # Add config version to document
         )
 
     def to_json(self) -> str:

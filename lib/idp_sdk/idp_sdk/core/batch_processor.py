@@ -82,6 +82,7 @@ class BatchProcessor:
         output_prefix: str = "cli-batch",
         batch_id: Optional[str] = None,
         number_of_files: Optional[int] = None,
+        config_version: Optional[str] = None,
     ) -> Dict:
         """
         Process batch of documents from manifest
@@ -112,7 +113,7 @@ class BatchProcessor:
 
         # Process documents
         return self._process_documents(
-            documents, batch_id, output_prefix, manifest_path
+            documents, batch_id, output_prefix, manifest_path, config_version
         )
 
     def process_batch_from_directory(
@@ -123,6 +124,7 @@ class BatchProcessor:
         output_prefix: str = "cli-batch",
         batch_id: Optional[str] = None,
         number_of_files: Optional[int] = None,
+        config_version: Optional[str] = None,
     ) -> Dict:
         """
         Process batch of documents from local directory
@@ -160,7 +162,12 @@ class BatchProcessor:
 
         # Process documents
         return self._process_documents(
-            documents, batch_id, output_prefix, dir_path, base_dir=dir_path
+            documents,
+            batch_id,
+            output_prefix,
+            dir_path,
+            config_version,
+            base_dir=dir_path,
         )
 
     def process_batch_from_s3_uri(
@@ -224,6 +231,7 @@ class BatchProcessor:
         batch_id: str,
         output_prefix: str,
         source: str,
+        config_version: Optional[str] = None,
         base_dir: Optional[str] = None,
     ) -> Dict:
         """
@@ -268,7 +276,9 @@ class BatchProcessor:
 
                 # Handle document upload/reference
                 # S3 upload automatically triggers EventBridge -> QueueSender -> SQS
-                s3_key = self._process_document_with_base(doc, batch_id, base_dir)
+                s3_key = self._process_document_with_base(
+                    doc, batch_id, base_dir, config_version
+                )
 
                 results["document_ids"].append(
                     s3_key
@@ -412,7 +422,11 @@ class BatchProcessor:
             raise
 
     def _process_document_with_base(
-        self, doc: Dict, batch_id: str, base_dir: Optional[str] = None
+        self,
+        doc: Dict,
+        batch_id: str,
+        base_dir: Optional[str] = None,
+        config_version: Optional[str] = None,
     ) -> str:
         """
         Process document with optional base directory for path preservation
@@ -427,12 +441,14 @@ class BatchProcessor:
         """
         if doc["type"] == "local":
             # Upload local file with path preservation
-            s3_key = self._upload_local_file_with_path(doc, batch_id, base_dir)
+            s3_key = self._upload_local_file_with_path(
+                doc, batch_id, base_dir, config_version
+            )
             logger.info(f"Uploaded {doc['filename']} to {s3_key}")
             return s3_key
         elif doc["type"] == "s3":
             # Copy from external S3 location to InputBucket
-            s3_key = self._copy_s3_file(doc, batch_id)
+            s3_key = self._copy_s3_file(doc, batch_id, config_version)
             logger.info(f"Copied {doc['filename']} from {doc['path']} to {s3_key}")
             return s3_key
         elif doc["type"] == "s3-key":
@@ -445,7 +461,11 @@ class BatchProcessor:
             raise ValueError(f"Unknown document type: {doc['type']}")
 
     def _upload_local_file_with_path(
-        self, doc: Dict, batch_id: str, base_dir: Optional[str] = None
+        self,
+        doc: Dict,
+        batch_id: str,
+        base_dir: Optional[str] = None,
+        config_version: Optional[str] = None,
     ) -> str:
         """
         Upload local file to S3 InputBucket with path preservation
@@ -470,9 +490,25 @@ class BatchProcessor:
             # Standardized: batch_id/filename
             s3_key = f"{batch_id}/{filename}"
 
-        # Upload file
+        # Upload file with config version as S3 metadata instead of filename suffix
         input_bucket = self.resources["InputBucket"]
-        self.s3.upload_file(Filename=local_path, Bucket=input_bucket, Key=s3_key)
+
+        if config_version:
+            # Use put_object with metadata for config version
+            logger.info(f"Adding config-version metadata: {config_version} to {s3_key}")
+            with open(local_path, "rb") as file_data:
+                self.s3.put_object(
+                    Bucket=input_bucket,
+                    Key=s3_key,
+                    Body=file_data,
+                    Metadata={"config-version": config_version},
+                )
+        else:
+            logger.info(
+                f"No config version specified, uploading without metadata to {s3_key}"
+            )
+            # Use upload_file for files without config version
+            self.s3.upload_file(Filename=local_path, Bucket=input_bucket, Key=s3_key)
 
         return s3_key
 
@@ -489,13 +525,16 @@ class BatchProcessor:
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         return f"{prefix}-{timestamp}"
 
-    def _copy_s3_file(self, doc: Dict, batch_id: str) -> str:
+    def _copy_s3_file(
+        self, doc: Dict, batch_id: str, config_version: Optional[str] = None
+    ) -> str:
         """
         Copy file from any S3 location to InputBucket
 
         Args:
             doc: Document specification with S3 URI
             batch_id: Batch identifier
+            config_version: Optional config version to add as metadata
 
         Returns:
             S3 key in InputBucket
@@ -515,11 +554,22 @@ class BatchProcessor:
         # Construct destination key: batch_id/filename
         dest_key = f"{batch_id}/{filename}"
 
-        # Copy object
+        # Copy object with config version metadata if provided
         input_bucket = self.resources["InputBucket"]
         copy_source = {"Bucket": source_bucket, "Key": source_key}
 
-        self.s3.copy_object(CopySource=copy_source, Bucket=input_bucket, Key=dest_key)
+        copy_args = {"CopySource": copy_source, "Bucket": input_bucket, "Key": dest_key}
+
+        if config_version:
+            copy_args["Metadata"] = {"config-version": config_version}
+            copy_args["MetadataDirective"] = "REPLACE"
+            logger.info(
+                f"Adding config-version metadata: {config_version} to copied file {dest_key}"
+            )
+        else:
+            logger.info(f"No config version specified for copied file {dest_key}")
+
+        self.s3.copy_object(**copy_args)
 
         return dest_key
 

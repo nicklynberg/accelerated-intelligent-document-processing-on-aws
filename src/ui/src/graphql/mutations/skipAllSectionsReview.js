@@ -7,6 +7,8 @@ const skipAllSectionsReview = /* GraphQL */ `
       ObjectKey
       ObjectStatus
       HITLStatus
+      HITLTriggered
+      HITLCompleted
       HITLSectionsPending
       HITLSectionsCompleted
       HITLSectionsSkipped

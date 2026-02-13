@@ -46,6 +46,7 @@ class BatchOperation:
         recursive: bool = True,
         number_of_files: Optional[int] = None,
         config_path: Optional[str] = None,
+        config_version: Optional[str] = None,
         context: Optional[str] = None,
         **kwargs,
     ) -> BatchResult:
@@ -64,6 +65,7 @@ class BatchOperation:
             recursive: Recursively scan directories
             number_of_files: Limit number of files to process
             config_path: Path to custom configuration file
+            config_version: Configuration version to use for processing
             context: Context for test set processing
             **kwargs: Additional parameters
 
@@ -95,8 +97,15 @@ class BatchOperation:
             )
 
         try:
+            # processor = BatchProcessor(
+            #     stack_name=name, config_path=config_path, region=self._client._region
+            # )
+
             processor = BatchProcessor(
-                stack_name=name, config_path=config_path, region=self._client._region
+                stack_name=name,
+                config_path=config_path,
+                config_version=config_version,
+                region=self._client._region,
             )
 
             if test_set:

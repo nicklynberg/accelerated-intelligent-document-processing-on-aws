@@ -63,7 +63,7 @@ def handler(event, context):
                                 hitl_meta.hitl_completed = True
                             logger.info(f"Synced HITL completion status from DynamoDB: {hitl_completed}")
             except Exception as e:
-                logger.warning(f"Failed to sync HITL status from DynamoDB: {str(e)}")
+                logger.warning(f"Failed to sync Review Status from DynamoDB: {str(e)}")
         
         # Update document status to SUMMARIZING
         document.status = Status.SUMMARIZING
@@ -71,8 +71,16 @@ def handler(event, context):
         logger.info(f"Updating document status to {document.status}")
         document_service.update_document(document)
         
-        # Load configuration and create the summarization service
-        config = get_config(as_model=True)
+        # Load configuration - use document's version if specified, otherwise use active version
+        config_version = getattr(document, 'config_version', None)
+        config = get_config(as_model=True, version=config_version)
+        
+        if config_version:
+            logger.info(f"Using configuration version {config_version} for document {document.id}")
+        else:
+            logger.info(f"Using active configuration for document {document.id}")
+        
+        # Create the summarization service
         summarization_service = summarization.SummarizationService(
             config=config
         )        

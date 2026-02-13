@@ -336,6 +336,7 @@ const ConfigBuilder = ({
   onResetToDefault = null,
   onChange,
   extractionSchema = null,
+  currentVersionName = null,
   onSchemaChange = null,
   onSchemaValidate = null,
   activeTabId: controlledActiveTabId = 'configuration',
@@ -344,6 +345,8 @@ const ConfigBuilder = ({
   ruleSchema = null,
   onRuleSchemaChange = null,
   onRuleSchemaValidate = null,
+  versionDescription = '',
+  onDescriptionChange = null,
 }) => {
   // Track expanded state for all list items across the form - default to collapsed
   const [expandedItems, setExpandedItems] = useState({});
@@ -554,6 +557,9 @@ const ConfigBuilder = ({
     current[lastSegment] = value;
     onChange(newValues);
   };
+
+  // Debug: Check if isCustomized function is properly passed
+  console.log('ConfigBuilder received isCustomized:', typeof isCustomized, !!isCustomized);
 
   // Define renderField first as a function declaration
   function renderField(key, property, path = '') {
@@ -1376,7 +1382,13 @@ const ConfigBuilder = ({
     const inputWithRestoreButton = isFieldCustomized ? (
       <Box display="flex" alignItems="center">
         <Box flex="1">{input}</Box>
-        <Button variant="link" onClick={handleRestoreDefault} className="restore-default-button" iconName="undo">
+        <Button
+          variant="link"
+          onClick={handleRestoreDefault}
+          className="restore-default-button"
+          iconName="undo"
+          disabled={!onResetToDefault}
+        >
           Restore default
         </Button>
       </Box>
@@ -1461,7 +1473,23 @@ const ConfigBuilder = ({
             label: 'Configuration',
             content: (
               <Box style={{ height: 'calc(70vh - 60px)', overflow: 'auto' }} padding="s">
-                <SpaceBetween size="l">{getSortedProperties().map(renderTopLevelProperty)}</SpaceBetween>
+                <SpaceBetween size="l">
+                  {/* Version Description Field */}
+                  <FormField
+                    label="Version Description"
+                    description="Optional description for this configuration version (max 200 characters)"
+                    errorText={versionDescription && versionDescription.length > 200 ? 'Description cannot exceed 200 characters' : ''}
+                  >
+                    <Input
+                      value={versionDescription}
+                      onChange={({ detail }) => onDescriptionChange?.(detail.value)}
+                      placeholder="Enter a description for this configuration version..."
+                      invalid={versionDescription && versionDescription.length > 200}
+                    />
+                  </FormField>
+
+                  {getSortedProperties().map(renderTopLevelProperty)}
+                </SpaceBetween>
               </Box>
             ),
           },
@@ -1470,7 +1498,12 @@ const ConfigBuilder = ({
             label: 'Document Schema',
             content: (
               <Box style={{ height: 'calc(70vh - 60px)' }}>
-                <SchemaBuilder initialSchema={extractionSchema} onChange={onSchemaChange} onValidate={onSchemaValidate} />
+                <SchemaBuilder
+                  key={`schema-${currentVersionName || 'default'}`}
+                  initialSchema={extractionSchema}
+                  onChange={onSchemaChange}
+                  onValidate={onSchemaValidate}
+                />
               </Box>
             ),
           },
@@ -1575,6 +1608,7 @@ ConfigBuilder.propTypes = {
   onResetToDefault: PropTypes.func,
   onChange: PropTypes.func.isRequired,
   extractionSchema: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
+  currentVersionName: PropTypes.string,
   onSchemaChange: PropTypes.func,
   onSchemaValidate: PropTypes.func,
   activeTabId: PropTypes.string,
@@ -1583,6 +1617,8 @@ ConfigBuilder.propTypes = {
   ruleSchema: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
   onRuleSchemaChange: PropTypes.func,
   onRuleSchemaValidate: PropTypes.func,
+  versionDescription: PropTypes.string,
+  onDescriptionChange: PropTypes.func,
 };
 
 export default ConfigBuilder;

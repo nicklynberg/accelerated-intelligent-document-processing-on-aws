@@ -6,11 +6,11 @@ from __future__ import annotations
 import boto3
 import json
 import os
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, List
 from botocore.exceptions import ClientError
 import logging
 
-from .models import IDPConfig, SchemaConfig, PricingConfig, ConfigurationRecord
+from .models import IDPConfig, SchemaConfig, PricingConfig, ConfigurationRecord, ConfigMetadata
 from .merge_utils import (
     deep_update,
     apply_delta_with_deletions,
@@ -18,16 +18,15 @@ from .merge_utils import (
     get_diff_dict,
 )
 from .constants import (
-    CONFIG_TYPE_SCHEMA,
-    CONFIG_TYPE_DEFAULT,
-    CONFIG_TYPE_CUSTOM,
-    CONFIG_TYPE_DEFAULT_PRICING,
     CONFIG_TYPE_CUSTOM_PRICING,
+    CONFIG_TYPE_DEFAULT_PRICING,
+    CONFIG_TYPE_SCHEMA,
+    CONFIG_TYPE_CONFIG,
     VALID_CONFIG_TYPES,
+    DEFAULT_VERSION
 )
 
 logger = logging.getLogger(__name__)
-
 
 class ConfigurationManager:
     """
@@ -72,7 +71,7 @@ class ConfigurationManager:
         logger.info(f"ConfigurationManager initialized with table: {table_name}")
 
     def get_configuration(
-        self, config_type: str
+        self, config_type: str, version: Optional[str] = None
     ) -> Optional[Union[SchemaConfig, IDPConfig, PricingConfig]]:
         """
         Retrieve configuration from DynamoDB.
@@ -81,19 +80,20 @@ class ConfigurationManager:
         1. Reads the DynamoDB item
         2. Deserializes into ConfigurationRecord (auto-migrates legacy format)
         3. Checks if migration occurred and persists if needed
-        4. Returns SchemaConfig for Schema type, PricingConfig for Pricing, IDPConfig for Default/Custom
+        4. Returns SchemaConfig for Schema type, PricingConfig for Pricing, IDPConfig for Version
 
         Args:
-            config_type: Configuration type (Schema, Default, Custom, Pricing)
+            config_type: Configuration type (Schema, Config, Pricing)
 
         Returns:
-            SchemaConfig for Schema type, PricingConfig for Pricing, IDPConfig for Default/Custom, or None if not found
+            SchemaConfig for Schema type, PricingConfig for Pricing, IDPConfig for version, or None if not found
 
         Raises:
             ClientError: If DynamoDB operation fails
+
         """
         try:
-            record = self._read_record(config_type)
+            record = self._read_record(config_type, version=version)
             if record is None:
                 logger.info(f"Configuration not found: {config_type}")
                 return None
@@ -108,21 +108,21 @@ class ConfigurationManager:
             logger.error(f"Error retrieving configuration {config_type}: {e}")
             raise
 
-    def get_raw_configuration(self, config_type: str) -> Optional[Dict[str, Any]]:
+    def get_raw_configuration(self, config_type: str, version: str) -> Optional[Dict[str, Any]]:
         """
         Retrieve RAW configuration from DynamoDB without Pydantic validation.
-
+        
         This is critical for the Custom configuration which should return ONLY
         the user-modified fields (sparse delta), NOT a full config with Pydantic defaults.
 
         Design Pattern:
-        - Custom item stores ONLY user deltas
+        - Version item stores ONLY user deltas
         - Using Pydantic validation would fill in all defaults (BAD for delta pattern)
         - This method returns the raw dict exactly as stored in DynamoDB
 
         Args:
-            config_type: Configuration type (typically CONFIG_TYPE_CUSTOM)
-
+            config_type: Configuration type (typically CONFIG_TYPE_CONFIG)
+            
         Returns:
             Raw dict from DynamoDB (without Pydantic default-filling), or None if not found
 
@@ -130,15 +130,21 @@ class ConfigurationManager:
             ClientError: If DynamoDB operation fails
         """
         try:
-            response = self.table.get_item(Key={"Configuration": config_type})
+            if version:
+                item = {"Configuration": f"{config_type}#{version}"}
+            else:
+                item = {"Configuration": config_type}
+
+            response = self.table.get_item(Key=item)
             item = response.get("Item")
 
             if item is None:
                 logger.info(f"Raw configuration not found: {config_type}")
                 return None
 
-            # Remove the DynamoDB partition key - return only the config data
-            config_data = {k: v for k, v in item.items() if k != "Configuration"}
+            # Remove the DynamoDB partition key and metadata fields - return only the config data
+            metadata_fields = {"Configuration", "CreatedAt", "UpdatedAt", "IsActive", "Description"}
+            config_data = {k: v for k, v in item.items() if k not in metadata_fields}
 
             logger.info(f"Retrieved raw configuration for {config_type}")
             return config_data
@@ -147,61 +153,97 @@ class ConfigurationManager:
             logger.error(f"Error retrieving raw configuration {config_type}: {e}")
             raise
 
-    def save_raw_configuration(
-        self, config_type: str, config_dict: Dict[str, Any]
-    ) -> None:
+    def save_raw_configuration(self, config_type: str, config_dict: Dict[str, Any], version: str, description: Optional[str] = None) -> None:
         """
         Save raw configuration dict to DynamoDB WITHOUT Pydantic validation.
-
-        This is critical for Custom configs which should store ONLY user deltas (sparse).
+        
+        This is critical for Version configs which should store ONLY user deltas (sparse).
         Using Pydantic would fill in all defaults, which defeats the delta pattern.
-
-        WARNING: Only use for CONFIG_TYPE_CUSTOM to preserve sparse delta pattern.
-        For other config types (Default, Schema), use save_configuration() which
+        
+        WARNING: Only use for CONFIG_TYPE_CONFIG to preserve sparse delta pattern for non default version.
+        For other config types, use save_configuration() which
         validates through Pydantic.
 
         Args:
-            config_type: Configuration type (should be CONFIG_TYPE_CUSTOM)
+            config_type: Configuration type (should be CONFIG_TYPE_CONFIG)
             config_dict: Raw dict to save (only user deltas, no defaults)
-
+            version: Version to save
+            
         Raises:
             ClientError: If DynamoDB operation fails
         """
         try:
             # Build DynamoDB item directly without Pydantic
-            item = {"Configuration": config_type}
+            # IMPORTANT: Stringify values to convert floats to strings for DynamoDB
+            # (DynamoDB doesn't accept Python float types, only Decimal or string)
+            if version:
+                item = {"Configuration": f"{config_type}#{version}"}
+            else:
+                item = {"Configuration": config_type}
+            
+            # Add metadata for version configurations
+            if version and config_type == CONFIG_TYPE_CONFIG:
+                from datetime import datetime
+                current_time = datetime.utcnow().isoformat() + 'Z'
+                
+                # Check if this is a new version (no existing record)
+                existing_record = self._read_record(config_type, version)
+                if not existing_record:
+                    # New version - set creation time
+                    item["CreatedAt"] = current_time
+                    item["UpdatedAt"] = current_time
+                    item["IsActive"] = False  # New versions are not active by default
+                    # Set description (empty string if None provided)
+                    item["Description"] = description if description is not None else ""
+                else: # existing record - preserve all existing metadata
+                    # Preserve existing CreatedAt
+                    if existing_record.metadata and existing_record.metadata.created_at:
+                        item["CreatedAt"] = existing_record.metadata.created_at
+                    # Preserve existing IsActive
+                    if existing_record.is_active is not None:
+                        item["IsActive"] = existing_record.is_active
+                    # Preserve existing Description if not provided
+                    if description is not None:
+                        item["Description"] = description
+                    elif existing_record.description is not None:
+                        item["Description"] = existing_record.description
+                    # Always update the modification time
+                    item["UpdatedAt"] = current_time
+                
             stringified = ConfigurationRecord._stringify_values(config_dict)
-            item.update(stringified)
+            if stringified is not None:
+                item.update(stringified)
 
             self.table.put_item(Item=item)
-            logger.info(f"Saved raw configuration (sparse delta): {config_type}")
-
+            logger.info(f"Saved raw configuration (sparse delta): {config_type}, version: {version}")
+            
         except ClientError as e:
             logger.error(f"Error saving raw configuration {config_type}: {e}")
             raise
 
-    def get_merged_configuration(self) -> Optional[IDPConfig]:
+    def get_merged_configuration(self, version: str) -> Optional[IDPConfig]:
         """
-        Get merged Default + Custom configuration for runtime processing.
+        Get merged Default + Version configuration for runtime processing.
 
         This is THE method to use for all runtime document processing.
-        It properly merges the stack Default with user Custom deltas.
+        It properly merges the stack defaul with version deltas.
 
         Design Pattern:
-        - Default = complete stack baseline (from deployment)
-        - Custom = sparse user deltas ONLY
-        - Merged = Default deep-updated with Custom = final runtime config
+        - default = complete stack baseline (from deployment)
+        - version = sparse user deltas ONLY
+        - Merged = Default deep-updated with version = final runtime config
 
         Returns:
-            Merged IDPConfig ready for runtime use, or None if Default doesn't exist
+            Merged IDPConfig ready for runtime use, or None if default doesn't exist
 
         Raises:
             ClientError: If DynamoDB operation fails
+            ValueError: If version not found
         """
         from copy import deepcopy
 
         # Get the full Default configuration (Pydantic validated - this is correct)
-        default_config = self.get_configuration(CONFIG_TYPE_DEFAULT)
+        default_config = self.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
         if default_config is None:
             logger.warning(
                 "Default configuration not found - cannot create merged config"
@@ -212,22 +254,25 @@ class ConfigurationManager:
             logger.error(f"Default config is not IDPConfig: {type(default_config)}")
             return None
 
-        # Get Custom as RAW dict (no Pydantic defaults!)
-        custom_dict = self.get_raw_configuration(CONFIG_TYPE_CUSTOM)
+        if not version:
+            raise ValueError("version not provided")
+        
+        # Get version as RAW dict (no Pydantic defaults!)
+        version_dict = self.get_raw_configuration(CONFIG_TYPE_CONFIG, version)
 
         # If no Custom, return Default as-is
-        if not custom_dict:
-            logger.info("No Custom configuration, returning Default")
-            return default_config
-
-        # Merge: Start with Default, deep update with Custom deltas
+        if not version_dict:
+            raise ValueError(f"No Version {version} configuration found")
+        
+        # Merge: Start with Default, deep update with version deltas
         default_dict = default_config.model_dump(mode="python")
         merged_dict = deepcopy(default_dict)
-        deep_update(merged_dict, custom_dict)
+        deep_update(merged_dict, version_dict)
 
-        logger.info("Merged Default + Custom configurations for runtime")
+        logger.info("Merged default + version configurations for runtime")
         return IDPConfig(**merged_dict)
 
+    
     def sync_custom_with_new_default(
         self, old_default: IDPConfig, new_default: IDPConfig, old_custom: IDPConfig
     ) -> IDPConfig:
@@ -269,10 +314,13 @@ class ConfigurationManager:
 
         return IDPConfig(**new_custom_dict)
 
+
     def save_configuration(
         self,
         config_type: str,
         config: Union[SchemaConfig, IDPConfig, PricingConfig, Dict[str, Any]],
+        version: Optional[str] = None,
+        description: Optional[str] = None,
         skip_sync: bool = False,
     ) -> None:
         """
@@ -280,18 +328,20 @@ class ConfigurationManager:
 
         This method:
         1. Converts dict to appropriate config type if needed
-        2. If saving Default, syncs Custom to preserve user customizations (unless skip_sync=True)
+        2. If saving default, syncs Version to preserve user customizations (unless skip_sync=True)
         3. Creates ConfigurationRecord
         4. Serializes to DynamoDB item
         5. Writes to DynamoDB
 
         Args:
-            config_type: Configuration type (Schema, Default, Custom, DefaultPricing, CustomPricing)
+            config_type: Configuration type (Schema, Config, DefaultPricing, CustomPricing)
             config: SchemaConfig, IDPConfig, PricingConfig model, or dict (dict will be converted to appropriate type)
-            skip_sync: If True, skip automatic Custom sync when saving Default (used for save-as-default)
+            skip_sync: If True, skip automatic Version sync
+            skip_sync: should be false when saving default to auto sync verisons with default
 
         Raises:
             ClientError: If DynamoDB operation fails
+
         """
         # Convert dict to appropriate config type if needed (for backward compatibility)
         if isinstance(config, dict):
@@ -305,50 +355,181 @@ class ConfigurationManager:
             else:
                 config = IDPConfig(**config)
 
-        # If updating Default, sync Custom to preserve user customizations
-        # Skip sync if this is a "save as default" operation where Custom will be deleted
+        # If updating Default, sync versions to preserve user customizations
         if (
-            config_type == CONFIG_TYPE_DEFAULT
+            config_type == CONFIG_TYPE_CONFIG
+            and version == DEFAULT_VERSION
             and not skip_sync
             and isinstance(config, IDPConfig)
         ):
-            old_default = self.get_configuration(CONFIG_TYPE_DEFAULT)
-            old_custom = self.get_configuration(CONFIG_TYPE_CUSTOM)
-
-            if (
-                old_default
-                and old_custom
-                and isinstance(old_default, IDPConfig)
-                and isinstance(old_custom, IDPConfig)
-            ):
-                logger.info(
-                    "Syncing Custom config with new Default while preserving user customizations"
+            old_default = self.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
+            versions = self.list_config_versions()
+            for version_dict in versions:
+                version_name: Optional[str] = str(version_dict.get("versionName")) if version_dict.get("versionName") else None
+                # CRITICAL: Use RAW Custom (no Pydantic defaults!) to preserve sparse delta pattern
+                old_version_dict = self.get_raw_configuration(CONFIG_TYPE_CONFIG, version=version_name)
+                if (
+                    old_default
+                    and old_version_dict is not None
+                    and version_name != DEFAULT_VERSION # sync non default version's only
+                    and isinstance(old_default, IDPConfig)
+                ):
+                    logger.info(
+                        f"Syncing Version: {version_name} config with new default while preserving user customizations (sparse)"
+                    )
+                    new_version_dict = self._sync_custom_with_new_default_sparse(
+                        old_default=old_default, new_default=config, old_custom_dict=old_version_dict
+                    )
+                    logger.info(
+                        f"Saving Version: {version_name} after sync with updated default, version dict {new_version_dict}"
+                        )
+                    self.save_raw_configuration(CONFIG_TYPE_CONFIG, config_dict=new_version_dict, version=version_name)
+            
+        
+        if config_type == CONFIG_TYPE_CONFIG:
+            # get existing record if saving existing version
+            existing_record = self._read_record(CONFIG_TYPE_CONFIG, version)
+            is_active_status = existing_record.is_active if existing_record else False
+            # update meta
+            import datetime
+            timestamp = datetime.datetime.utcnow().isoformat() + "Z"
+            
+            if existing_record:
+                # Existing config - preserve created_at, update updated_at
+                metadata = {
+                    "created_at": existing_record.metadata.created_at if existing_record.metadata else timestamp,
+                    "updated_at": timestamp
+                }
+                # Create record
+                record = ConfigurationRecord(
+                    configuration_type=config_type,
+                    version=version,
+                    is_active=is_active_status,  # Preserve existing active status or None for new
+                    description=description if description else existing_record.description,
+                    config=config,
+                    metadata=ConfigMetadata(**metadata)
                 )
-                new_custom = self.sync_custom_with_new_default(
-                    old_default, config, old_custom
+            else:
+                # New config - set both timestamps
+                metadata = {
+                    "created_at": timestamp,
+                    "updated_at": timestamp
+                }
+                # Create record
+                record = ConfigurationRecord(
+                    configuration_type=config_type,
+                    version=version,
+                    is_active=is_active_status,  # Preserve existing active status or None for new
+                    description=description,
+                    config=config,
+                    metadata=ConfigMetadata(**metadata)
                 )
-                # Save the synced custom config
-                self.save_configuration(CONFIG_TYPE_CUSTOM, new_custom, skip_sync=True)
-
-        # Create record
-        record = ConfigurationRecord(configuration_type=config_type, config=config)
-
+        else:
+            # Create record
+            record = ConfigurationRecord(configuration_type=config_type, config=config)
+        
         # Write to DynamoDB
         self._write_record(record)
 
-    def delete_configuration(self, config_type: str) -> None:
+    def activate_version(self, version: str) -> None:
+        """
+        Activate a specific Config version and deactivate all others.
+        
+        Args:
+            version: Version to activate (default, production-config, test-config, etc.)
+            
+        Raises:
+            ValueError: If version doesn't exist
+            ClientError: If DynamoDB operation fails
+        """
+        try:
+            # First, verify the version exists by checking if key exists in DynamoDB
+            response = self.table.get_item(Key={"Configuration": f"{CONFIG_TYPE_CONFIG}#{version}"})
+            if not response.get("Item"):
+                raise ValueError(f"Config version {version} not found")
+            
+            # Deactivate all currently active versions
+            for version_dict in self.list_config_versions():
+                if version_dict.get("isActive"):
+                    self.table.update_item(
+                        Key={"Configuration": f"{CONFIG_TYPE_CONFIG}#{version_dict.get('versionName')}"},
+                        UpdateExpression="SET IsActive = :false",
+                        ExpressionAttributeValues={":false": False}
+                    )
+
+            # Activate the target version
+            self.table.update_item(
+                Key={"Configuration": f"{CONFIG_TYPE_CONFIG}#{version}"},
+                UpdateExpression="SET IsActive = :true",
+                ExpressionAttributeValues={":true": True}
+            )
+            logger.info(f"Activated Config version {version}")
+        except ClientError as e:
+            logger.error(f"Error activating version {version}: {e}")
+            raise
+
+    def list_config_versions(self) -> List[Dict[str, Any]]:
+        """
+        List all configuration versions.
+        
+        Returns:
+            List of version info dicts with versionId, isActive, createdAt, updatedAt, description
+        """
+        try:
+            response = self.table.scan(
+                FilterExpression="begins_with(Configuration, :config_prefix)",
+                ExpressionAttributeValues={":config_prefix": f"{CONFIG_TYPE_CONFIG}#"},
+                ProjectionExpression="Configuration, IsActive, CreatedAt, UpdatedAt, Description"
+            )
+            
+            versions = []
+            for item in response.get('Items', []):
+                config_key = item.get('Configuration', '')
+                if "#" in config_key:
+                    _, version = config_key.split("#", 1)
+                    versions.append({
+                        "versionName": version,
+                        "isActive": item.get('IsActive'),  # Can be None, True, or False
+                        "createdAt": item.get('CreatedAt'),
+                        "updatedAt": item.get('UpdatedAt'),
+                        "description": item.get('Description', "")  # Return empty string instead of generated text
+                    })
+            
+            return versions
+            
+        except ClientError as e:
+            logger.error(f"Error listing config versions: {e}")
+            return []
+
+    def delete_configuration(self, config_type: str, version: Optional[str] = None) -> None:
         """
         Delete configuration from DynamoDB.
 
         Args:
             config_type: Configuration type to delete
-
+            version: config version [applicable to config type: Config]
         Raises:
             ClientError: If DynamoDB operation fails
+            ValueError: If version is required but not provided
         """
         try:
-            self.table.delete_item(Key={"Configuration": config_type})
-            logger.info(f"Deleted configuration: {config_type}")
+            if config_type == CONFIG_TYPE_CONFIG:
+                if version is None:
+                    raise ValueError("Version is required for Config type")
+        
+                # Check if trying to delete active version
+                record = self._read_record(CONFIG_TYPE_CONFIG, version)
+                logger.info(f"Checking version {version} for deletion. Record found: {record is not None}, Is active: {record.is_active if record else 'N/A'}")
+                if not record:
+                    raise ClientError(f"Version: {version} not found in configurations")
+                if record and record.is_active:
+                    raise ValueError(f"Cannot delete active version {version}. Activate another version first.")
+                key = f"{CONFIG_TYPE_CONFIG}#{version}"
+            else:
+                # For all other types, use config_type directly
+                key = config_type
+            self.table.delete_item(Key={"Configuration": key})
+            logger.info(f"Deleted configuration: {key}")
         except ClientError as e:
             logger.error(f"Error deleting configuration {config_type}: {e}")
             raise
@@ -459,20 +640,22 @@ class ConfigurationManager:
             raise
 
     def handle_update_custom_configuration(
-        self, custom_config: Union[str, Dict[str, Any], IDPConfig]
+        self, custom_config: Union[str, Dict[str, Any], IDPConfig], version: Optional[str] = None, description: Optional[str] = None
     ) -> bool:
         """
         Handle the updateConfiguration GraphQL mutation.
 
         DESIGN PATTERN (CRITICAL):
-        - Custom stores ONLY user deltas (sparse)
-        - Frontend sends deltas to merge into existing Custom
-        - We DO NOT use Pydantic defaults when reading existing Custom
+        - default stores default version (system default)
+        - Version stores ONLY user deltas (sparse) 
+        - Frontend sends deltas to merge into existing Version
+        - We DO NOT use Pydantic defaults when reading existing Version
 
         Operations:
-        - resetToDefault=True: Delete Custom entirely (empty = use all defaults)
-        - saveAsDefault=True: Save merged config as new Default, empty Custom
-        - Normal update: Merge deltas into existing Custom (raw, no Pydantic)
+        - resetToDefault=True: Version config will be deleted as there is no delta
+        - saveAsDefault=True: Version config will be deleted as there is no delta, default replaced with version config
+        - saveAsVersion=True: Version config will be copied to new version, default unchanged
+        - Normal update: Merge deltas into existing Version (raw, no Pydantic)
 
         Args:
             custom_config: Configuration deltas as JSON string, dict, or IDPConfig
@@ -483,7 +666,8 @@ class ConfigurationManager:
         Raises:
             Exception: If configuration update fails
         """
-        # Parse input to dict
+
+        # Parse input
         if isinstance(custom_config, str):
             config_dict = json.loads(custom_config)
         elif isinstance(custom_config, IDPConfig):
@@ -502,66 +686,48 @@ class ConfigurationManager:
             if isinstance(config_dict, dict)
             else False
         )
-        replace_custom = (
-            config_dict.pop("replaceCustom", False)
+        save_as_version = (
+            config_dict.pop("saveAsVersion", False)
             if isinstance(config_dict, dict)
             else False
         )
-
+        
         # Remove legacy pricing field if present (now stored separately as DefaultPricing/CustomPricing)
         if isinstance(config_dict, dict):
             config_dict.pop("pricing", None)
 
-        # Handle reset to default - delete Custom entirely
-        # Empty Custom = use all defaults (this is the expected behavior)
+        # Handle reset to default - Version wont be deleted
+        # Empty Version = use all defaults (this is the expected behavior)
         if reset_to_default:
-            logger.info("Resetting Custom configuration by deleting it")
+            logger.info(f"Resetting version {version} to default")
             try:
-                self.delete_configuration(CONFIG_TYPE_CUSTOM)
+                # save empty config on version [as no delta is applicable]
+                self.save_raw_configuration(CONFIG_TYPE_CONFIG, None, version=version, description=description)
             except Exception as e:
-                # If Custom doesn't exist, that's fine - it's already "reset"
-                logger.info(f"Custom config may not exist (already reset): {e}")
-            logger.info("Custom configuration deleted - all defaults will now be used")
+                logger.info(f"Failed to resert version {version} to default: {e}")
+            logger.info("Version {version} reset done - all defaults will now be used")
             return True
-
-        # For empty config without special flags, nothing to do
-        if not config_dict or (isinstance(config_dict, dict) and len(config_dict) == 0):
-            logger.info(
-                "Empty configuration update with no special flags - no changes made"
-            )
-            return True
-
+    
         if save_as_default:
             # Save as Default: Frontend sends the complete merged config
-            # This becomes the new baseline, then we delete Custom
             config = IDPConfig(**config_dict)
-
-            # Skip sync since we're about to delete Custom anyway
-            self.save_configuration(CONFIG_TYPE_DEFAULT, config, skip_sync=True)
-
-            # Delete Custom since the new baseline now includes all customizations
-            try:
-                self.delete_configuration(CONFIG_TYPE_CUSTOM)
-            except Exception:
-                pass  # Custom might not exist
-
-            logger.info("Saved current state as new Default and cleared Custom")
-        elif replace_custom:
-            # Replace Custom entirely (used for import operations)
-            # This deletes existing Custom first, then saves the imported config as new Custom
+            
+            # First save as new default (this will sync all other versions)
+            self.save_configuration(CONFIG_TYPE_CONFIG, config, version=DEFAULT_VERSION, skip_sync=False)
+            
+            # Then clear the current version (make it empty/default)
+            self.save_raw_configuration(CONFIG_TYPE_CONFIG, None, version=version)
+            
+            logger.info(f"Saved current state version: {version} as new {DEFAULT_VERSION}, current version: {version} cleared")
+        elif save_as_version: # create new version
+            # Save as new version (used for import operations)
             # Imported config is already merged with system defaults by frontend/import process
             logger.info(
-                "Replace Custom mode: clearing existing Custom before applying imported config"
+                f"Save config as new version: {version}"
             )
 
-            # Delete existing Custom first
-            try:
-                self.delete_configuration(CONFIG_TYPE_CUSTOM)
-            except Exception:
-                pass  # Custom might not exist
-
             # Validate that Default + imported config creates a valid config
-            default_config = self.get_configuration(CONFIG_TYPE_DEFAULT)
+            default_config = self.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
             if default_config and isinstance(default_config, IDPConfig):
                 from copy import deepcopy
 
@@ -579,36 +745,47 @@ class ConfigurationManager:
                 )
 
             # Save ONLY the sparse Custom deltas (NO Pydantic defaults!)
-            self.save_raw_configuration(CONFIG_TYPE_CUSTOM, config_dict)
-            logger.info("Replaced Custom configuration with imported config")
-        else:
-            # Normal custom config update - merge deltas into existing Custom
-            # IMPORTANT: Use RAW Custom (no Pydantic defaults!) to preserve sparse pattern
-            existing_custom_dict = self.get_raw_configuration(CONFIG_TYPE_CUSTOM)
+            self.save_raw_configuration(CONFIG_TYPE_CONFIG, config_dict, version=version, description=description)
+            logger.info(f"Save as new version: {version} configuration with imported config")
+        else: 
+            # Normal version config update - merge deltas into existing version
+            # IMPORTANT: Use RAW version (no Pydantic defaults!) to preserve sparse pattern
+            existing_version_dict = self.get_raw_configuration(CONFIG_TYPE_CONFIG, version=version)
+            
+            # Check if description changed by getting the existing record (includes metadata)
+            existing_record = self._read_record(CONFIG_TYPE_CONFIG, version)
+            existing_description = existing_record.description if existing_record else None
+            descriptionUpdated = existing_description != description
+            
+            if not descriptionUpdated and (not config_dict or (isinstance(config_dict, dict) and len(config_dict) == 0)):
+                logger.info(
+                    "Empty configuration update with no special flags - no changes made"
+                )
+                return True
 
             # If Custom doesn't exist, start with empty dict (NOT Default!)
             # Custom should only contain user deltas
-            if existing_custom_dict is None:
-                existing_custom_dict = {}
-                logger.info("No existing Custom - creating new sparse delta config")
+            if existing_version_dict is None:
+                existing_version_dict = {}
+                logger.info(f"No existing verison {version} - creating new sparse delta config")
 
-            # Merge the new deltas into existing Custom deltas
+            # Merge the new deltas into existing version deltas
             # IMPORTANT: Use apply_delta_with_deletions to handle null values as deletions
             # This supports "reset to default" for individual fields:
             # - Frontend sends {"classification": {"model": null}}
             # - Backend removes "model" from Custom.classification
             # - When merged with Default, the Default value is used
-            apply_delta_with_deletions(existing_custom_dict, config_dict)
+            apply_delta_with_deletions(existing_version_dict, config_dict)
 
-            # Validate that Default + merged Custom creates a valid config
+            # Validate that Default + merged Version creates a valid config
             # (but don't save the merged version - save only the sparse Custom)
-            default_config = self.get_configuration(CONFIG_TYPE_DEFAULT)
+            default_config = self.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
             if default_config and isinstance(default_config, IDPConfig):
                 from copy import deepcopy
 
                 default_dict = default_config.model_dump(mode="python")
                 validation_dict = deepcopy(default_dict)
-                deep_update(validation_dict, existing_custom_dict)
+                deep_update(validation_dict, existing_version_dict)
                 # This validates the merged config is valid - will raise ValidationError if not
                 IDPConfig(**validation_dict)
                 logger.info("Validated merged Default + Custom configuration")
@@ -618,30 +795,81 @@ class ConfigurationManager:
                 # - If user sets a value to its default, remove it from Custom
                 # - Handles "restore to default" naturally (just set the default value)
                 # - Keeps Custom truly sparse (only real customizations)
-                strip_matching_defaults(existing_custom_dict, default_dict)
+                strip_matching_defaults(existing_version_dict, default_dict)
                 logger.info(
                     "Auto-cleaned Custom config (removed values matching defaults)"
                 )
 
             # Save ONLY the sparse Custom deltas (NO Pydantic defaults!)
-            self.save_raw_configuration(CONFIG_TYPE_CUSTOM, existing_custom_dict)
+            self.save_raw_configuration(CONFIG_TYPE_CONFIG, config_dict=existing_version_dict, version = version, description=description)
             logger.info("Updated Custom configuration by merging deltas (sparse save)")
 
         return True
-
+    
     # ===== Private Methods =====
 
-    def _read_record(self, config_type: str) -> Optional[ConfigurationRecord]:
+    def _sync_custom_with_new_default_sparse(
+        self,
+        old_default: IDPConfig,
+        new_default: IDPConfig,
+        old_custom_dict: Dict[str, Any],
+    ) -> Dict[str, Any]:
         """
-        Read ConfigurationRecord from DynamoDB.
+        Sync Custom config when Default is updated, preserving sparse delta pattern.
+
+        CRITICAL: This method preserves the sparse delta pattern by:
+        1. Taking the RAW old_custom_dict (NOT Pydantic-validated)
+        2. Returning ONLY customizations that still differ from new_default
+
+        Algorithm:
+        1. Get old_default and new_default as dicts
+        2. For each field in old_custom_dict:
+           - If value differs from new_default, keep it in result
+           - If value equals new_default, drop it (no longer a customization)
+        3. Return sparse delta dict (only actual customizations)
 
         Args:
-            config_type: Configuration type to read
+            old_default: Previous default configuration (Pydantic model)
+            new_default: New default configuration being saved (Pydantic model)
+            old_custom_dict: RAW custom config dict (sparse deltas only!)
+
+        Returns:
+            New sparse custom dict with only fields that differ from new_default
+        """
+        from copy import deepcopy
+
+        old_default_dict = old_default.model_dump(mode="python")
+        new_default_dict = new_default.model_dump(mode="python")
+
+        if old_custom_dict:
+            # Start with a copy of existing Custom deltas
+            new_custom_dict = deepcopy(old_custom_dict)
+        else:
+            new_custom_dict = old_default_dict
+
+        # Strip any values that now match the new Default
+        # This ensures Custom only contains actual customizations
+        strip_matching_defaults(new_custom_dict, new_default_dict)
+
+        logger.info(
+            f"Synced Custom config (sparse): preserved {len(new_custom_dict)} top-level customizations"
+        )
+
+        return new_custom_dict
+
+
+    def _read_record(self, configuration_type: str, version: str = "") -> Optional[ConfigurationRecord]:
+        """
+        Read ConfigurationRecord from DynamoDB using single key.
+
+        Args:
+            configuration_type: Configuration type (Config, Schema, Pricing)
+            version: Version identifier for Config type (default, production-config, test-config, ...) or "" for Schema/Pricing
 
         Returns:
             ConfigurationRecord or None if not found
-        """
-        response = self.table.get_item(Key={"Configuration": config_type})
+        """ 
+        response = self.table.get_item(Key={"Configuration": f"{CONFIG_TYPE_CONFIG}#{version}" if version else configuration_type})
         item = response.get("Item")
 
         if item is None:
@@ -649,13 +877,23 @@ class ConfigurationManager:
 
         return ConfigurationRecord.from_dynamodb_item(item)
 
-    def _write_record(self, record: ConfigurationRecord) -> None:
+    def _write_record(self, record: ConfigurationRecord, identifier: Optional[str] = None) -> None:
         """
-        Write ConfigurationRecord to DynamoDB.
+        Write ConfigurationRecord to DynamoDB using single key.
 
         Args:
             record: ConfigurationRecord to write
+            identifier: Optional identifier for logging (e.g., "v1", "Schema")
         """
         item = record.to_dynamodb_item()
         self.table.put_item(Item=item)
-        logger.info(f"Saved configuration: {record.configuration_type}")
+        
+        # Generate log identifier
+        if identifier:
+            log_id = identifier
+        elif record.configuration_type == CONFIG_TYPE_CONFIG and record.version:
+            log_id = f"{CONFIG_TYPE_CONFIG}#{record.version}"
+        else:
+            log_id = record.configuration_type
+            
+        logger.info(f"Saved configuration: {log_id}")

@@ -912,7 +912,7 @@ Resources:
                 order: 6
               max_tokens:
                 type: number
-                description: Max tokens
+                description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 7
               system_prompt:
                 type: string
@@ -1039,7 +1039,7 @@ Resources:
                 order: 4
               max_tokens:
                 type: number
-                description: Max tokens
+                description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 5
               system_prompt:
                 type: string
@@ -1187,7 +1187,7 @@ Resources:
                 order: 8
               max_tokens:
                 type: number
-                description: Max tokens
+                description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 9
               system_prompt:
                 type: string
@@ -1205,7 +1205,7 @@ Resources:
             sectionLabel: Summarization Inference
             properties:
               enabled:
-                type: booleanss
+                type: boolean
                 description: Enable or disable document summarization
                 default: true
                 order: 0
@@ -1262,7 +1262,7 @@ Resources:
                 order: 4
               max_tokens:
                 type: number
-                description: Max tokens
+                description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                 order: 5
               system_prompt:
                 type: string
@@ -1342,7 +1342,7 @@ Resources:
                     order: 4
                   max_tokens:
                     type: number
-                    description: Max tokens
+                    description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     order: 5
                   system_prompt:
                     type: string
@@ -1422,7 +1422,7 @@ Resources:
                     order: 2
                   max_tokens:
                     type: number
-                    description: Maximum number of tokens to generate
+                    description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     minimum: 1000
                     maximum: 20000
                     default: 10000
@@ -1501,7 +1501,7 @@ Resources:
                     order: 2
                   max_tokens:
                     type: number
-                    description: Maximum number of tokens to generate
+                    description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     minimum: 1000
                     maximum: 20000
                     default: 10000
@@ -1714,7 +1714,7 @@ Resources:
                     order: 3
                   max_tokens:
                     type: integer
-                    description: Max tokens
+                    description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     default: 4096
                     order: 4
                   system_prompt:
@@ -1795,7 +1795,7 @@ Resources:
                     order: 3
                   max_tokens:
                     type: integer
-                    description: Max tokens
+                    description: "Maximum number of output tokens. Ensure this does not exceed the selected model's limit. See model documentation for details."
                     default: 4096
                     order: 4
                   system_prompt:
