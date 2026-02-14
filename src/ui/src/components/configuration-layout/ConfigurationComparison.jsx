@@ -17,35 +17,67 @@ const ConfigurationComparison = ({ versions, configs }) => {
       </Box>
     );
   }
-  // Find differences between configurations - using backend logic
+
+  // Find differences between configurations with deep diff support for classes and rules
   const findDifferences = (configsToCompare) => {
     const differences = [];
-    const ignoredFields = new Set(['UpdatedAt', 'Description', 'CreatedAt', 'IsActive', 'Configuration', 'version_name', 'classes']);
+    const ignoredFields = new Set(['UpdatedAt', 'Description', 'CreatedAt', 'IsActive', 'Configuration', 'version_name']);
 
-    // Get all nested paths from dictionary - backend style
-    const getAllPaths = (dictionary, prefix = '') => {
+    // Check if an array contains identity-keyed objects (e.g., classes, rule_classes with $id fields)
+    const isIdentityKeyedArray = (arr) => {
+      return Array.isArray(arr) && arr.length > 0 && arr.every((item) => typeof item === 'object' && item !== null && '$id' in item);
+    };
+
+    // Recursively extract all leaf paths from a value, using $id-based keys for identity arrays
+    const getPathsFromValue = (value, currentPath) => {
       const paths = [];
 
-      for (const [key, value] of Object.entries(dictionary || {})) {
-        if (ignoredFields.has(key)) continue;
-
-        const currentPath = prefix ? `${prefix}.${key}` : key;
-        if (typeof value === 'object' && value !== null) {
-          paths.push(...getAllPaths(value, currentPath));
+      if (Array.isArray(value)) {
+        if (isIdentityKeyedArray(value)) {
+          // Identity-keyed array (classes, rule_classes): use $id as key segment
+          for (const item of value) {
+            const itemPrefix = `${currentPath}[${item['$id']}]`;
+            for (const [propKey, propValue] of Object.entries(item)) {
+              if (propKey === '$id') continue; // Skip the identity key itself
+              getPathsFromValue(propValue, `${itemPrefix}.${propKey}`).forEach((p) => paths.push(p));
+            }
+          }
         } else {
+          // Regular array: treat as leaf value (will be stringified for comparison)
           paths.push(currentPath);
         }
+      } else if (typeof value === 'object' && value !== null) {
+        for (const [key, val] of Object.entries(value)) {
+          if (ignoredFields.has(key)) continue;
+          const childPath = currentPath ? `${currentPath}.${key}` : key;
+          getPathsFromValue(val, childPath).forEach((p) => paths.push(p));
+        }
+      } else {
+        paths.push(currentPath);
       }
+
       return paths;
     };
 
-    // Get nested value using dot notation path - backend style
+    // Get nested value using dot notation path with identity-keyed array bracket support
+    // Supports paths like: "classes[Payslip].description" or "rule_classes[global_periods].rule_properties.field"
     const getNestedValue = (dictionary, path) => {
-      const keys = path.split('.');
+      const parts = path.split('.');
       let current = dictionary;
-      for (const key of keys) {
-        if (typeof current === 'object' && current !== null && key in current) {
-          current = current[key];
+
+      for (const part of parts) {
+        if (current === null || current === undefined) return null;
+
+        // Check for identity bracket notation: fieldName[id]
+        const bracketMatch = part.match(/^(.+?)\[(.+)\]$/);
+        if (bracketMatch) {
+          const arrayKey = bracketMatch[1];
+          const id = bracketMatch[2];
+          const arr = current[arrayKey];
+          if (!Array.isArray(arr)) return null;
+          current = arr.find((item) => item && item['$id'] === id) || null;
+        } else if (typeof current === 'object' && current !== null && part in current) {
+          current = current[part];
         } else {
           return null;
         }
@@ -56,12 +88,21 @@ const ConfigurationComparison = ({ versions, configs }) => {
     // Get all possible paths from all configs
     const allPaths = new Set();
     Object.values(configsToCompare).forEach((config) => {
-      // Now we receive merged config directly, not the old {custom, default, schema} format
-      getAllPaths(config || {}).forEach((path) => allPaths.add(path));
+      getPathsFromValue(config || {}, '').forEach((path) => {
+        if (path) allPaths.add(path);
+      });
     });
 
     // Sort paths for consistent ordering
     const sortedPaths = Array.from(allPaths).sort();
+
+    // Stringify a value for comparison (handles arrays, objects, primitives)
+    const stringifyValue = (value) => {
+      if (value === null || value === undefined) return '<missing>';
+      if (typeof value === 'string') return value.trim();
+      if (typeof value === 'object') return JSON.stringify(value);
+      return String(value).trim();
+    };
 
     // Check each path for differences
     sortedPaths.forEach((path) => {
@@ -72,12 +113,8 @@ const ConfigurationComparison = ({ versions, configs }) => {
 
       versions.forEach((version) => {
         const config = configsToCompare[version];
-        // Now we receive merged config directly, not the old {custom, default, schema} format
         const value = getNestedValue(config || {}, path);
-
-        // Always include the value, even if null/undefined (missing field)
-        const strValue =
-          value === null || value === undefined ? '<missing>' : typeof value === 'string' ? value.trim() : String(value).trim();
+        const strValue = stringifyValue(value);
 
         values[version] = strValue;
 
@@ -102,19 +139,30 @@ const ConfigurationComparison = ({ versions, configs }) => {
     return differences.sort((a, b) => a.field.localeCompare(b.field));
   };
 
-  // Helper to get nested value from object using dot notation
-  const getNestedValue = (obj, path) => {
-    return path.split('.').reduce((current, key) => {
-      return current && current[key] !== undefined ? current[key] : undefined;
-    }, obj);
-  };
-
   // Format value for display
   const formatValue = (value) => {
     if (value === '<missing>') return <Badge color="grey">Missing</Badge>;
     if (value === undefined) return <Badge color="grey">Not set</Badge>;
     if (value === null) return <Badge color="grey">null</Badge>;
     if (typeof value === 'boolean') return value ? 'true' : 'false';
+    // Handle JSON-stringified arrays/objects from deep diff
+    if (typeof value === 'string' && value.startsWith('[') && value.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) return `[${parsed.length} items]`;
+      } catch {
+        // Not valid JSON, display as-is
+      }
+    }
+    if (typeof value === 'string' && value.startsWith('{') && value.endsWith('}')) {
+      try {
+        JSON.parse(value);
+        // Truncate long JSON objects for display
+        return value.length > 80 ? `${value.substring(0, 77)}...` : value;
+      } catch {
+        // Not valid JSON, display as-is
+      }
+    }
     if (Array.isArray(value)) return `[${value.length} items]`;
     if (typeof value === 'object') return '[Object]';
     return String(value);

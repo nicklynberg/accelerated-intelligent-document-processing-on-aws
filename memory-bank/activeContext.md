@@ -92,6 +92,31 @@ flowchart TD
 
 ---
 
+### Config Version Comparison Deep Diffs (February 14, 2026)
+**Status:** ✅ Completed
+
+#### Problem
+The "Compare Selected" config versions feature was not showing changes in `classes` (document extraction schemas) or `rule_classes` (rule validation schemas) sections. Two issues:
+1. `classes` was explicitly listed in `ignoredFields` — entirely skipped from comparison
+2. No identity-based array comparison — arrays of complex JSON Schema objects (keyed by `$id`) need to be compared by matching items by their `$id` field, not by array index
+
+#### Solution
+Modified `src/ui/src/components/configuration-layout/ConfigurationComparison.jsx`:
+- **Removed `classes` from `ignoredFields`** so document schemas are now included in comparison
+- **Added `isIdentityKeyedArray()` detection** — detects arrays where all items have a `$id` field (applies to `classes` and `rule_classes`)
+- **Added `$id`-based path generation** — for identity-keyed arrays, paths use the `$id` value as the key (e.g., `classes[Payslip].description`) instead of numeric index
+- **Added `$id`-based path resolution** — `getNestedValue()` supports bracket notation like `classes[Payslip]` to find the array item where `$id === 'Payslip'`
+- **Improved value formatting** — JSON-stringified objects/arrays get smarter display (truncation, item counts)
+- Regular arrays (non-identity-keyed) are still treated as leaf values and stringified for comparison
+
+#### Path format examples
+- `classes[Payslip].description` — class description changed
+- `classes[Payslip].properties.City.type` — nested field type changed
+- `classes[BankStatement].$schema` — class present in one version but not another shows as `<missing>`
+- `rule_classes[global_periods].rule_properties.minor_surgery` — rule property changed
+
+---
+
 ### Configuration Versions Documentation (February 14, 2026)
 **Status:** ✅ Completed
 
