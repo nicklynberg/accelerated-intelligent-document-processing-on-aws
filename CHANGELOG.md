@@ -8,7 +8,7 @@ SPDX-License-Identifier: MIT-0
 ### Added
 
 - **Configuration Versioning System**
-  - Manage multiple named configuration versions as complete, self-contained snapshots — no hidden merging or delta logic
+  - Manage multiple named configuration versions as complete, self-contained snapshots
   - **Version Management UI**: Configuration Versions table with create, compare, activate, delete, and import operations; version comparison with CSV/JSON export
   - **Full Config Storage**: Each version stores the complete configuration; editing and saving a version persists the full config, making behavior predictable and debuggable
   - **Active Version**: One version is marked active for new document processing; selectable when uploading documents, running tests, or reprocessing
