@@ -38,12 +38,12 @@ const useConfigurationVersions = () => {
         throw new Error(response.error?.message || 'Failed to fetch versions');
       }
 
-      const versions = response.versions || [];
+      const fetchedVersions = response.versions || [];
       logger.info(
         'Fetched versions:',
-        versions.map((v) => ({ name: v.versionName, description: v.description, created: v.created, isActive: v.isActive })),
+        fetchedVersions.map((v) => ({ name: v.versionName, description: v.description, created: v.created, isActive: v.isActive })),
       );
-      setVersions(versions);
+      setVersions(fetchedVersions);
     } catch (err) {
       logger.error('Error fetching configuration versions:', err);
       console.error('Full error object:', err);

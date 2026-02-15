@@ -264,8 +264,8 @@ const ConfigurationLayout = () => {
 
       setCompareData(comparisonData);
       setShowCompareModal(true);
-    } catch (error) {
-      console.error('Failed to fetch configurations for comparison:', error);
+    } catch (err) {
+      console.error('Failed to fetch configurations for comparison:', err);
     } finally {
       setComparingVersions(false);
     }
@@ -303,8 +303,8 @@ const ConfigurationLayout = () => {
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       setSelectedVersion(versionName); // Select the activated version (useEffect will fetch config)
-    } catch (error) {
-      console.error('Failed to activate version:', error);
+    } catch (err) {
+      console.error('Failed to activate version:', err);
     }
   };
 
@@ -324,8 +324,8 @@ const ConfigurationLayout = () => {
       await setActiveVersion(versionName);
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSelectedVersion(versionName);
-    } catch (error) {
-      console.error('Failed to sync and activate version:', error);
+    } catch (err) {
+      console.error('Failed to sync and activate version:', err);
     }
   };
 
@@ -368,9 +368,9 @@ const ConfigurationLayout = () => {
       setNewVersionName('');
       setNewVersionDescription('');
       setShowImportSourceModal(false); // Also close import source modal
-    } catch (error) {
-      logger.error('Create version error:', error);
-      console.error('Create version error:', error);
+    } catch (err) {
+      logger.error('Create version error:', err);
+      console.error('Create version error:', err);
     }
   };
 
@@ -387,8 +387,8 @@ const ConfigurationLayout = () => {
       if (selectedVersion && versionNames.includes(selectedVersion)) {
         setSelectedVersion(null);
       }
-    } catch (error) {
-      console.error('Failed to delete versions:', error);
+    } catch (err) {
+      console.error('Failed to delete versions:', err);
     }
   };
 

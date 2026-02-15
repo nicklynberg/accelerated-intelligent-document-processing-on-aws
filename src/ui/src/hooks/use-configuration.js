@@ -206,7 +206,7 @@ const useConfiguration = (versionName = 'default') => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchConfiguration = async (versionName = 'default', silent = false) => {
+  const fetchConfiguration = async (fetchVersionName = 'default', silent = false) => {
     // Use different loading states for initial load vs background refresh
     if (silent) {
       setRefreshing(true);
@@ -215,12 +215,12 @@ const useConfiguration = (versionName = 'default') => {
     }
     setError(null);
     try {
-      logger.debug('Fetching configuration for versionName:', versionName);
+      logger.debug('Fetching configuration for versionName:', fetchVersionName);
       const result = await client.graphql({
         query: getConfigVersionQuery,
-        variables: { versionName },
+        variables: { versionName: fetchVersionName },
       });
-      logger.debug('API response version', versionName, result);
+      logger.debug('API response version', fetchVersionName, result);
 
       const response = result.data.getConfigVersion;
 
@@ -344,10 +344,10 @@ const useConfiguration = (versionName = 'default') => {
     }
   };
 
-  const updateConfiguration = async (versionName, newCustomConfig, description = null) => {
+  const updateConfiguration = async (targetVersionName, newCustomConfig, description = null) => {
     setError(null);
     try {
-      logger.debug('Updating config - versionName:', versionName, 'description:', description, 'config:', newCustomConfig);
+      logger.debug('Updating config - versionName:', targetVersionName, 'description:', description, 'config:', newCustomConfig);
 
       // Make sure we have a valid object to update with
       const configToUpdate =
@@ -362,12 +362,12 @@ const useConfiguration = (versionName = 'default') => {
       // Ensure we're sending a JSON string
       const configString = typeof configToUpdate === 'string' ? configToUpdate : JSON.stringify(configToUpdate);
 
-      logger.debug('Sending customConfig string for version', versionName, ':', configString);
+      logger.debug('Sending customConfig string for version', targetVersionName, ':', configString);
 
       const result = await client.graphql({
         query: updateConfigurationMutation,
         variables: {
-          versionName,
+          versionName: targetVersionName,
           customConfig: configString,
           description,
         },
@@ -383,12 +383,12 @@ const useConfiguration = (versionName = 'default') => {
       // Refetch silently to ensure backend and frontend are in sync
       // Silent mode prevents loading state changes that cause re-renders
       // The component will handle rehydration without full re-render
-      await fetchConfiguration(versionName, true);
+      await fetchConfiguration(targetVersionName, true);
 
       return true;
     } catch (err) {
-      logger.error('Error updating configuration for version', versionName, ':', err);
-      setError(`Failed to update configuration for version ${versionName}: ${err.message}`);
+      logger.error('Error updating configuration for version', targetVersionName, ':', err);
+      setError(`Failed to update configuration for version ${targetVersionName}: ${err.message}`);
       return false;
     }
   };
