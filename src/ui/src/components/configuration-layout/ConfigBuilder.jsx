@@ -21,6 +21,26 @@ import {
 } from '@cloudscape-design/components';
 import SchemaBuilder from '../json-schema-builder/SchemaBuilder';
 
+// Numeric-aware value comparison: treats "5" and "5.0" as equal, "0" and "0.0" as equal, etc.
+const areValuesEqual = (val1, val2) => {
+  // Fast path: strict equality
+  if (val1 === val2) return true;
+  // JSON.stringify equality for objects/arrays
+  const str1 = JSON.stringify(val1);
+  const str2 = JSON.stringify(val2);
+  if (str1 === str2) return true;
+  // Numeric comparison: if both can be parsed as numbers, compare numerically
+  const isNumeric = (v) => {
+    if (typeof v === 'number') return true;
+    if (typeof v === 'string' && v.trim() !== '') return !Number.isNaN(Number(v));
+    return false;
+  };
+  if (isNumeric(val1) && isNumeric(val2)) {
+    return Number(val1) === Number(val2);
+  }
+  return false;
+};
+
 // Add custom styles for compact form layout
 const customStyles = `
   .expandable-textarea {
@@ -1298,11 +1318,12 @@ const ConfigBuilder = ({
 
     // Check if current form value differs from default (for "Restore to default" button visibility)
     // This uses formValues (live edits) vs defaultConfig, so the button hides immediately after restoring
+    // Uses numeric-aware comparison so "5" and "5.0" are treated as equal
     let isFormValueDifferentFromDefault = false;
     if (defaultConfig) {
       const defaultValue = getValueAtPath(defaultConfig, path);
       const formValue = getValueAtPath(formValues, path);
-      isFormValueDifferentFromDefault = JSON.stringify(formValue) !== JSON.stringify(defaultValue);
+      isFormValueDifferentFromDefault = !areValuesEqual(formValue, defaultValue);
     }
 
     // Check if current form value differs from last-saved config (for unsaved change indicator)
@@ -1310,7 +1331,7 @@ const ConfigBuilder = ({
     if (mergedConfig) {
       const savedValue = getValueAtPath(mergedConfig, path);
       const formValue = getValueAtPath(formValues, path);
-      hasUnsavedChange = JSON.stringify(formValue) !== JSON.stringify(savedValue);
+      hasUnsavedChange = !areValuesEqual(formValue, savedValue);
     }
 
     // Show "Restore to default" only if form value currently differs from default

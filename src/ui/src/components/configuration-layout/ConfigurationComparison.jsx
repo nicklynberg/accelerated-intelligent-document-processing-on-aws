@@ -104,6 +104,19 @@ const ConfigurationComparison = ({ versions, configs }) => {
       return String(value).trim();
     };
 
+    // Numeric-aware comparison: treats "5" and "5.0" as equal
+    const isNumeric = (v) => {
+      if (v === '<missing>') return false;
+      if (typeof v === 'number') return true;
+      if (typeof v === 'string' && v.trim() !== '') return !Number.isNaN(Number(v));
+      return false;
+    };
+    const areStrValuesEqual = (a, b) => {
+      if (a === b) return true;
+      if (isNumeric(a) && isNumeric(b)) return Number(a) === Number(b);
+      return false;
+    };
+
     // Check each path for differences
     sortedPaths.forEach((path) => {
       const values = {};
@@ -118,11 +131,11 @@ const ConfigurationComparison = ({ versions, configs }) => {
 
         values[version] = strValue;
 
-        // Check for differences using normalized values
+        // Check for differences using numeric-aware comparison
         if (!firstValueSet) {
           firstValue = strValue;
           firstValueSet = true;
-        } else if (firstValue !== strValue) {
+        } else if (!areStrValuesEqual(firstValue, strValue)) {
           hasDifferences = true;
         }
       });
