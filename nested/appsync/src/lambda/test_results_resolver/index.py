@@ -37,9 +37,17 @@ def handler(event, context):
     field_name = event['info']['fieldName']
     
     if field_name == 'getTestRuns':
-        time_period_hours = event.get('arguments', {}).get('timePeriodHours', 2)  # Default 2 hours
-        logger.info(f"Processing getTestRuns request with timePeriodHours: {time_period_hours}")
-        return get_test_runs(time_period_hours)
+        args = event.get('arguments', {})
+        start_date_time = args.get('startDateTime')
+        end_date_time = args.get('endDateTime')
+        time_period_hours = args.get('timePeriodHours', 2)  # Default 2 hours
+        
+        if start_date_time and end_date_time:
+            logger.info(f"Processing getTestRuns request with date range: {start_date_time} → {end_date_time}")
+            return get_test_runs_by_date_range(start_date_time, end_date_time)
+        else:
+            logger.info(f"Processing getTestRuns request with timePeriodHours: {time_period_hours}")
+            return get_test_runs(time_period_hours)
     elif field_name == 'getTestRun':
         test_run_id = event['arguments']['testRunId']
         logger.info(f"Processing getTestRun request for test run: {test_run_id}")
@@ -216,6 +224,7 @@ def get_test_results(test_run_id):
                 'createdAt': _format_datetime(metadata.get('CreatedAt')),
                 'completedAt': _format_datetime(metadata.get('CompletedAt')),
                 'context': metadata.get('Context'),
+                'configVersion': metadata.get('ConfigVersion'),
                 'config': _get_test_run_config(test_run_id)
             }
     
@@ -240,6 +249,7 @@ def get_test_results(test_run_id):
         'createdAt': _format_datetime(metadata.get('CreatedAt')),
         'completedAt': _format_datetime(metadata.get('CompletedAt')),
         'context': metadata.get('Context'),
+        'configVersion': metadata.get('ConfigVersion'),
         'config': _get_test_run_config(test_run_id)
     }
 
@@ -268,6 +278,72 @@ def get_test_results(test_run_id):
         logger.warning(f"Failed to cache results for {test_run_id}: {e}")
     
     return result
+
+def get_test_runs_by_date_range(start_date_time, end_date_time):
+    """Get list of test runs within a specific date range (startDateTime to endDateTime)"""
+    table = dynamodb.Table(os.environ['TRACKING_TABLE'])
+    
+    logger.info(f"Fetching test runs between: {start_date_time} and {end_date_time}")
+    
+    # Handle pagination for DynamoDB scan
+    items = []
+    scan_kwargs = {
+        'FilterExpression': 'begins_with(PK, :pk) AND SK = :sk AND CreatedAt >= :start AND CreatedAt <= :end',
+        'ExpressionAttributeValues': {
+            ':pk': 'testrun#',
+            ':sk': 'metadata',
+            ':start': start_date_time,
+            ':end': end_date_time
+        }
+    }
+    
+    while True:
+        response = table.scan(**scan_kwargs)
+        items.extend(response.get('Items', []))
+        
+        if 'LastEvaluatedKey' not in response:
+            break
+        scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
+    
+    logger.info(f"DynamoDB scan completed. Items found: {len(items)}")
+    
+    test_runs = []
+    for item in items:
+        # If completedAt is missing, call get_test_run_status to update it
+        status_result = None
+        if not item.get('CompletedAt'):
+            status_result = get_test_run_status(item['TestRunId'])
+            # Refresh item from database to get updated CompletedAt
+            updated_response = table.get_item(
+                Key={'PK': f'testrun#{item["TestRunId"]}', 'SK': 'metadata'}
+            )
+            if 'Item' in updated_response:
+                item = updated_response['Item']
+        
+        test_runs.append({
+            'testRunId': item['TestRunId'],
+            'testSetId': item.get('TestSetId'),
+            'testSetName': item.get('TestSetName'),
+            'status': status_result.get('status') if status_result else item.get('Status'),
+            'filesCount': item.get('FilesCount', 0),
+            'completedFiles': status_result.get('completedFiles') if status_result else item.get('CompletedFiles', 0),
+            'failedFiles': status_result.get('failedFiles') if status_result else item.get('FailedFiles', 0),
+            'createdAt': _format_datetime(item.get('CreatedAt')),
+            'completedAt': _format_datetime(item.get('CompletedAt')),
+            'context': item.get('Context')
+        })
+    
+    # Sort by createdAt descending (most recent first)
+    def sort_key(test_run):
+        created_at = test_run.get('createdAt')
+        if not created_at:
+            return '1970-01-01T00:00:00Z'
+        return created_at
+    
+    test_runs.sort(key=sort_key, reverse=True)
+    
+    return test_runs
+
 
 def get_test_runs(time_period_hours=2):
     """Get list of test runs within specified time period"""
@@ -333,7 +409,8 @@ def get_test_runs(time_period_hours=2):
             'failedFiles': status_result.get('failedFiles') if status_result else item.get('FailedFiles', 0),
             'createdAt': _format_datetime(item.get('CreatedAt')),
             'completedAt': _format_datetime(item.get('CompletedAt')),
-            'context': item.get('Context')
+            'context': item.get('Context'),
+            'configVersion': item.get('ConfigVersion')
         })
     
     # Sort by createdAt descending (most recent first)
@@ -566,7 +643,7 @@ def _get_test_run_config(test_run_id):
     return convert_decimals(config)
 
 def _build_config_comparison(configs):
-    """Build configuration differences - compare Custom configs, fallback to Default"""
+    """Build configuration differences - compare actual Config structure"""
     if not configs or len(configs) < 2:
         return None
     
@@ -577,6 +654,13 @@ def _build_config_comparison(configs):
         for key in keys:
             if isinstance(current, dict) and key in current:
                 current = current[key]
+            elif isinstance(current, list) and key.isdigit():
+                # Handle array index access
+                index = int(key)
+                if 0 <= index < len(current):
+                    current = current[index]
+                else:
+                    return None
             else:
                 return None
         return current
@@ -584,66 +668,71 @@ def _build_config_comparison(configs):
     def get_all_paths(dictionary, prefix=""):
         """Get all nested paths from dictionary"""
         paths = []
+        ignored_fields = {'UpdatedAt', 'Description', 'CreatedAt', 'IsActive', 'Configuration', 'version_name', 'classes'}
+        
         for key, value in dictionary.items():
+            # Skip ignored metadata fields
+            if key in ignored_fields:
+                continue
+                
             current_path = f"{prefix}.{key}" if prefix else key
             if isinstance(value, dict):
                 paths.extend(get_all_paths(value, current_path))
+            elif isinstance(value, list):
+                # Handle arrays by creating indexed paths for each element
+                for i, item in enumerate(value):
+                    item_path = f"{current_path}.{i}"
+                    if isinstance(item, dict):
+                        paths.extend(get_all_paths(item, item_path))
+                    else:
+                        paths.append(item_path)
             else:
                 paths.append(current_path)
         return paths
     
     # Get all possible configuration paths from all configs
     all_paths = set()
-    default_config = {}
     
     for config_item in configs:
         config = config_item['config']
-        custom = config.get('Custom', {})
-        default = config.get('Default', {})
-        
-        all_paths.update(get_all_paths(custom))
-        all_paths.update(get_all_paths(default))
-        
-        # Use first config's default as reference
-        if not default_config:
-            default_config = default
+        actual_config = config.get('Config', {})
+        all_paths.update(get_all_paths(actual_config))
+    
+    # Sort paths for consistent ordering with configuration UI
+    sorted_paths = sorted(all_paths)
     
     differences = []
-    for path in all_paths:
+    for path in sorted_paths:
         values = {}
         has_differences = False
         first_value = None
         
-        # Get effective values for each test run
+        # Get values for each test run
         for config_item in configs:
             test_run_id = config_item['testRunId']
             config = config_item['config']
-            custom = config.get('Custom', {})
-            default = config.get('Default', {})
+            actual_config = config.get('Config', {})
             
-            # Get effective value (Custom overrides Default)
-            value = get_nested_value(custom, path)
+            value = get_nested_value(actual_config, path)
+            
+            # Always include the value, even if None (missing field)
             if value is None:
-                value = get_nested_value(default, path)
+                str_value = '<missing>'
+            elif isinstance(value, str):
+                str_value = value.strip()
+            else:
+                str_value = str(value).strip()
             
-            if value is not None:
-                # Normalize the value for comparison
-                if isinstance(value, str):
-                    # Strip whitespace and normalize string values
-                    str_value = value.strip()
-                else:
-                    str_value = str(value).strip()
-                
-                values[test_run_id] = str_value
-                
-                # Check for differences using normalized values
-                if first_value is None:
-                    first_value = str_value
-                elif first_value != str_value:
-                    has_differences = True
+            values[test_run_id] = str_value
+            
+            # Check for differences using normalized values
+            if first_value is None:
+                first_value = str_value
+            elif first_value != str_value:
+                has_differences = True
         
-        # Only include if there are differences and at least 2 values
-        if has_differences and len(values) >= 2:
+        # Include if there are differences (including missing vs present)
+        if has_differences:
             differences.append({
                 'setting': path,
                 'values': values

@@ -6,11 +6,12 @@ import { Button, ButtonDropdown, CollectionPreferences, Link, SpaceBetween } fro
 import { TableHeader } from '../common/table';
 import { DOCUMENTS_PATH } from '../../routes/constants';
 import { renderHitlStatus } from '../common/hitl-status-renderer';
+import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
 
 export const KEY_COLUMN_ID = 'objectKey';
 export const UNIQUE_TRACK_ID = 'uniqueId';
 
-export const COLUMN_DEFINITIONS_MAIN = [
+export const COLUMN_DEFINITIONS_MAIN = (versions = []) => [
   {
     id: KEY_COLUMN_ID,
     header: 'Document ID',
@@ -27,6 +28,13 @@ export const COLUMN_DEFINITIONS_MAIN = [
     header: 'Status',
     cell: (item) => item.objectStatus,
     sortingField: 'objectStatus',
+    width: 150,
+  },
+  {
+    id: 'configVersion',
+    header: 'Config Version',
+    cell: (item) => formatConfigVersionLink(item.configVersion, versions),
+    sortingField: 'configVersion',
     width: 150,
   },
   {
@@ -88,7 +96,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
   },
 ];
 
-export const DEFAULT_SORT_COLUMN = COLUMN_DEFINITIONS_MAIN[2]; // initialEventTime
+export const DEFAULT_SORT_COLUMN = { sortingField: 'initialEventTime' };
 
 export const SELECTION_LABELS = {
   itemSelectionLabel: (data, row) => `select ${row.objectKey}`,
@@ -111,6 +119,7 @@ const VISIBLE_CONTENT_OPTIONS = [
       { id: 'initialEventTime', label: 'Submitted' },
       { id: 'completionTime', label: 'Completed' },
       { id: 'duration', label: 'Duration' },
+      { id: 'configVersion', label: 'Config Version' },
       { id: 'evaluationStatus', label: 'Evaluation' },
       { id: 'confidenceAlertCount', label: 'Confidence Alerts' },
       { id: 'hitlStatus', label: 'Review Status' },
@@ -120,7 +129,15 @@ const VISIBLE_CONTENT_OPTIONS = [
   },
 ];
 
-const VISIBLE_CONTENT = ['objectKey', 'objectStatus', 'initialEventTime', 'duration', 'confidenceAlertCount', 'hitlStatus'];
+const VISIBLE_CONTENT = [
+  'objectKey',
+  'objectStatus',
+  'configVersion',
+  'initialEventTime',
+  'duration',
+  'confidenceAlertCount',
+  'hitlStatus',
+];
 
 export const DEFAULT_PREFERENCES = {
   pageSize: PAGE_SIZE_OPTIONS[0].value,
@@ -169,6 +186,7 @@ const TIME_PERIOD_DROPDOWN_CONFIG = {
   'refresh-1w': { count: 7 * DOCUMENT_LIST_SHARDS_PER_DAY, text: '1 week' },
   'refresh-2w': { count: 14 * DOCUMENT_LIST_SHARDS_PER_DAY, text: '2 weeks' },
   'refresh-1m': { count: 30 * DOCUMENT_LIST_SHARDS_PER_DAY, text: '30 days' },
+  'custom-range': { count: -1, text: 'Custom range...' },
 };
 const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map((k) => ({
   id: k,
@@ -177,6 +195,9 @@ const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map(
 
 // local storage key to persist the last periods to load
 export const PERIODS_TO_LOAD_STORAGE_KEY = 'periodsToLoad';
+
+// local storage key to persist custom date range
+export const CUSTOM_DATE_RANGE_STORAGE_KEY = 'customDateRange';
 
 // Statuses that can be aborted
 const ABORTABLE_STATUSES = [
@@ -205,13 +226,37 @@ export const DocumentsCommonHeader = ({
 }) => {
   const onPeriodToLoadChange = ({ detail }) => {
     const { id } = detail;
+    if (id === 'custom-range') {
+      // Signal parent to show date range picker
+      if (props.onCustomDateRange) {
+        props.onCustomDateRange();
+      }
+      return;
+    }
     const shardCount = TIME_PERIOD_DROPDOWN_CONFIG[id].count;
+    // Clear any custom date range when switching to relative period
+    if (props.setCustomDateRange) {
+      props.setCustomDateRange(null);
+      localStorage.removeItem(CUSTOM_DATE_RANGE_STORAGE_KEY);
+    }
     props.setPeriodsToLoad(shardCount);
     localStorage.setItem(PERIODS_TO_LOAD_STORAGE_KEY, JSON.stringify(shardCount));
   };
 
+  // Determine display text
+  const getDisplayText = () => {
+    if (props.customDateRange) {
+      const start = new Date(props.customDateRange.startDateTime);
+      const end = new Date(props.customDateRange.endDateTime);
+      const formatDate = (d) =>
+        `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      return `${formatDate(start)} → ${formatDate(end)}`;
+    }
+    return TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
+  };
+
   // eslint-disable-next-line
-  const periodText = TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
+  const periodText = getDisplayText();
 
   const hasSelectedItems = selectedItems.length > 0;
   // Check if any selected items can be aborted

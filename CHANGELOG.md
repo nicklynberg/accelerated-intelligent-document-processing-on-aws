@@ -5,6 +5,60 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.4.15]
+
+### Added
+
+- **Lambda Hook Inference (Custom LLM Integration)**
+  - Customers can provide their own custom Lambda function to integrate with any LLM — models hosted on SageMaker, ECS, EC2, or external APIs — by selecting `LambdaHook` as the model in any pipeline step
+  - **Per-Step Granularity**: Configure LambdaHook independently for OCR, Classification, Extraction, Assessment, and Summarization (Pattern-2)
+  - **Converse API-Compatible Contract**: Lambda receives the same Converse API payload structure used with Bedrock, and returns a Converse API-compatible response — documented request/response format for easy implementation
+  - **S3 Image References**: Inline image bytes automatically uploaded to S3 and replaced with `s3Location` references to avoid Lambda's 6MB payload limit
+  - **GENAIIDP- Naming Convention**: Lambda function names must start with `GENAIIDP-` for secure, scoped IAM permissions
+  - **Built-in Retry Logic**: Exponential backoff with jitter for transient errors (throttling, timeouts), matching Bedrock retry behavior
+  - **Metering Integration**: Token usage from Lambda response tracked in document metering data for cost calculations
+  - **Sample Functions**: Examples in `samples/lambda-hook-inference/` — Bedrock proxy (with customization points) and SageMaker endpoint hook, with SAM template
+  - **Documentation**: New [lambda-hook-inference.md](docs/lambda-hook-inference.md) with architecture diagram, configuration guide, payload contract, SageMaker example, IAM, and limitations
+
+- **Configuration Versioning System**
+  - Manage multiple named configuration versions as complete, self-contained snapshots
+  - **Version Management UI**: Configuration Versions table with create, compare, activate, delete, and import operations; version comparison with CSV/JSON export
+  - **Full Config Storage**: Each version stores the complete configuration; editing and saving a version persists the full config, making behavior predictable and debuggable
+  - **Active Version**: One version is marked active for new document processing; selectable when uploading documents, running tests, or reprocessing
+  - **Version Tracking**: Config version recorded per document (S3 metadata + DynamoDB) and displayed across Document List, Document Details, Test Studio results, and all exports
+  - **Unsaved Changes Protection**: Per-field unsaved change indicators (orange dots), info banner with "Discard changes" button, and browser navigation guards (`beforeunload` + SPA hash navigation)
+  - **CLI Integration**: `--config-version` parameter for `run-inference`, `config-download`, and `config-upload` commands with version validation before processing
+  - **Test Studio Integration**: Version selector in Test Runner, version tracking per test run, version displayed in Test Results and Test Comparison views
+  - **Legacy Support**: Existing sparse-delta configs auto-detected and seamlessly migrated to full format on first read
+  - **Stack Upgrade Independence**: Stack upgrades update only the `default` version; user versions are locked snapshots that users explicitly manage
+  - **Documentation**: New [configuration-versions.md](docs/configuration-versions.md) with comprehensive feature documentation
+  - **~200 lines of merge/delta/sync code removed**: Eliminated runtime merge logic, auto-sync on default updates, null-as-deletion semantics, and auto-cleanup of matching defaults
+
+- **Custom Date Range Selector for Document List and Test Executions** - [GitHub Issue #177](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/177)
+  - Added "Custom range..." option to the time period dropdown in both Document List and Test Studio → Test Results
+  - Users can now select absolute start/end dates to query historical documents beyond the previous 30-day limit
+  - **Scalable Server-Side Architecture**: Custom date ranges use a new `listDocumentsByDateRange` Lambda resolver that iterates shards server-side and batch-fetches documents, avoiding the client-side fan-out scalability issue
+  - **Existing Behavior Preserved**: Relative period presets (2h through 30d) continue using the proven client-side shard mechanism — zero changes to existing code paths
+  - **365-Day Maximum**: Date range capped at 365 days in the UI to prevent unbounded queries
+
+### Fixed
+
+- **Schema Builder Few-Shot Examples Input Focus Loss** - [GitHub Issue #174](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/174)
+  - Fixed cursor jumping out of input fields after each keystroke when editing few-shot examples in the Schema Builder
+
+
+- **Code Intelligence Agent - DeepWiki MCP Transport Migration**
+  - Fixed "client initialization failed" error when using Code Intelligence Agent in Agent Companion Chat
+  - **Root Cause**: DeepWiki deprecated their SSE transport endpoint (`/sse`) and now returns HTTP 410 Gone
+  - **Solution**: Migrated from SSE (`sse_client`) to Streamable HTTP (`streamablehttp_client`) transport using the new `/mcp` endpoint
+  - See DeepWiki documentation: https://docs.devin.ai/work-with-devin/deepwiki-mcp
+
+### Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.15.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.15.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.15.yaml`
+
+
 ## [0.4.14]
 
 ### Added
