@@ -5,6 +5,14 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **React UI TypeScript Migration (Phases 1–2)** — Added TypeScript tooling foundation (`tsconfig.json`, `@types/*`, ESLint overrides for `.ts/.tsx`) and migrated all 5 contexts, 16 hooks, constants, and utility modules from JavaScript to TypeScript with proper interfaces and type annotations. No runtime behavior changes; JS and TS coexist for incremental migration. ([#187](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/187), [#188](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/188), [#191](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/191))
+
+### Fixed
+
+- **Fixed Processing Flow chart using active stack config instead of the document's actual config version** for determining disabled steps (assessment, summarization, etc.)
+
 ## [0.4.15]
 
 ### Added
