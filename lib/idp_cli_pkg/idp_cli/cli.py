@@ -3736,6 +3736,9 @@ def config_activate(
             )
             console.print("New documents will use this configuration immediately.")
 
+        except ValueError as e:
+            console.print(f"[red]✗ {e}[/red]")
+            return
         except Exception as e:
             console.print(f"[red]✗ Failed to activate configuration version: {e}[/red]")
             return
@@ -3743,9 +3746,6 @@ def config_activate(
     except Exception as e:
         console.print(f"[red]✗ Failed to activate configuration: {e}[/red]")
         return
-
-    except Exception as e:
-        logger.error(f"Error activating config: {e}", exc_info=True)
 
 
 @cli.command(name="config-list")
@@ -3840,6 +3840,9 @@ def config_list(stack_name: str):
 
             console.print(table)
 
+        except ValueError as e:
+            console.print(f"[red]✗ {e}[/red]")
+            return
         except Exception as e:
             console.print(f"[red]✗ Failed to list configuration versions: {e}[/red]")
             return
@@ -3847,9 +3850,6 @@ def config_list(stack_name: str):
     except Exception as e:
         console.print(f"[red]✗ Failed to list configurations: {e}[/red]")
         return
-
-    except Exception as e:
-        logger.error(f"Error listing configs: {e}", exc_info=True)
 
 
 @cli.command(name="config-delete")
@@ -3946,9 +3946,6 @@ def config_delete(
     except Exception as e:
         console.print(f"[red]✗ Failed to delete configuration: {e}[/red]")
         return
-
-    except Exception as e:
-        logger.error(f"Error deleting config: {e}", exc_info=True)
         console.print(f"[red]✗ Error: {e}[/red]")
         sys.exit(1)
 

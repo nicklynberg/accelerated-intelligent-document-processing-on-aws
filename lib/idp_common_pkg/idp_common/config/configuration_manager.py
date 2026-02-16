@@ -206,11 +206,15 @@ class ConfigurationManager:
 
         if not version:
             # Find and use active version
+            active_version: Optional[str] = None
             for version_dict in self.list_config_versions():
                 if version_dict.get("isActive"):
-                    version = version_dict.get("versionName")
-                    logger.info(f"Using active version: {version}")
+                    active_version = version_dict.get("versionName")
+                    logger.info(f"Using active version: {active_version}")
                     break
+            
+            if active_version:
+                version = active_version
             else:
                 logger.warning("No active version found, using default")
                 version = DEFAULT_VERSION
