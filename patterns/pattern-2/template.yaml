@@ -437,12 +437,17 @@ Resources:
           - classification
           - extraction
         properties:
-          notes:
+          use_bda:
             order: 0
+            type: boolean
+            description: Use Bedrock Data Automation (BDA) for OCR, classification, and extraction
+            default: false
+          notes:
+            order: 1
             type: string
             description: Notes
           ocr:
-            order: 1
+            order: 2
             type: object
             sectionLabel: OCR Configuration
             required:
