@@ -23,6 +23,13 @@ This folder contains detailed documentation on various aspects of the GenAI Inte
 - [Monitoring](./monitoring.md) - Monitoring and logging capabilities
 - [Troubleshooting](./troubleshooting.md) - Troubleshooting and performance guides
 
+### GovCloud
+
+- [GovCloud Deployment Guide](./govcloud-deployment.md) - Deployment packages, prerequisites, and deploy commands
+- [GovCloud Architecture](./govcloud-architecture.md) - Services removed vs. retained, limitations, and workarounds
+- [Batch Jobs REST API](./govcloud-batch-api.md) - API reference, authentication, and bastion tunnel setup
+- [GovCloud Operations](./govcloud-operations.md) - Monitoring, troubleshooting, and best practices
+
 ## Screenshots and Diagrams
 
 The documentation references several screenshots and diagrams from the `../images` folder:

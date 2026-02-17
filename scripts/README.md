@@ -11,6 +11,8 @@ scripts/
 ├── sdlc/                # SDLC CI/CD scripts and infrastructure
 │   ├── cfn/             # CloudFormation templates for CI/CD pipeline
 │   └── [scripts]        # CI/CD automation scripts
+├── bastion.sh           # SSH tunnel to API Gateway via bastion host
+├── get_api_token.sh     # Generate OAuth bearer token for API access
 └── generate_govcloud_template.py  # GovCloud template generation
 ```
 
@@ -39,6 +41,8 @@ See [sdlc/cfn/README.md](sdlc/cfn/README.md) for CloudFormation templates.
 
 | Script | Purpose | Usage |
 |--------|---------|-------|
+| `bastion.sh` | Establish SSH tunnel to API Gateway via bastion host | `./scripts/bastion.sh <stack-name>` |
+| `get_api_token.sh` | Generate OAuth bearer token for API access (e.g., Postman) | `./scripts/get_api_token.sh <stack-name>` |
 | `generate_govcloud_template.py` | Generate GovCloud-compatible template | `python scripts/generate_govcloud_template.py <bucket> <prefix> <region>` |
 
 ## Operational Commands (via idp-cli)
