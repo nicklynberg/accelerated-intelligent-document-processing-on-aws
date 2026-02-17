@@ -433,6 +433,11 @@ Parameters:
     Default: ""
     Description: Optional - Existing VPC Endpoint ID for execute-api service (required if VpcId is provided)
 
+  ApiStageName:
+    Type: String
+    Default: beta
+    Description: API Gateway deployment stage name
+
   LambdaSecurityGroupId:
     Type: String
     Default: ""
@@ -734,16 +739,69 @@ Resources:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
       RetentionInDays: !Ref LogRetentionDays
 
+  ##########################################################################
+  # API Authentication - Cognito User Pool for M2M (client credentials)
+  ##########################################################################
+
+  ApiUserPool:
+    Type: AWS::Cognito::UserPool
+    Condition: DeployApiGateway
+    Properties:
+      UserPoolName: !Sub ${AWS::StackName}-api
+
+  ApiResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Condition: DeployApiGateway
+    Properties:
+      Identifier: idp-api
+      Name: IDP API
+      UserPoolId: !Ref ApiUserPool
+      Scopes:
+        - ScopeName: jobs.read
+          ScopeDescription: Read job status
+        - ScopeName: jobs.write
+          ScopeDescription: Create and manage jobs
+
+  ApiAppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: DeployApiGateway
+    DependsOn: ApiResourceServer
+    Properties:
+      ClientName: !Sub ${AWS::StackName}-api-client
+      UserPoolId: !Ref ApiUserPool
+      GenerateSecret: true
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - idp-api/jobs.read
+        - idp-api/jobs.write
+
+  ApiUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Condition: DeployApiGateway
+    Properties:
+      Domain: !Sub ${AWS::StackName}-api-${AWS::AccountId}
+      UserPoolId: !Ref ApiUserPool
+
+  ##########################################################################
+  # Private API Gateway with Cognito Authorization
+  ##########################################################################
+
   ApiGateway:
     Type: AWS::Serverless::Api
     Condition: DeployApiGateway
     Properties:
-      StageName: prod
+      StageName: !Ref ApiStageName
       EndpointConfiguration:
         Type: PRIVATE
         VPCEndpointIds:
           - !Ref ApiGatewayVpcEndpointId
       Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt ApiUserPool.Arn
         ResourcePolicy:
           CustomStatements:
             - Effect: Deny
@@ -802,12 +860,20 @@ Resources:
             RestApiId: !Ref ApiGateway
             Path: /jobs
             Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+              AuthorizationScopes:
+                - idp-api/jobs.write
         GetJob:
           Type: Api
           Properties:
             RestApiId: !Ref ApiGateway
             Path: /jobs/{job_id}
             Method: GET
+            Auth:
+              Authorizer: CognitoAuthorizer
+              AuthorizationScopes:
+                - idp-api/jobs.read
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
@@ -7531,4 +7597,8 @@ Outputs:
   ApiGatewayEndpoint:
     Condition: DeployApiGateway
     Description: Jobs API endpoint URL
-    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.${AWS::URLSuffix}/prod"
+    Value: !Sub "https://${ApiGateway}.execute-api.${AWS::Region}.${AWS::URLSuffix}/${ApiStageName}"
+  ApiClientId:
+    Condition: DeployApiGateway
+    Description: App client ID for API authentication
+    Value: !Ref ApiAppClient
