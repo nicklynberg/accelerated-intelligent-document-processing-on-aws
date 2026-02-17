@@ -173,10 +173,6 @@ Parameters:
     Type: String
     AllowedValues: ["true", "false"]
   
-  IsPattern1:
-    Type: String
-    AllowedValues: ["true", "false"]
-  
   Pattern1BDAProjectArn:
     Type: String
   
@@ -198,7 +194,6 @@ Conditions:
   HasGuardrail: !Equals [!Ref HasGuardrailConfig, "true"]
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
   ShouldCreateReportingBucket: !Equals [!Ref ShouldCreateReportingBucket, "true"]
-  IsPattern1Enabled: !Equals [!Ref IsPattern1, "true"]
   HasBDAProjectArn: !Equals [!Ref HasPattern1BDAProjectArn, "true"]
 
 Resources:
@@ -294,10 +289,7 @@ Resources:
                   - !GetAtt GetAgentChatMessagesFunction.Arn
                   - !GetAtt DeleteAgentChatSessionFunction.Arn
                   - !GetAtt ListDocumentsByDateRangeResolverFunction.Arn
-                  - !If
-                    - IsPattern1Enabled
-                    - !GetAtt SyncBdaIdpResolverFunction.Arn
-                    - !Ref AWS::NoValue
+                  - !GetAtt SyncBdaIdpResolverFunction.Arn
 
   # Lambda function for Create Document resolver
 
@@ -2626,7 +2618,6 @@ Resources:
   ##########################################################################
   SyncBdaIdpResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: IsPattern1Enabled
     Properties:
       RetentionInDays: !Ref LogRetentionDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
@@ -2637,7 +2628,6 @@ Resources:
   ##########################################################################
   SyncBdaIdpResolverFunction:
     Type: AWS::Serverless::Function
-    Condition: IsPattern1Enabled
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -2728,7 +2718,6 @@ Resources:
   ##########################################################################
   SyncBdaIdpDataSource:
     Type: AWS::AppSync::DataSource
-    Condition: IsPattern1Enabled
     Properties:
       ApiId: !Ref GraphQLApiId
       Name: SyncBdaIdpDataSource
@@ -2744,7 +2733,6 @@ Resources:
   ##########################################################################
   SyncBdaIdpResolver:
     Type: AWS::AppSync::Resolver
-    Condition: IsPattern1Enabled
     DependsOn: GraphQLSchema
     Properties:
       ApiId: !Ref GraphQLApiId
