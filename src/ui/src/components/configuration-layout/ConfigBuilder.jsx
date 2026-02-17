@@ -765,13 +765,15 @@ const ConfigBuilder = ({
     // For top-level objects with sectionLabel, we shouldn't add a container here
     // as it's already being added in renderTopLevelProperty
     if (property.sectionLabel && isTopLevel) {
-      return (
-        <SpaceBetween size="s">
-          {getSortedObjectProperties(property.properties).map(({ propKey, propSchema }) => {
-            return <Box key={propKey}>{renderField(propKey, propSchema, fullPath)}</Box>;
-          })}
-        </SpaceBetween>
-      );
+      // Pre-render fields and filter out nulls to avoid empty Box wrappers causing whitespace
+      const renderedFields = getSortedObjectProperties(property.properties)
+        .map(({ propKey, propSchema }) => {
+          const rendered = renderField(propKey, propSchema, fullPath);
+          return rendered ? <Box key={propKey}>{rendered}</Box> : null;
+        })
+        .filter(Boolean);
+
+      return <SpaceBetween size="s">{renderedFields}</SpaceBetween>;
     }
 
     // For nested objects with sectionLabel, use the same styling as list headers
