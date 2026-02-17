@@ -650,9 +650,16 @@ const ConfigBuilder = ({
           return null; // Hide field if we can't resolve the dependency
         }
       } else {
-        // Normal dependency resolution
+        // Normal dependency resolution: first try sibling (same parent), then fall back to top-level
         const parentPath = currentPath.substring(0, currentPath.lastIndexOf('.'));
-        dependencyPath = parentPath.length > 0 ? `${parentPath}.${dependencyField}` : dependencyField;
+        const siblingPath = parentPath.length > 0 ? `${parentPath}.${dependencyField}` : dependencyField;
+        // Check if the sibling path resolves to a value; if not, try top-level
+        if (getValueAtPath(formValues, siblingPath) !== undefined) {
+          dependencyPath = siblingPath;
+        } else {
+          // Fall back to top-level field (e.g., use_bda is at root, not inside assessment)
+          dependencyPath = dependencyField;
+        }
       }
 
       // Get the current value of the dependency field

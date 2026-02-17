@@ -444,7 +444,7 @@ Resources:
           use_bda:
             order: 1
             type: boolean
-            description: Use Bedrock Data Automation (BDA) for OCR, classification, and extraction
+            description: Use Bedrock Data Automation (BDA) for OCR, classification, extraction, and assessment
             default: false
           ocr:
             order: 2
