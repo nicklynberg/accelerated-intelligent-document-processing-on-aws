@@ -1083,6 +1083,100 @@ def delete_documents_cmd(
         sys.exit(1)
 
 
+def _process_impl(
+    stack_name: str,
+    manifest: Optional[str],
+    directory: Optional[str],
+    s3_uri: Optional[str],
+    test_set: Optional[str],
+    context: Optional[str],
+    batch_id: Optional[str],
+    file_pattern: str,
+    recursive: bool,
+    config: Optional[str],
+    batch_prefix: str,
+    monitor: bool,
+    refresh_interval: int,
+    region: Optional[str],
+    number_of_files: Optional[int],
+    config_version: Optional[str],
+):
+    """Implementation for process and run_inference commands"""
+    try:
+        # Validate mutually exclusive options
+        if not manifest and not directory and not s3_uri and not test_set:
+            console.print(
+                "[red]✗ Error: Must specify one of: --manifest, --dir, --s3-uri, or --test-set[/red]"
+            )
+            sys.exit(1)
+
+        input_count = sum(
+            1 for x in [manifest, directory, s3_uri, test_set] if x is not None
+        )
+        if input_count > 1:
+            console.print("[red]✗ Error: Cannot specify multiple input sources[/red]")
+            sys.exit(1)
+
+        # Initialize processor
+        processor = BatchProcessor(stack_name=stack_name, region=region)
+
+        # Handle test set processing
+        if test_set:
+            batch_result = _process_test_set(
+                stack_name=stack_name,
+                test_set_name=test_set,
+                context=context,
+                region=region,
+                processor=processor,
+                number_of_files=number_of_files,
+                config_version=config_version,
+            )
+        else:
+            # Handle manifest/directory/S3 processing
+            batch_result = processor.process_batch(
+                manifest_path=manifest,
+                directory=directory,
+                s3_uri=s3_uri,
+                batch_id=batch_id,
+                file_pattern=file_pattern,
+                recursive=recursive,
+                config_path=config,
+                batch_prefix=batch_prefix,
+                number_of_files=number_of_files,
+                config_version=config_version,
+            )
+
+        # Show results
+        console.print()
+        console.print(f"[bold blue]Batch ID: {batch_result['batch_id']}[/bold blue]")
+        console.print(f"Documents queued: {batch_result['documents_queued']}")
+
+        if batch_result.get("uploaded", 0) > 0:
+            console.print(f"Files uploaded: {batch_result['uploaded']}")
+        if batch_result.get("skipped", 0) > 0:
+            console.print(f"Files skipped: {batch_result['skipped']}")
+        if batch_result.get("failed", 0) > 0:
+            console.print(f"[red]Files failed: {batch_result['failed']}[/red]")
+
+        console.print()
+
+        # Monitor if requested
+        if monitor and batch_result["documents_queued"] > 0:
+            _monitor_progress(
+                stack_name=stack_name,
+                batch_id=batch_result["batch_id"],
+                document_ids=batch_result.get("document_ids", []),
+                refresh_interval=refresh_interval,
+                region=region,
+                resources=processor.resources,
+            )
+
+    except Exception as e:
+        logger.error(f"Error processing batch: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
 @cli.command()
 @click.option("--stack-name", required=True, help="CloudFormation stack name")
 @click.option(
@@ -1209,8 +1303,7 @@ def process(
       # Process manifest with baselines (automatically creates "idp-cli" test set for Test Studio integration)
       idp-cli process --stack-name my-stack --manifest docs_with_baselines.csv --monitor
     """
-    # Call the existing run_inference implementation
-    return run_inference(
+    return _process_impl(
         stack_name,
         manifest,
         directory,
@@ -1392,8 +1485,7 @@ def run_inference(
     Equivalent command:
       idp-cli process --stack-name <stack> --manifest <file> [options]
     """
-    # Call the new process implementation
-    return process(
+    return _process_impl(
         stack_name,
         manifest,
         directory,
