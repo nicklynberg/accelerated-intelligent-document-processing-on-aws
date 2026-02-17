@@ -435,7 +435,7 @@ Parameters:
 
   ApiStageName:
     Type: String
-    Default: prod
+    Default: beta
     Description: API Gateway deployment stage name
 
   LambdaSecurityGroupId:

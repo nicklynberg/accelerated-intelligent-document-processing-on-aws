@@ -111,7 +111,7 @@ aws cloudformation deploy \
     PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,subnet-xxxxx \
     ApiGatewayVpcEndpointId=vpce-xxxxxxxxx \
     LambdaSecurityGroupId=sg-xxxxxxxxx \
-    ApiStageName=prod
+    ApiStageName=beta
 ```
 
 This enables the `/jobs` REST API accessible from within your VPC. See [Batch Jobs REST API](./govcloud-batch-api.md) for usage.
@@ -132,7 +132,7 @@ aws cloudformation deploy \
     PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,subnet-xxxxx \
     ApiGatewayVpcEndpointId=vpce-xxxxxxxxx \
     LambdaSecurityGroupId=sg-xxxxxxxxx \
-    ApiStageName=prod \
+    ApiStageName=beta \
     DeployBastionHost=true \
     BastionHostSubnetId=subnet-xxxxxxxxx \
     BastionHostSecurityGroupId=sg-xxxxxxxxx
@@ -150,7 +150,7 @@ This adds a bastion host for local API access via SSM tunnel. See [Batch Jobs RE
 | `PrivateSubnetIds` | Comma-separated private subnet IDs (minimum 2 for HA) |
 | `ApiGatewayVpcEndpointId` | VPC endpoint for private API Gateway access |
 | `LambdaSecurityGroupId` | Security group for VPC-enabled Lambda functions |
-| `ApiStageName` | API Gateway deployment stage name (default: `prod`) |
+| `ApiStageName` | API Gateway deployment stage name (default: `beta`) |
 
 ### Bastion Parameters (Option C only)
 

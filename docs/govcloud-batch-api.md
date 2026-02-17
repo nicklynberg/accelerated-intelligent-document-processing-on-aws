@@ -26,7 +26,7 @@ The token is a Cognito client credentials grant with `idp-api/jobs.read` and `id
 
 The `API_GATEWAY_ENDPOINT` is the `ApiGatewayEndpoint` value from your CloudFormation stack outputs, in the format `https://{restapi-id}.execute-api.{region}.amazonaws.com/{stage}`.
 
-> **Note:** The `{stage}` defaults to `prod` unless overridden via the `ApiStageName` parameter.
+> **Note:** The `{stage}` defaults to `beta` unless overridden via the `ApiStageName` parameter.
 
 ### POST /jobs — Create a Job
 
