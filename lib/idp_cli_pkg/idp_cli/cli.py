@@ -3615,7 +3615,6 @@ def config_download(
                 )
                 if classification_method == "bda":
                     pattern = "pattern-1"
-                elif classification_method == "udop":
                 else:
                     pattern = "pattern-2"
                 console.print(f"[dim]Auto-detected pattern: {pattern}[/dim]")

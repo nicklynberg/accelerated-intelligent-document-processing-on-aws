@@ -167,7 +167,6 @@ class ConfigOperation:
                 )
                 if classification_method == "bda":
                     pattern = "pattern-1"
-                elif classification_method == "udop":
                 else:
                     pattern = "pattern-2"
 

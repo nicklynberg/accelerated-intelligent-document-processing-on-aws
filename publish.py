@@ -1409,7 +1409,6 @@ STDERR:
 
         return zipfile_name
 
-
     def _upload_template_to_s3(self, template_path, s3_key, description):
         """Helper method to upload template to S3 with error handling"""
         self.console.print(f"[cyan]Uploading {description} to S3: {s3_key}[/cyan]")

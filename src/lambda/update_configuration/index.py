@@ -223,7 +223,6 @@ def detect_pattern_from_config(config: Dict[str, Any]) -> str:
     
     if classification_method == "bda":
         return "pattern-1"
-    elif classification_method == "udop":
     else:
         # Default to pattern-2 (most common - Textract + Bedrock LLM)
         return "pattern-2"
@@ -279,7 +278,7 @@ def save_configuration_bypass_manager(config_type: str, config_data: Any, versio
     Used when ConfigurationManager is unreliable (e.g., after migration from legacy format).
     """
     import boto3
-    from idp_common.config.models import SchemaConfig, IDPConfig, PricingConfig
+    from idp_common.config.models import IDPConfig, PricingConfig, SchemaConfig
     
     # Get table name from environment
     table_name = os.environ.get('CONFIGURATION_TABLE_NAME')
@@ -623,7 +622,7 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                         existing_config = None
                         try:
                             existing_config = manager.get_configuration("Config", version)
-                        except:
+                        except Exception:
                             pass
                         if existing_config:
                             manager.save_configuration("Config", config, version=version)

@@ -3190,12 +3190,12 @@ Resources:
               - !GetAtt PATTERN2STACK.Outputs.PatternLogGroups
         StateMachineArn: !If
           - IsPattern2
-            - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+          - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
+          - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
         StateMachineName: !If
           - IsPattern2
-            - !GetAtt PATTERN2STACK.Outputs.StateMachineName
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineName
+          - !GetAtt PATTERN2STACK.Outputs.StateMachineName
+          - !GetAtt PATTERN1STACK.Outputs.StateMachineName
         KnowledgeBaseId: !If
           - ShouldCreateDocumentKnowledgeBase
           - !GetAtt DOCUMENTKB.Outputs.KnowledgeBaseID
@@ -3403,8 +3403,8 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           STATE_MACHINE_ARN: !If
             - IsPattern2
-              - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
           CONCURRENCY_TABLE: !Ref ConcurrencyTable
           MAX_CONCURRENT: !Ref MaxConcurrentWorkflows
@@ -3415,8 +3415,8 @@ Resources:
         - StepFunctionsExecutionPolicy:
             StateMachineName: !If
               - IsPattern2
-                - !GetAtt PATTERN2STACK.Outputs.StateMachineName
-                - !GetAtt PATTERN1STACK.Outputs.StateMachineName
+              - !GetAtt PATTERN2STACK.Outputs.StateMachineName
+              - !GetAtt PATTERN1STACK.Outputs.StateMachineName
         - DynamoDBCrudPolicy:
             TableName: !Ref TrackingTable
         - DynamoDBCrudPolicy:
@@ -3583,8 +3583,8 @@ Resources:
           stateMachineArn:
             - !If
               - IsPattern2
-                - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-                - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+              - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
+              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
           status:
             - FAILED
             - TIMED_OUT
@@ -3712,8 +3712,8 @@ Resources:
           stateMachineArn:
             - !If
               - IsPattern2
-                - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-                - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+              - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
+              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
           status:
             - SUCCEEDED
       State: ENABLED
@@ -3845,8 +3845,8 @@ Resources:
         - Name: StateMachineArn
           Value: !If
             - IsPattern2
-              - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
       AlarmActions:
         - !Ref AlertsTopic
 
@@ -3865,8 +3865,8 @@ Resources:
         - Name: StateMachineArn
           Value: !If
             - IsPattern2
-              - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
       AlarmActions:
         - !Ref AlertsTopic
 
@@ -4230,12 +4230,12 @@ Resources:
           }
         - StateMachineArn: !If
             - IsPattern2
-              - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
+            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
           StateMachineLogGroup: !If
             - IsPattern2
-              - !GetAtt PATTERN2STACK.Outputs.StateMachineLogGroup
-              - !GetAtt PATTERN1STACK.Outputs.StateMachineLogGroup
+            - !GetAtt PATTERN2STACK.Outputs.StateMachineLogGroup
+            - !GetAtt PATTERN1STACK.Outputs.StateMachineLogGroup
 
   DashboardMergerFunction:
     DependsOn:
@@ -4288,8 +4288,8 @@ Resources:
       Dashboard1Name: !Ref MainTemplateSubsetDashboard
       Dashboard2Name: !If
         - IsPattern2
-          - !GetAtt PATTERN2STACK.Outputs.DashboardName
-          - !GetAtt PATTERN1STACK.Outputs.DashboardName
+        - !GetAtt PATTERN2STACK.Outputs.DashboardName
+        - !GetAtt PATTERN1STACK.Outputs.DashboardName
       MergedDashboardName: !Sub "${AWS::StackName}-${AWS::Region}"
       ChangeToForceUpdate: <HASH_TOKEN> # Source code hash set by publish script
 
@@ -6741,16 +6741,16 @@ Outputs:
     Description: Step Functions State machine ARN
     Value: !If
       - IsPattern2
-        - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-        - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+      - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
+      - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
   StateMachineConsoleURL:
     Description: Step Functions State machine console URL
     Value: !Sub
       - https://${AWS::Region}.console.aws.amazon.com/states/home?region=${AWS::Region}#/statemachines/view/${StateMachineArn}
       - StateMachineArn: !If
           - IsPattern2
-            - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
-            - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
+          - !GetAtt PATTERN2STACK.Outputs.StateMachineArn
+          - !GetAtt PATTERN1STACK.Outputs.StateMachineArn
 
   CWDashboardConsoleName:
     Description: Name of the merged CloudWatch dashboard

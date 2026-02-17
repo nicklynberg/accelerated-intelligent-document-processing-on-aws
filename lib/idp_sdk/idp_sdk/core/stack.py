@@ -2138,7 +2138,6 @@ def upload_local_config(
                 )
                 if classification_method == "bda":
                     pattern = "pattern-1"
-                elif classification_method == "udop":
                 else:
                     # Default to pattern-2 (most common)
                     pattern = "pattern-2"

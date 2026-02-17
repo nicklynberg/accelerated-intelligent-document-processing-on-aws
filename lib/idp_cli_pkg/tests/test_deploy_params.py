@@ -108,7 +108,6 @@ class TestParameterPreservation:
 
         assert "Pattern2" in params2["IDPPattern"]
         assert "Textract and Bedrock" in params2["IDPPattern"]
-        assert "SageMaker" in params3["IDPPattern"]
 
     def test_build_parameters_none_values_excluded(self):
         """Test that None values are not included in parameters dict"""

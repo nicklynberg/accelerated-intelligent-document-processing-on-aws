@@ -182,7 +182,6 @@ class TestConfigModelsIntegration:
         # Validate that classes with examples work
         assert len(config.classes) > 0
 
-
     def test_rule_validation_config(self, config_root):
         """Test rule validation configuration"""
         config_file = config_root / "pattern-2" / "criteria-validation" / "config.yaml"
