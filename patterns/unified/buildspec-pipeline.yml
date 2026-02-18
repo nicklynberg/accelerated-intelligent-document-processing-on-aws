@@ -31,6 +31,7 @@ phases:
           docker buildx build \
             --platform linux/arm64 \
             --tag "${ECR_URI}:${func_name}-${IMAGE_VERSION}" \
+            --provenance=false \
             --push \
             "${func_path}"
         done

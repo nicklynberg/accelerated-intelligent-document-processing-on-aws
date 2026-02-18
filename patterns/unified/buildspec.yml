@@ -38,6 +38,7 @@ phases:
             -f Dockerfile.optimized \
             --build-arg FUNCTION_PATH="${func_path}" \
             --tag "${ECR_URI}:${func_name}-${IMAGE_VERSION}" \
+            --provenance=false \
             --push \
             .
         done

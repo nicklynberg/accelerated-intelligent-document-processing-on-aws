@@ -15,8 +15,6 @@
             "Default": "OCRStep"
         },
 
-        "_comment_bda_branch": "========== BDA BRANCH (use_bda=true) ==========",
-
         "BDA_CheckExistingData": {
             "Type": "Choice",
             "Comment": "Check if document already has pages/sections data (reprocessing scenario)",
@@ -153,8 +151,6 @@
             ],
             "Next": "CheckHITLRequired"
         },
-
-        "_comment_pipeline_branch": "========== PIPELINE BRANCH (use_bda=false) ==========",
 
         "OCRStep": {
             "Type": "Task",
@@ -407,8 +403,6 @@
             "ResultPath": "$.RuleValidationOrchestrationResult",
             "Next": "CheckHITLRequired"
         },
-
-        "_comment_shared_tail": "========== SHARED TAIL (both branches converge here) ==========",
 
         "CheckHITLRequired": {
             "Type": "Choice",
