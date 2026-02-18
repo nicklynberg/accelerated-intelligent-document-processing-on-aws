@@ -2,83 +2,104 @@
 
 ## Current Work Focus
 
-### Pattern Unification: Phase 2b+2c - Unified Template (February 17, 2026)
-**Status:** ✅ Completed
+### Pattern Unification: Phase 2 — COMPLETE (February 17, 2026)
+**Status:** ✅ All code changes complete. Ready for deploy & test.
 
 #### What Was Done
-Merged the two separate pattern templates (pattern-1/BDA and pattern-2/Pipeline) into a single unified template, and updated the main template.yaml to reference it.
+Merged the two separate IDP patterns (Pattern-1/BDA and Pattern-2/Pipeline) into a single unified pattern. The `use_bda` configuration flag (set at runtime via the UI) determines whether documents are processed via BDA or the step-by-step pipeline.
 
-#### Files Created/Modified
+#### Architecture Summary (Unified)
+```
+Main template (template.yaml)
+  └── PATTERNSTACK (patterns/unified/)
+        ├── 1 ECR Repository (all 12 images)
+        ├── 1 CodeBuild Project (sequential build via buildspec.yml)
+        ├── 1 ImageVersion (content-based hash)
+        ├── 1 SourceZipfile (unified-source-{hash}.zip)
+        ├── Unified State Machine (routes via use_bda flag)
+        │     ├── BDA branch: InvokeBDA → BDAProcessResults → shared tail
+        │     └── Pipeline branch: OCR → Classification → Extraction → Assessment → ProcessResults → RuleValidation → shared tail
+        │     └── Shared tail: HITL check → Summarization → Evaluation
+        ├── 12 Lambda Functions:
+        │     BDA: InvokeBDAFunction, BDAProcessResultsFunction, BDACompletionFunction
+        │     Pipeline: OCRFunction, ClassificationFunction, ExtractionFunction,
+        │               AssessmentFunction, ProcessResultsFunction, RuleValidationFunction,
+        │               RuleValidationOrchestrationFunction
+        │     Shared: SummarizationFunction, EvaluationFunction
+        └── Supporting: BDAMetadataTable, BDAEventRule, CloudWatch Dashboard
+```
 
-**New files in `patterns/unified/`:**
-- `template.yaml` (3849 lines, 175KB) - Unified CloudFormation template combining both patterns
-- `buildspec-bda.yml` - CodeBuild buildspec for BDA Lambda container images
-- `buildspec-pipeline.yml` - CodeBuild buildspec for Pipeline Lambda container images
-- `statemachine/workflow.asl.json` (pre-existing) - Unified state machine routing via `use_bda` flag
+#### Key Files Modified/Created
+- **`patterns/unified/template.yaml`** — Unified CloudFormation nested stack (single ECR, CodeBuild, all Lambda functions)
+- **`patterns/unified/buildspec.yml`** — Builds all 12 Docker images sequentially
+- **`patterns/unified/src/`** — All 12 function directories (BDA functions from pattern-1, Pipeline functions from pattern-2)
+- **`patterns/unified/statemachine/workflow.asl.json`** — Routes via `use_bda` flag
+- **`config_library/unified/`** — Configuration presets (copy of pattern-2 library)
+- **`template.yaml`** — Main stack: single `PATTERNSTACK`, no `IDPPattern` selector, consolidated `ConfigurationPreset` parameter
+- **`publish.py`** — `package_unified_source()`, unified tokens (`<UNIFIED_IMAGE_VERSION>`, `<UNIFIED_SOURCE_ZIPFILE_TOKEN>`), component dependency map
+- **`nested/appsync/template.yaml`** — Removed `IsPattern1` conditional (BDA resolvers always created)
 
-**Modified:**
-- `template.yaml` (main) - Replaced dual `PATTERN1STACK`/`PATTERN2STACK` with single `PATTERNSTACK`
+#### Key Design Decisions
+1. **Single ECR + Single CodeBuild** — All 12 images built sequentially from one source zip
+2. **Source in `patterns/unified/src/`** — Copied from pattern-1/pattern-2, with BDA processresults renamed to `bda_processresults_function`
+3. **Pattern-2 schema as superset** — `UpdateSchemaConfig` from pattern-2 includes `use_bda` toggle and all step-by-step config sections
+4. **Shared functions from Pipeline** — Summarization/Evaluation use pattern-2 versions (superset with LambdaHook support)
+5. **Config from `config_library/unified/`** — Same as pattern-2 configs for now; `use_bda` toggle is in the schema, not the preset configs
 
-#### Design Decisions
+#### Resource Naming
+- BDA-specific: `BDAProcessResultsFunction`, `BDAMetadataTable`, `BDACompletionFunction`
+- Pipeline-specific: `OCRFunction`, `ClassificationFunction`, etc. (no prefix)
+- Shared: `DocumentProcessingStateMachine`, `ECRRepository`, `DockerBuildProject`
 
-1. **Two ECR repos + Two CodeBuild projects**: BDA and Pipeline have separate source zips, so they need separate build infrastructure. Named `BDAECRRepository`/`PipelineECRRepository` and `BDADockerBuildProject`/`PipelineDockerBuildProject`.
+#### Parameters (Main Template)
+- **Removed**: `IDPPattern`, `Pattern1Configuration`, `Pattern2Configuration`
+- **Added**: `ConfigurationPreset` (single dropdown, default `lending-package-sample`)
+- **Relabeled**: BDA Project ARN, Custom Classification/Extraction Model ARNs (removed "Pattern1"/"Pattern2" prefixes)
+- **Kept** (parameter names preserved for updates): `Pattern1BDAProjectArn`, `Pattern2CustomClassificationModelARN`, `Pattern2CustomExtractionModelARN`
 
-2. **Resource naming to avoid conflicts**: 
-   - Pattern-1 infra: `BDA*` prefix (BDADockerBuildRole, BDACodeBuildTrigger, etc.)
-   - Pattern-2 infra: `Pipeline*` prefix (PipelineDockerBuildRole, PipelineCodeBuildTrigger, etc.)
-   - Pattern-1 ProcessResults → `BDAProcessResultsFunction` (to avoid conflict with Pipeline's `ProcessResultsFunction`)
-   - BDA-unique functions keep original names: `InvokeBDAFunction`, `BDACompletionFunction`
+#### Token Flow (publish.py → template.yaml → unified template)
+```
+publish.py:
+  package_unified_source() → unified-source-{hash}.zip → S3
+  
+template.yaml tokens:
+  <UNIFIED_SOURCE_ZIPFILE_TOKEN> → unified-source-{hash}.zip
+  <UNIFIED_IMAGE_VERSION> → {hash} (extracted from zipfile name)
+  
+PATTERNSTACK params:
+  ImageVersion: "{hash}"
+  SourceZipfile: "unified-source-{hash}.zip"
+```
 
-3. **Schema uses Pattern-2's superset**: The `UpdateSchemaConfig` from pattern-2 includes the `use_bda` toggle and all pipeline-specific config sections (OCR, classification, extraction, assessment, rule_validation), plus shared sections (summarization, evaluation, discovery, agents).
+### Remaining Work (Next Session)
 
-4. **Shared functions from Pipeline**: Summarization and Evaluation Lambda functions from pattern-2 are the superset versions (support LambdaHook, etc.). BDA's versions were removed to avoid duplication.
+#### 🔴 High Priority
+1. **Deploy & Test** — `python publish.py <bucket> <prefix> <region> --clean-build` → deploy as new stack
+2. **Fix any deploy issues** — Watch for template validation errors, CodeBuild failures, etc.
 
-5. **Single PATTERNSTACK**: Main template now has one `PATTERNSTACK` instead of conditional `PATTERN1STACK`/`PATTERN2STACK`. All `!If [IsPattern2, PATTERN2STACK, PATTERN1STACK]` references simplified to direct `!GetAtt PATTERNSTACK.Outputs.*`.
+#### 🟡 Medium Priority  
+3. **Validate Makefile/CI** — `make validate-buildspec` checks `patterns/*/buildspec.yml` — may need to include `patterns/unified/buildspec.yml`
+4. **GovCloud template** — `scripts/generate_govcloud_template.py` may reference old pattern paths
+5. **CI/CD pipeline** — `.gitlab-ci.yml` may reference old pattern paths
 
-6. **Parameters changed**: `SourceZipfile` split into `BDASourceZipfile` and `PipelineSourceZipfile`. `ImageVersion` is shared (same content-based hash approach).
-
-#### Remaining IsPattern References
-- `IsPattern1`/`IsPattern2` conditions still defined in main template (4 refs remaining)
-- Used by: BDA sample project condition, AppSync stack parameter
-- These will be cleaned up in a future phase when full unification is complete
-
-#### 51 Resources in Unified Template
-- Config: UpdateSchemaConfig, UpdateDefaultConfig
-- BDA Build: BDAECRRepository, BDADockerBuildRole, BDADockerBuildProject, BDACodeBuildExecutionRole, BDACodeBuildTrigger, BDACodeBuildTriggerLogGroup, BDADockerBuildRun, BDAEcrRepositoryCleanup, BDALambdaECRAccessPolicy
-- Pipeline Build: PipelineECRRepository, PipelineDockerBuildRole, PipelineDockerBuildProject, PipelineCodeBuildExecutionRole, PipelineCodeBuildTrigger, PipelineCodeBuildTriggerLogGroup, PipelineDockerBuildRun, PipelineEcrRepositoryCleanup, PipelineLambdaECRAccessPolicy
-- BDA Functions: InvokeBDAFunction, BDAProcessResultsFunction, BDACompletionFunction + log groups, DLQ, EventBridge
-- Pipeline Functions: OCRFunction, ClassificationFunction, ExtractionFunction, AssessmentFunction, ProcessResultsFunction, SummarizationFunction, EvaluationFunction, RuleValidationFunction, RuleValidationOrchestrationFunction + log groups
-- Shared: DocumentProcessingStateMachine, StateMachineLogGroup, BDAMetadataTable
-
-#### Next Steps (Phase 2d+)
-- Create unified buildspec that builds ALL images in one CodeBuild
-- Add combined CloudWatch Dashboard to unified template
-- Clean up remaining IsPattern1/IsPattern2 conditions from main template
-- Update publish.py to handle unified pattern packaging
-- Update config_library to work with unified pattern
+#### 🟢 Low Priority
+6. **Clean up old dirs** — `patterns/pattern-1/`, `patterns/pattern-2/` still exist (source now in `unified/src/`)
+7. **Update docs** — `docs/pattern-1.md`, `docs/pattern-2.md`, deployment docs
+8. **Config library enhancement** — Add `use_bda: true` variant configs for BDA-specific presets
 
 ---
 
 ### Configuration Storage: Full Configs Per Version (February 14, 2026)
-**Status:** ✅ Completed - Core refactoring done
+**Status:** ✅ Completed
 
-#### Problem
-The previous "sparse delta" pattern for config versions was introducing significant complexity and bugs.
-
-#### Decision
-Each version stores a **complete, self-contained configuration snapshot**.
+Each config version stores a complete, self-contained configuration snapshot (no more sparse deltas).
 
 ---
 
 ## Important Patterns and Preferences
 
-### Resource Naming Convention (Unified Pattern)
-- BDA-specific resources: `BDA*` prefix
-- Pipeline-specific resources: `Pipeline*` prefix
-- Shared resources: No prefix (e.g., `DocumentProcessingStateMachine`)
-
-### Template Outputs Interface
-The unified template maintains the same outputs as both patterns:
+### Template Outputs Interface (Unified Pattern)
+Same outputs as before — no breaking changes:
 - `StateMachineName`, `StateMachineArn`, `StateMachineLogGroup`
-- `PatternLogGroups` (comma-separated, now includes ALL log groups)
+- `PatternLogGroups` (all 12 function log groups + state machine)
 - `DashboardName`, `DashboardArn`

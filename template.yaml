@@ -1595,7 +1595,8 @@ Resources:
 
   TestSetBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: RetainExceptOnCreate
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
     Properties:
       CorsConfiguration:
         CorsRules:
