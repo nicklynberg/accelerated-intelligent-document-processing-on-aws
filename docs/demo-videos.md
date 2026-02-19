@@ -92,14 +92,14 @@ https://github.com/user-attachments/assets/0bf14b62-99dc-4538-a015-d8b89fa2f1f0
 
 ---
 
-### Ask a Question Feature
+### Chat with Document Feature
 Interactive document Q&A using Nova Pro model to answer questions about specific documents.
 
 **Duration**: ~2 minutes
 
 https://github.com/user-attachments/assets/50607084-96d6-4833-85a6-3dc0e72b28ac
 
-**Related Documentation**: [Web UI Documentation - Ask a Question](./web-ui.md#ask-a-question-about-a-document)
+**Related Documentation**: [Web UI Documentation - Chat with Document](./web-ui.md#chat-with-document)
 
 ---
 
