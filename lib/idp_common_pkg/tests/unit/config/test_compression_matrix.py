@@ -24,19 +24,18 @@ Run with `-s` flag to see the full matrix output:
 """
 
 import json
-import sys
 
 import pytest
 from idp_common.config.configuration_manager import (
-    ConfigurationManager,
     _COMPRESSED_DATA_FIELD,
     _DYNAMODB_ITEM_SIZE_LIMIT,
+    ConfigurationManager,
 )
-
 
 # ========================================================================
 # Realistic document class generator
 # ========================================================================
+
 
 def _generate_realistic_class(class_index: int, num_fields: int = 20) -> dict:
     """
@@ -82,7 +81,9 @@ def _generate_full_config_item(num_classes: int, fields_per_class: int = 20) -> 
     Includes all the standard IDP config sections (ocr, classification, extraction,
     assessment, summarization) plus the document classes.
     """
-    classes = [_generate_realistic_class(i, fields_per_class) for i in range(num_classes)]
+    classes = [
+        _generate_realistic_class(i, fields_per_class) for i in range(num_classes)
+    ]
 
     return {
         "Configuration": "Config#v1",
@@ -163,7 +164,11 @@ class TestCompressionMatrix:
     Extended counts (100-1000) demonstrate enterprise-scale capacity.
     """
 
-    @pytest.mark.parametrize("num_classes", ISSUE_CLASS_COUNTS, ids=[f"{n}-classes" for n in ISSUE_CLASS_COUNTS])
+    @pytest.mark.parametrize(
+        "num_classes",
+        ISSUE_CLASS_COUNTS,
+        ids=[f"{n}-classes" for n in ISSUE_CLASS_COUNTS],
+    )
     def test_issue_200_class_counts_all_fit(self, num_classes):
         """All class counts from Issue #200 must fit after compression (including 48 and 50)."""
         item = _generate_full_config_item(num_classes)
@@ -183,7 +188,11 @@ class TestCompressionMatrix:
             f"Raw size: {sizes['raw_size']:,} bytes, ratio: {sizes['ratio']:.1f}x"
         )
 
-    @pytest.mark.parametrize("num_classes", EXTENDED_CLASS_COUNTS, ids=[f"{n}-classes" for n in EXTENDED_CLASS_COUNTS])
+    @pytest.mark.parametrize(
+        "num_classes",
+        EXTENDED_CLASS_COUNTS,
+        ids=[f"{n}-classes" for n in EXTENDED_CLASS_COUNTS],
+    )
     def test_extended_class_counts_fit(self, num_classes):
         """Extended class counts for enterprise scale must also fit."""
         item = _generate_full_config_item(num_classes)
@@ -226,7 +235,9 @@ class TestCompressionMatrix:
             sizes = _compute_sizes(item)
 
             # Determine what the old result was (before compression)
-            old_result = "FAILED" if sizes["raw_size"] > _DYNAMODB_ITEM_SIZE_LIMIT else "Success"
+            old_result = (
+                "FAILED" if sizes["raw_size"] > _DYNAMODB_ITEM_SIZE_LIMIT else "Success"
+            )
             if num_classes in [48, 50]:
                 old_result = "FAILED (reported)"
 
@@ -300,13 +311,19 @@ class TestCompressionCapacityEstimator:
 
             print(f"\n  Capacity Estimate ({label}):")
             print(f"    Max classes that fit in 400KB: {max_fitting}")
-            print(f"    At {max_fitting} classes: {sizes['compressed_size']:,} bytes compressed ({sizes['ratio']:.1f}x ratio)")
+            print(
+                f"    At {max_fitting} classes: {sizes['compressed_size']:,} bytes compressed ({sizes['ratio']:.1f}x ratio)"
+            )
             print(f"    Raw size would have been: {sizes['raw_size']:,} bytes")
 
             if first_exceeding:
-                item_over = _generate_full_config_item(max_fitting + 1, fields_per_class)
+                item_over = _generate_full_config_item(
+                    max_fitting + 1, fields_per_class
+                )
                 sizes_over = _compute_sizes(item_over)
-                print(f"    At {max_fitting + 1} classes: {sizes_over['compressed_size']:,} bytes compressed (exceeds limit)")
+                print(
+                    f"    At {max_fitting + 1} classes: {sizes_over['compressed_size']:,} bytes compressed (exceeds limit)"
+                )
         else:
             print(f"\n  Capacity Estimate ({label}): Even 50 classes exceeds 400KB!")
 
