@@ -41,9 +41,9 @@ TESTSET_BUCKET = os.environ.get('TESTSET_BUCKET')
 TRACKING_TABLE = os.environ.get('TRACKING_TABLE')
 
 # Constants
-DATASET_NAME = 'RVL-CDIP-N-MP-Packets'
-DATASET_PREFIX = 'rvl-cdip-n-mp/'
-TEST_SET_ID = 'rvl-cdip-n-mp'
+DATASET_NAME = 'DocSplit-Poly-Seq'
+DATASET_PREFIX = 'docsplit/'
+TEST_SET_ID = 'docsplit'
 HF_DATA_URL = 'https://huggingface.co/datasets/jordyvl/rvl_cdip_n_mp/resolve/main/data.tar.gz'
 
 # Path to bundled manifest

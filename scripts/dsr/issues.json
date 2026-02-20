@@ -51343,7 +51343,7 @@
   },
   {
     "source": "Semgrep",
-    "path": "src/lambda/rvl_cdip_nmp_deployer/index.py",
+    "path": "src/lambda/docsplit_testset_deployer/index.py",
     "line": 170,
     "issue": "Possible path traversal through `tarfile.open($PATH).extractall()` if the source tar is controlled by an attacker",
     "check_id": "trailofbits.python.tarfile-extractall-traversal.tarfile-extractall-traversal",
@@ -57628,7 +57628,7 @@
   },
   {
     "source": "Bandit",
-    "path": "src/lambda/rvl_cdip_nmp_deployer/index.py",
+    "path": "src/lambda/docsplit_testset_deployer/index.py",
     "line": 171,
     "issue": "tarfile.extractall used without any validation. Please check and discard dangerous members.",
     "fix": "Use `tarfile.extractall()` with member filtering or `tarfile.extract()` with path validation to prevent directory traversal attacks. Validate member paths before extraction.",
@@ -64064,7 +64064,7 @@
   },
   {
     "source": "Bandit",
-    "path": "src/lambda/rvl_cdip_nmp_deployer/index.py",
+    "path": "src/lambda/docsplit_testset_deployer/index.py",
     "line": 221,
     "issue": "Found tarfile.extractall(members=?) but couldn't identify the type of members. Check if the members were properly validated {'Other': 'safe_members'}).",
     "fix": "Use `tarfile.extractall()` with member filtering or `tarfile.extract()` with path validation to prevent directory traversal attacks. Validate member paths before extraction.",

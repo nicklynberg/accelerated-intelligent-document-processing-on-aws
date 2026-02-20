@@ -11,6 +11,7 @@ SPDX-License-Identifier: MIT-0
   - [User Personas](#user-personas)
   - [Managing Users](#managing-users)
 - [Workflow](#workflow)
+  - [Review Status Values](#review-status-values)
 - [Configuration](#configuration)
 - [Review Portal](#review-portal)
 - [Best Practices](#best-practices)
@@ -20,6 +21,12 @@ SPDX-License-Identifier: MIT-0
 
 The GenAI-IDP solution supports Human-in-the-Loop (HITL) review capabilities through a built-in review system integrated directly into the Web UI. This feature enables human reviewers to validate and correct extracted information when the system's confidence falls below a specified threshold, ensuring accuracy for critical document processing workflows.
 
+
+
+https://github.com/user-attachments/assets/0bf14b62-99dc-4538-a015-d8b89fa2f1f0
+
+
+
 **Supported Patterns:**
 - Pattern 1: BDA processing with HITL review
 - Pattern 2: Textract + Bedrock processing with HITL review
@@ -27,18 +34,19 @@ The GenAI-IDP solution supports Human-in-the-Loop (HITL) review capabilities thr
 **Key Features:**
 - Built-in review portal within the GenAI-IDP Web UI
 - Role-based access control with Admin and Reviewer personas
+- Review ownership model - reviewers claim documents before editing
 - Section-by-section review workflow
 - Visual editor for viewing and correcting extracted data
-- Automatic workflow continuation after review completion
+- Decoupled from document processing workflow for improved reliability
 
 ## Architecture
 
-The HITL system integrates with the document processing workflow through:
+The HITL system operates independently from the document processing workflow:
 
 - **Built-in Review Portal**: Web interface integrated into the GenAI-IDP UI for validation and correction
 - **User Management**: Cognito-based authentication with role-based access control
 - **Section Review Tracking**: DynamoDB-based tracking of review progress per document section
-- **Workflow Integration**: Step Functions integration for automatic workflow continuation after review
+- **Decoupled Design**: HITL operations update document status directly without triggering reprocessing
 
 ### Review Flow
 
@@ -60,6 +68,8 @@ Admins have full access to all system features:
 | Upload Documents | ✅ Allowed |
 | View/Edit Extraction Results | ✅ Full access |
 | Complete Section Reviews | ✅ Allowed |
+| Skip All Reviews | ✅ Allowed (Admin only) |
+| Release Any Review | ✅ Allowed (can release reviews owned by others) |
 | View/Edit Configuration | ✅ Full access |
 | User Management | ✅ Full access (create/delete users) |
 | Discovery | ✅ Full access |
@@ -71,16 +81,19 @@ Reviewers have limited access focused on document review tasks:
 
 | Feature | Access |
 |---------|--------|
-| View Documents | ✅ Full access |
+| View Documents | ✅ Pending and own in-progress reviews only |
 | Upload Documents | ❌ Not allowed |
-| View/Edit Extraction Results | ✅ Can view and edit |
-| Complete Section Reviews | ✅ Allowed (only for pending sections) |
+| Start Review | ✅ Claim ownership of pending documents |
+| View/Edit Extraction Results | ✅ Can view and edit (only for owned documents) |
+| Complete Section Reviews | ✅ Allowed (only for owned documents) |
+| Release Review | ✅ Can release own reviews only |
+| Skip All Reviews | ❌ Not allowed (Admin only) |
 | View/Edit Configuration | ❌ Not allowed |
 | User Management | ❌ Not allowed |
 | Discovery | ❌ Not allowed |
 | Analytics & Agents | ❌ Limited access |
 
-**Note:** Once a Reviewer completes a section review, they cannot re-edit that section. Only pending sections can be reviewed.
+**Note:** Reviewers see only documents that are pending review (unassigned) or documents they have claimed for review.
 
 ### Managing Users
 
@@ -125,43 +138,69 @@ The system automatically synchronizes users between Cognito and DynamoDB:
 
 ## Workflow
 
+### Review Status Values
+
+Documents progress through the following Review Status values:
+
+| Status | Description |
+|--------|-------------|
+| **Review Pending** | Document is awaiting review, not yet claimed by a reviewer |
+| **Review In Progress** | Document has been claimed by a reviewer and is being reviewed |
+| **Review Completed** | All sections have been reviewed and approved |
+| **Review Skipped** | Admin has skipped all remaining reviews |
+
 ### 1. Automatic Triggering
 
 HITL review is automatically triggered when:
 - HITL feature is enabled in your configuration (`assessment.enable_hitl = true`)
 - Extraction confidence score falls below the configured threshold
-- The workflow pauses and waits for human review completion
+- Document status is set to **Review Pending**
 
 ### 2. Review Process
 
-**Accessing Documents for Review:**
-1. Log in to the GenAI-IDP Web UI
-2. Navigate to the **Documents** page
-3. Documents requiring review show status **HITL_IN_PROGRESS**
-4. Click on a document to view its details
+**For Reviewers:**
 
-**Reviewing Sections:**
-1. In the document detail view, locate the **Sections** panel
-2. Sections pending review are indicated with a review status
-3. Click **View/Edit Data** to open the visual editor
-4. Review the extracted key-value pairs against the document
-5. Make corrections as needed using the editor
-6. Click **Mark Review Complete** to complete the section review
+1. **View Available Documents**: Log in and navigate to the Documents page. You will see only:
+   - Documents with status **Review Pending** (available to claim)
+   - Documents you have claimed with status **Review In Progress**
 
-**Visual Editor Features:**
-- Side-by-side view of document image and extracted data
-- Bounding box highlighting for field locations
-- Inline editing of extracted values
-- Confidence score display for each field
+2. **Start Review (Claim Document)**:
+   - Select a document with **Review Pending** status
+   - Click **Start Review** button
+   - Document status changes to **Review In Progress**
+   - You become the review owner
+
+3. **Review Sections**:
+   - In the document detail view, locate the **Sections** panel
+   - Click **View/Edit Data** to open the visual editor
+   - Review and correct extracted key-value pairs
+   - Click **Mark Review Complete** for each section
+
+4. **Release Review** (optional):
+   - If you need to stop reviewing, click **Release Review**
+   - Document returns to **Review Pending** status
+   - Another reviewer can claim it
+
+**For Admins:**
+
+Admins have additional capabilities:
+
+- **Skip All Reviews**: Click **Skip All Reviews** to mark all pending sections as skipped
+  - Document status changes to **Review Skipped**
+  - The **Review Completed By** field records the admin who skipped
+  - No reprocessing is triggered
+  
+- **Release Any Review**: Admins can release reviews owned by other users
 
 ### 3. Result Integration
 
-When all sections are reviewed:
-- The workflow automatically resumes
+When all sections are reviewed or skipped:
+- Document status changes to **Review Completed** or **Review Skipped**
 - Corrected data is saved to S3
-- Document status changes from `HITL_IN_PROGRESS` to `SUMMARIZING`
-- Processing continues with summarization and subsequent steps
+- **Review Completed By** field records who completed/skipped the review
 - Review history is recorded with reviewer information and timestamps
+
+**Note:** Completing or skipping reviews does not automatically trigger document reprocessing. Use the **Reprocess** button if you need to re-run summarization or evaluation with the corrected data.
 
 ## Configuration
 
@@ -198,10 +237,17 @@ The confidence threshold determines when human review is triggered:
 
 ### Document List View
 
-The document list shows all processed documents with their current status:
-- **HITL_IN_PROGRESS**: Document is awaiting human review
-- **SUMMARIZING**: Review complete, processing continues
-- **COMPLETED**: All processing finished
+**For Admins:** All documents are visible with their current status.
+
+**For Reviewers:** Only documents available for review are shown:
+- Documents with **Review Pending** status (available to claim)
+- Documents with **Review In Progress** status owned by the current reviewer
+
+Document statuses displayed:
+- **Review Pending**: Document is awaiting review
+- **Review In Progress**: Document is being reviewed
+- **Review Completed**: All sections reviewed
+- **Review Skipped**: Admin skipped remaining reviews
 
 ### Section Review Interface
 
@@ -211,6 +257,15 @@ The section review interface provides:
 - **View/Edit Data**: Opens the visual editor for a section
 - **Download Data**: Export extraction results as JSON
 - **Mark Review Complete**: Complete the review for a section
+
+### Review Actions
+
+| Action | Available To | Description |
+|--------|--------------|-------------|
+| **Start Review** | Reviewers, Admins | Claim a pending document for review |
+| **Release Review** | Owner, Admins | Release document back to pending status |
+| **Skip All Reviews** | Admins only | Skip all remaining sections |
+| **Mark Review Complete** | Owner, Admins | Complete review for a section |
 
 ### Visual Editor
 
@@ -291,7 +346,9 @@ When evaluation data is available:
 
 ### Review Management
 
-- **Process Promptly**: Review documents promptly to avoid processing delays
+- **Claim Before Editing**: Always use "Start Review" to claim a document before making edits
+- **Process Promptly**: Review documents promptly to avoid backlogs
+- **Release If Unavailable**: Release reviews if you cannot complete them so others can take over
 - **Consistent Standards**: Establish consistent correction guidelines across reviewers
 - **Quality Checks**: Implement spot-checks on completed reviews for quality assurance
 
@@ -316,26 +373,30 @@ When evaluation data is available:
 - Check confidence threshold settings
 - Ensure extraction confidence scores are being calculated
 
+**Cannot Start Review:**
+- Verify document is in **Review Pending** status
+- Check if document is already claimed by another reviewer
+- Ensure you have Reviewer or Admin persona
+
 **Cannot Complete Section Review:**
-- Verify you have Reviewer or Admin persona
-- Check if section is already completed (Reviewers cannot re-edit completed sections)
+- Verify you are the review owner or have Admin persona
+- Check if section is already completed
 - Ensure all required fields are filled
 
-**User Cannot Access Review Features:**
+**User Cannot See Documents:**
+- Reviewers only see pending documents and their own in-progress reviews
 - Verify user is in the correct Cognito group
 - Check user persona in User Management
 - Clear browser cache and re-login
 
-**Workflow Not Resuming After Review:**
-- Verify all sections are marked complete
-- Check Step Functions execution for errors
-- Review CloudWatch logs for the complete_section_review Lambda
+**Estimated Cost Shows Zero After Start Review:**
+- This issue has been fixed - HITL operations no longer re-serialize document data
+- If still occurring, ensure you have the latest deployment
 
 ### Monitoring
 
 Monitor HITL performance through:
 - **CloudWatch Metrics**: Track review completion rates
-- **Step Functions Console**: Monitor workflow execution status
 - **Web UI Dashboard**: View document processing status
 - **DynamoDB**: Query HITLReviewHistory for audit trails
 
@@ -343,7 +404,10 @@ Monitor HITL performance through:
 
 Each completed review is recorded with:
 - Section ID
-- Reviewer username and email
+- Reviewer username and email  
 - Review completion timestamp
+- Action taken (complete, skip_all)
 
 Query the tracking table for `HITLReviewHistory` to audit review activities.
+
+The **Review Completed By** field in the document list shows who completed or skipped the review.

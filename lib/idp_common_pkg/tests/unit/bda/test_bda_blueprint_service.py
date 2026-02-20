@@ -213,21 +213,39 @@ class TestBdaBlueprintService:
     def test_create_blueprints_from_custom_configuration_no_config(self, service):
         """Test handling when no custom configuration exists."""
         # Mock empty configuration retrieval
-        service.config_manager.get_configuration.return_value = {
-            "Configuration": "Custom",
-            "classes": [],
-        }
+        config_obj = MagicMock()
+        config_obj.classes = []
+        service.config_manager.get_configuration.return_value = config_obj
+
+        # Mock empty blueprints list
+        service._retrieve_all_blueprints = MagicMock(return_value=[])
+
+        # Mock AWS standard conversion
+        service._convert_aws_standard_blueprints_to_custom = MagicMock(
+            return_value={
+                "status": "success",
+                "converted_count": 0,
+                "conversion_details": [],
+            }
+        )
 
         # This should not raise an exception but should handle empty classes gracefully
-        # Note: The current implementation has a bug with len(classess) < 0 which is never true
-        # We'll test the actual behavior
-        result = service.create_blueprints_from_custom_configuration()
+        # Test with default bidirectional sync - returns empty list
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
-        # Should complete without processing any classes
-        assert result["status"] == "success"
-        assert "No classes to process" in result["message"]
+        # Should complete without processing any classes - returns empty list
+        assert isinstance(result, list)
+        assert len(result) == 0
         service.blueprint_creator.create_blueprint.assert_not_called()
         service.blueprint_creator.update_blueprint.assert_not_called()
+
+        # Test with explicit sync directions - all return empty list
+        for direction in ["bda_to_idp", "idp_to_bda", "bidirectional"]:
+            result = service.create_blueprints_from_custom_configuration(
+                version="test-version", sync_direction=direction
+            )
+            assert isinstance(result, list)
+            assert len(result) == 0  # No classes processed
 
     def test_create_blueprints_from_custom_configuration_no_classes_key(self, service):
         """Test handling when configuration has no 'classes' key."""
@@ -236,10 +254,11 @@ class TestBdaBlueprintService:
             "Configuration": "Custom"
         }
 
-        # Should handle missing classes key gracefully
-        result = service.create_blueprints_from_custom_configuration()
+        # Should handle missing classes key gracefully - returns empty list
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
-        assert result["status"] == "success"
+        assert isinstance(result, list)
+        assert len(result) == 0
         service.blueprint_creator.create_blueprint.assert_not_called()
 
     def test_create_blueprints_from_custom_configuration_dynamodb_error(self, service):
@@ -254,7 +273,20 @@ class TestBdaBlueprintService:
 
         # Should raise exception on DynamoDB error
         with pytest.raises(Exception, match="Failed to process blueprint creation"):
-            service.create_blueprints_from_custom_configuration()
+            service.create_blueprints_from_custom_configuration("test-version")
+
+    def test_create_blueprints_invalid_sync_direction(self, service):
+        """Test handling of invalid sync direction parameter."""
+        # Mock configuration
+        config_obj = MagicMock()
+        config_obj.classes = [build_json_schema(doc_id="W-4")]
+        service.config_manager.get_configuration.return_value = config_obj
+
+        # Should raise Exception (not ValueError) for invalid direction
+        with pytest.raises(Exception, match="Invalid sync_direction"):
+            service.create_blueprints_from_custom_configuration(
+                version="test-version", sync_direction="invalid_direction"
+            )
 
     def test_create_blueprints_from_custom_configuration_partial_failure(
         self, service, mock_custom_configuration
@@ -282,12 +314,28 @@ class TestBdaBlueprintService:
             success_response
         )
 
-        # Should continue processing despite individual failures
-        # The method should complete and update configuration with successful blueprints
-        service.create_blueprints_from_custom_configuration()
+        # Mock blueprints and AWS standard conversion
+        service._retrieve_all_blueprints = MagicMock(return_value=[])
+        service._convert_aws_standard_blueprints_to_custom = MagicMock(
+            return_value={
+                "status": "success",
+                "converted_count": 0,
+                "conversion_details": [],
+            }
+        )
 
-        # Should still update configuration despite partial failure
-        service.config_manager.handle_update_custom_configuration.assert_called_once()
+        # Mock _blueprint_lookup to return None (no existing blueprints)
+        service._blueprint_lookup = MagicMock(return_value=None)
+
+        # Should continue processing despite individual failures
+        # The method should complete and return status for all classes
+        result = service.create_blueprints_from_custom_configuration("test-version")
+
+        # Verify result is a list
+        assert isinstance(result, list)
+
+        # Should have processed both classes (W-4 and I-9)
+        assert len(result) == 2
 
     def test_check_for_updates_no_changes(self, service):
         """Test _check_for_updates when no changes are detected."""
@@ -559,13 +607,11 @@ class TestBdaBlueprintService:
     def test_create_blueprints_creates_idp_classes_from_orphaned_bda_blueprints(
         self, service
     ):
-        """Test that IDP classes are created for BDA blueprints without corresponding IDP classes.
+        """Test that orphaned blueprint sync is disabled (commented out).
 
-        This test covers the scenario where:
-        1. BDA blueprints exist in the project
-        2. Some blueprints don't have corresponding IDP document classes
-        3. The method should create IDP class schemas from those orphaned blueprints
-        4. The new IDP classes should be added to the configuration
+        NOTE: The orphaned blueprint sync feature (creating IDP classes from BDA blueprints
+        without corresponding IDP classes) has been commented out for optimization.
+        This test now verifies that only existing IDP classes are processed.
         """
         # Mock existing configuration with only one IDP class
         existing_idp_classes = [
@@ -701,6 +747,15 @@ class TestBdaBlueprintService:
             return_value=existing_bda_blueprints
         )
 
+        # Mock convert_aws_standard_blueprints_to_custom to return no conversions
+        service._convert_aws_standard_blueprints_to_custom = MagicMock(
+            return_value={
+                "status": "success",
+                "converted_count": 0,
+                "conversion_details": [],
+            }
+        )
+
         # Mock blueprint operations for the existing W-4 class
         service.blueprint_creator.create_blueprint.return_value = {
             "status": "success",
@@ -727,92 +782,76 @@ class TestBdaBlueprintService:
 
         service._blueprint_lookup = MagicMock(side_effect=mock_blueprint_lookup)
 
-        # Execute the method
-        result = service.create_blueprints_from_custom_configuration()
+        # Execute the method with bidirectional sync (default)
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
-        # Verify the result
+        # Verify the result - only the existing W-4 class should be processed
+        # Orphaned blueprints (I-9, 1099) are NOT synced because that code is commented out
         assert isinstance(result, list)
-        assert (
-            len(result) == 3
-        )  # All classes processed: 1 existing (W-4) + 2 orphaned (I-9, 1099)
+        assert len(result) == 1  # Only W-4 processed (orphaned sync disabled)
 
-        # Verify that handle_update_custom_configuration was called with new classes
-        service.config_manager.handle_update_custom_configuration.assert_called_once()
+        # Verify only W-4 was processed - check only status and class fields
+        assert result[0]["class"] == "W-4"
+        assert result[0]["status"] == "success"
 
-        # Get the call arguments to verify the new classes were added
-        call_args = service.config_manager.handle_update_custom_configuration.call_args[
-            0
-        ][0]
-        updated_classes = call_args["classes"]
+        # Verify that handle_update_custom_configuration was NOT called
+        # (no new classes added since orphaned sync is disabled)
+        service.config_manager.handle_update_custom_configuration.assert_not_called()
 
-        # Should have 3 classes total: 1 original + 2 new from orphaned blueprints
-        assert len(updated_classes) == 3
+    def test_sync_direction_bda_to_idp_only(self, service):
+        """Test that version="test-version", sync_direction='bda_to_idp' only syncs from BDA to IDP."""
+        # Mock configuration
+        config_obj = MagicMock()
+        config_obj.classes = [build_json_schema(doc_id="W-4")]
+        service.config_manager.get_configuration.return_value = config_obj
 
-        # Verify the original W-4 class is still there
-        w4_class = next(
-            (cls for cls in updated_classes if cls.get("$id") == "W-4"), None
-        )
-        assert w4_class is not None
-        assert w4_class["description"] == "Employee's Withholding Certificate form"
-
-        # Verify the new I-9 class was created from the BDA blueprint
-        i9_class = next(
-            (cls for cls in updated_classes if cls.get("$id") == "I-9"), None
-        )
-        assert i9_class is not None
-        assert i9_class["$schema"] == "https://json-schema.org/draft/2020-12/schema"
-        assert i9_class["x-aws-idp-document-type"] == "I-9"
-        assert i9_class["description"] == "Employment Eligibility Verification"
-        assert i9_class["type"] == "object"
-
-        # Verify I-9 has proper $defs (converted from definitions)
-        assert "$defs" in i9_class
-        assert "EmployeeInfo" in i9_class["$defs"]
-
-        # Verify I-9 properties have proper $ref paths (converted from #/definitions/ to #/$defs/)
-        assert i9_class["properties"]["employeeInfo"]["$ref"] == "#/$defs/EmployeeInfo"
-
-        # Verify I-9 definition properties have descriptions (converted from instruction)
-        employee_info_def = i9_class["$defs"]["EmployeeInfo"]
-        assert (
-            employee_info_def["properties"]["fullName"]["description"]
-            == "Employee full name"
-        )
-        assert (
-            employee_info_def["properties"]["dateOfBirth"]["description"]
-            == "Employee date of birth"
+        # Mock blueprints
+        service._retrieve_all_blueprints = MagicMock(return_value=[])
+        service._convert_aws_standard_blueprints_to_custom = MagicMock(
+            return_value={
+                "status": "success",
+                "converted_count": 0,
+                "conversion_details": [],
+            }
         )
 
-        # Verify BDA-specific fields were removed
-        assert "inferenceType" not in employee_info_def["properties"]["fullName"]
-        assert "instruction" not in employee_info_def["properties"]["fullName"]
-
-        # Verify the new 1099 class was created from the BDA blueprint
-        form1099_class = next(
-            (cls for cls in updated_classes if cls.get("$id") == "1099"), None
-        )
-        assert form1099_class is not None
-        assert (
-            form1099_class["$schema"] == "https://json-schema.org/draft/2020-12/schema"
-        )
-        assert form1099_class["x-aws-idp-document-type"] == "1099"
-        assert form1099_class["description"] == "Miscellaneous Income Tax Form"
-
-        # Verify 1099 properties (flat structure, no definitions)
-        assert "payerInfo" in form1099_class["properties"]
-        assert "recipientInfo" in form1099_class["properties"]
-        assert (
-            form1099_class["properties"]["payerInfo"]["description"]
-            == "Payer information"
-        )
-        assert (
-            form1099_class["properties"]["recipientInfo"]["description"]
-            == "Recipient information"
+        # Execute with bda_to_idp direction
+        service.create_blueprints_from_custom_configuration(
+            version="test-version", sync_direction="bda_to_idp"
         )
 
-        # Verify BDA-specific fields were removed from 1099 properties
-        assert "inferenceType" not in form1099_class["properties"]["payerInfo"]
-        assert "instruction" not in form1099_class["properties"]["payerInfo"]
+        # Should not create or update blueprints (Phase 2 skipped)
+        service.blueprint_creator.create_blueprint.assert_not_called()
+        service.blueprint_creator.update_blueprint.assert_not_called()
+
+    def test_sync_direction_idp_to_bda_only(self, service):
+        """Test that version="test-version", sync_direction='idp_to_bda' only syncs from IDP to BDA."""
+        # Mock configuration
+        config_obj = MagicMock()
+        config_obj.classes = [build_json_schema(doc_id="W-4")]
+        service.config_manager.get_configuration.return_value = config_obj
+
+        # Mock blueprints
+        service._retrieve_all_blueprints = MagicMock(return_value=[])
+        service.blueprint_creator.create_blueprint.return_value = {
+            "status": "success",
+            "blueprint": {
+                "blueprintArn": "arn:aws:bedrock:us-west-2:123456789012:blueprint/new-w4",
+                "blueprintName": "new-w4",
+            },
+        }
+        service.blueprint_creator.create_blueprint_version.return_value = {
+            "status": "success"
+        }
+
+        # Execute with idp_to_bda direction
+        service.create_blueprints_from_custom_configuration(
+            version="test-version", sync_direction="idp_to_bda"
+        )
+
+        # Should not call convert_aws_standard_blueprints_to_custom (Phase 1 skipped)
+        # But should create blueprints (Phase 2 executed)
+        service.blueprint_creator.create_blueprint.assert_called_once()
 
     def test_create_blueprints_no_orphaned_blueprints(self, service):
         """Test that no IDP classes are created when all BDA blueprints have corresponding IDP classes."""
@@ -847,6 +886,27 @@ class TestBdaBlueprintService:
         )
         service._check_for_updates = MagicMock(return_value=False)
 
+        # Mock AWS standard conversion
+        service._convert_aws_standard_blueprints_to_custom = MagicMock(
+            return_value={
+                "status": "success",
+                "converted_count": 0,
+                "conversion_details": [],
+            }
+        )
+
+        # Mock blueprint operations
+        service.blueprint_creator.create_blueprint.return_value = {
+            "status": "success",
+            "blueprint": {
+                "blueprintArn": "arn:aws:bedrock:us-west-2:123456789012:blueprint/new-w4",
+                "blueprintName": "new-w4",
+            },
+        }
+        service.blueprint_creator.create_blueprint_version.return_value = {
+            "status": "success"
+        }
+
         def mock_blueprint_lookup(existing_blueprints, doc_class):
             for blueprint in existing_blueprints:
                 blueprint_name = blueprint.get("blueprintName", "")
@@ -857,21 +917,13 @@ class TestBdaBlueprintService:
         service._blueprint_lookup = MagicMock(side_effect=mock_blueprint_lookup)
 
         # Execute the method
-        service.create_blueprints_from_custom_configuration()
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
-        # Verify that handle_update_custom_configuration was called
-        service.config_manager.handle_update_custom_configuration.assert_called_once()
+        # Verify result is a list
+        assert isinstance(result, list)
 
-        # Get the call arguments to verify no new classes were added
-        call_args = service.config_manager.handle_update_custom_configuration.call_args[
-            0
-        ][0]
-        updated_classes = call_args["classes"]
-
-        # Should still have only the original 2 classes (no new ones added)
-        assert len(updated_classes) == 2
-        assert any(cls.get("$id") == "W-4" for cls in updated_classes)
-        assert any(cls.get("$id") == "I-9" for cls in updated_classes)
+        # Should have processed 2 classes (W-4 and I-9)
+        assert len(result) == 2
 
     def test_create_blueprints_empty_existing_blueprints(self, service):
         """Test behavior when no BDA blueprints exist in the project."""
@@ -887,6 +939,15 @@ class TestBdaBlueprintService:
         # Mock empty blueprints list
         service._retrieve_all_blueprints = MagicMock(return_value=[])
 
+        # Mock AWS standard conversion
+        service._convert_aws_standard_blueprints_to_custom = MagicMock(
+            return_value={
+                "status": "success",
+                "converted_count": 0,
+                "conversion_details": [],
+            }
+        )
+
         # Mock blueprint operations
         service.blueprint_creator.create_blueprint.return_value = {
             "status": "success",
@@ -900,17 +961,862 @@ class TestBdaBlueprintService:
         }
 
         # Execute the method
-        service.create_blueprints_from_custom_configuration()
+        result = service.create_blueprints_from_custom_configuration("test-version")
 
-        # Verify that handle_update_custom_configuration was called
+        # Verify result is a list
+        assert isinstance(result, list)
+
+        # Should have processed 1 class (W-4)
+        assert len(result) == 1
+        assert result[0]["class"] == "W-4"
+        assert result[0]["status"] == "success"
+
+    def test_convert_aws_standard_blueprints_to_custom_success(self, service):
+        """Test successful conversion of AWS standard blueprints to custom blueprints."""
+        # Mock existing configuration
+        config_obj = MagicMock()
+        config_obj.classes = []
+        service.config_manager.get_configuration.return_value = config_obj
+
+        # Mock AWS standard blueprints
+        aws_standard_blueprints = [
+            {
+                "blueprintArn": "arn:aws:bedrock:us-east-1:aws:blueprint/invoice-standard",
+                "blueprintName": "Invoice-Standard",
+                "blueprintVersion": "1",
+                "schema": json.dumps(
+                    {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "class": "Invoice",
+                        "description": "Standard invoice blueprint",
+                        "type": "object",
+                        "properties": {
+                            "invoiceNumber": {
+                                "type": "string",
+                                "inferenceType": "explicit",
+                                "instruction": "Invoice number",
+                            }
+                        },
+                    }
+                ),
+            },
+            {
+                "blueprintArn": "arn:aws:bedrock:us-east-1:aws:blueprint/receipt-standard",
+                "blueprintName": "Receipt-Standard",
+                "blueprintVersion": "1",
+                "schema": json.dumps(
+                    {
+                        "$schema": "http://json-schema.org/draft-07/schema#",
+                        "class": "Receipt",
+                        "description": "Standard receipt blueprint",
+                        "type": "object",
+                        "properties": {
+                            "receiptNumber": {
+                                "type": "string",
+                                "inferenceType": "explicit",
+                                "instruction": "Receipt number",
+                            }
+                        },
+                    }
+                ),
+            },
+        ]
+
+        # Mock _retrieve_all_blueprints to return AWS standard blueprints
+        service._retrieve_all_blueprints = MagicMock(
+            return_value=aws_standard_blueprints
+        )
+
+        # Mock blueprint creation
+        service.blueprint_creator.create_blueprint.return_value = {
+            "status": "success",
+            "blueprint": {
+                "blueprintArn": "arn:aws:bedrock:us-east-1:123456789012:blueprint/custom-invoice",
+                "blueprintName": "custom-invoice",
+            },
+        }
+        service.blueprint_creator.create_blueprint_version.return_value = {
+            "status": "success"
+        }
+
+        # Mock list_blueprints and update_project_with_custom_configurations
+        service.blueprint_creator.list_blueprints.return_value = {
+            "blueprints": aws_standard_blueprints
+        }
+        service.blueprint_creator.update_project_with_custom_configurations.return_value = {
+            "status": "success"
+        }
+
+        # Execute the method
+        result = service._convert_aws_standard_blueprints_to_custom("test-version")
+
+        # Verify the result
+        assert result["status"] == "success"
+        assert result["converted_count"] == 2
+        assert len(result["conversion_details"]) == 2
+
+        # Verify blueprint creation was called for each AWS standard blueprint
+        assert service.blueprint_creator.create_blueprint.call_count == 2
+
+        # Verify project was updated to remove AWS standard blueprints
+        service.blueprint_creator.update_project_with_custom_configurations.assert_called_once()
+
+        # Verify configuration was updated with new IDP classes
         service.config_manager.handle_update_custom_configuration.assert_called_once()
+        call_args = service.config_manager.handle_update_custom_configuration.call_args
+        # Access keyword arguments
+        updated_classes = call_args.kwargs["custom_config"]["classes"]
 
-        # Get the call arguments to verify no new classes were added (since no orphaned blueprints)
-        call_args = service.config_manager.handle_update_custom_configuration.call_args[
-            0
-        ][0]
-        updated_classes = call_args["classes"]
+        # Should have 2 new IDP classes
+        assert len(updated_classes) == 2
+        assert any(cls.get("$id") == "Invoice" for cls in updated_classes)
+        assert any(cls.get("$id") == "Receipt" for cls in updated_classes)
 
-        # Should still have only the original 1 class (no new ones added from blueprints)
-        assert len(updated_classes) == 1
-        assert updated_classes[0].get("$id") == "W-4"
+    def test_convert_aws_standard_blueprints_no_aws_blueprints(self, service):
+        """Test conversion when no AWS standard blueprints exist."""
+        # Mock existing configuration
+        config_obj = MagicMock()
+        config_obj.classes = []
+        service.config_manager.get_configuration.return_value = config_obj
+
+        # Mock custom blueprints only (no AWS standard)
+        custom_blueprints = [
+            {
+                "blueprintArn": "arn:aws:bedrock:us-east-1:123456789012:blueprint/custom-w4",
+                "blueprintName": "custom-w4",
+                "blueprintVersion": "1",
+                "schema": json.dumps({"class": "W-4", "type": "object"}),
+            }
+        ]
+
+        service._retrieve_all_blueprints = MagicMock(return_value=custom_blueprints)
+
+        # Mock blueprint creation to fail (since these aren't AWS standard blueprints)
+        service.blueprint_creator.create_blueprint.return_value = {
+            "status": "failed",
+            "error": "Not an AWS standard blueprint",
+        }
+
+        # Execute the method
+        result = service._convert_aws_standard_blueprints_to_custom("test-version")
+
+        # Verify the method completes but reports failures for non-AWS blueprints
+        assert result["status"] == "success"
+        assert result["converted_count"] == 0
+        assert len(result["conversion_details"]) == 1
+        assert result["conversion_details"][0]["status"] == "failed"
+
+        # Verify no project updates were attempted
+        service.blueprint_creator.update_project_with_custom_configurations.assert_not_called()
+
+    def test_convert_aws_standard_blueprints_partial_failure(self, service):
+        """Test conversion when some blueprints fail to convert."""
+        # Mock existing configuration
+        config_obj = MagicMock()
+        config_obj.classes = []
+        service.config_manager.get_configuration.return_value = config_obj
+
+        # Mock AWS standard blueprints
+        aws_standard_blueprints = [
+            {
+                "blueprintArn": "arn:aws:bedrock:us-east-1:aws:blueprint/invoice-standard",
+                "blueprintName": "Invoice-Standard",
+                "blueprintVersion": "1",
+                "schema": json.dumps(
+                    {
+                        "class": "Invoice",
+                        "type": "object",
+                        "properties": {
+                            "invoiceNumber": {
+                                "type": "string",
+                                "instruction": "Invoice number",
+                            }
+                        },
+                    }
+                ),
+            },
+            {
+                "blueprintArn": "arn:aws:bedrock:us-east-1:aws:blueprint/receipt-standard",
+                "blueprintName": "Receipt-Standard",
+                "blueprintVersion": "1",
+                "schema": json.dumps(
+                    {
+                        "class": "Receipt",
+                        "type": "object",
+                        "properties": {
+                            "receiptNumber": {
+                                "type": "string",
+                                "instruction": "Receipt number",
+                            }
+                        },
+                    }
+                ),
+            },
+        ]
+
+        service._retrieve_all_blueprints = MagicMock(
+            return_value=aws_standard_blueprints
+        )
+
+        # Mock first blueprint creation success, second failure
+        service.blueprint_creator.create_blueprint.side_effect = [
+            {
+                "status": "success",
+                "blueprint": {
+                    "blueprintArn": "arn:aws:bedrock:us-east-1:123456789012:blueprint/custom-invoice",
+                    "blueprintName": "custom-invoice",
+                },
+            },
+            Exception("Creation failed"),
+        ]
+        service.blueprint_creator.create_blueprint_version.return_value = {
+            "status": "success"
+        }
+        service.blueprint_creator.list_blueprints.return_value = {
+            "blueprints": aws_standard_blueprints
+        }
+        service.blueprint_creator.update_project_with_custom_configurations.return_value = {
+            "status": "success"
+        }
+
+        # Execute the method
+        result = service._convert_aws_standard_blueprints_to_custom("test-version")
+
+        # Verify partial success (method returns success even with failures)
+        assert result["status"] == "success"
+        assert result["converted_count"] == 1
+        assert len(result["conversion_details"]) == 2
+
+        # Verify one success and one failure
+        success_details = [
+            d for d in result["conversion_details"] if d["status"] == "success"
+        ]
+        failure_details = [
+            d for d in result["conversion_details"] if d["status"] == "failed"
+        ]
+        assert len(success_details) == 1
+        assert len(failure_details) == 1
+
+    def test_convert_aws_standard_blueprints_project_update_failure(self, service):
+        """Test conversion when project update fails but creation succeeds."""
+        # Mock existing configuration
+        config_obj = MagicMock()
+        config_obj.classes = []
+        service.config_manager.get_configuration.return_value = config_obj
+
+        # Mock AWS standard blueprint
+        aws_standard_blueprints = [
+            {
+                "blueprintArn": "arn:aws:bedrock:us-east-1:aws:blueprint/invoice-standard",
+                "blueprintName": "Invoice-Standard",
+                "blueprintVersion": "1",
+                "schema": json.dumps(
+                    {
+                        "class": "Invoice",
+                        "type": "object",
+                        "properties": {
+                            "invoiceNumber": {
+                                "type": "string",
+                                "instruction": "Invoice number",
+                            }
+                        },
+                    }
+                ),
+            }
+        ]
+
+        service._retrieve_all_blueprints = MagicMock(
+            return_value=aws_standard_blueprints
+        )
+
+        # Mock successful creation but failed project update
+        service.blueprint_creator.create_blueprint.return_value = {
+            "status": "success",
+            "blueprint": {
+                "blueprintArn": "arn:aws:bedrock:us-east-1:123456789012:blueprint/custom-invoice",
+                "blueprintName": "custom-invoice",
+            },
+        }
+        service.blueprint_creator.create_blueprint_version.return_value = {
+            "status": "success"
+        }
+        service.blueprint_creator.list_blueprints.return_value = {
+            "blueprints": aws_standard_blueprints
+        }
+        service.blueprint_creator.update_project_with_custom_configurations.side_effect = Exception(
+            "Update failed"
+        )
+
+        # Execute the method
+        result = service._convert_aws_standard_blueprints_to_custom("test-version")
+
+        # Verify conversion still marked as success (project update failure is logged but not critical)
+        assert result["status"] == "success"
+        assert result["converted_count"] == 1
+
+    def test_convert_aws_standard_blueprints_invalid_schema(self, service):
+        """Test conversion when AWS standard blueprint has invalid schema."""
+        # Mock existing configuration
+        config_obj = MagicMock()
+        config_obj.classes = []
+        service.config_manager.get_configuration.return_value = config_obj
+
+        # Mock AWS standard blueprint with invalid schema
+        aws_standard_blueprints = [
+            {
+                "blueprintArn": "arn:aws:bedrock:us-east-1:aws:blueprint/invalid-standard",
+                "blueprintName": "Invalid-Standard",
+                "blueprintVersion": "1",
+                "schema": "invalid json",
+            }
+        ]
+
+        service._retrieve_all_blueprints = MagicMock(
+            return_value=aws_standard_blueprints
+        )
+
+        # Execute the method
+        result = service._convert_aws_standard_blueprints_to_custom("test-version")
+
+        # Verify failure was handled (method returns success even with failures)
+        assert result["status"] == "success"
+        assert result["converted_count"] == 0
+        assert len(result["conversion_details"]) == 1
+        assert result["conversion_details"][0]["status"] == "failed"
+        # Only check for status and class fields (no error_message)
+        assert "class" in result["conversion_details"][0]
+
+    def test_normalize_aws_blueprint_schema_adds_missing_types(self, service):
+        """Test that normalization adds missing type fields to AWS blueprint schema."""
+        # AWS API response format - missing type fields
+        aws_schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "class": "US-drivers-licenses",
+            "description": "This document is for US driving license from any US state",
+            # Missing "type": "object" at root
+            "definitions": {
+                "Address": {
+                    # Missing "type": "object" for definition
+                    "properties": {
+                        "STREET_ADDRESS": {
+                            "type": "string",
+                            "inferenceType": "explicit",
+                            "instruction": "The street address",
+                        }
+                    }
+                },
+                "NameDetails": {
+                    # Missing "type": "object" for definition
+                    "properties": {
+                        "FIRST_NAME": {
+                            "type": "string",
+                            "inferenceType": "explicit",
+                            "instruction": "The first name",
+                        }
+                    }
+                },
+            },
+            "properties": {
+                "NAME_DETAILS": {
+                    "$ref": "#/definitions/NameDetails"
+                    # Missing "instruction": "-"
+                },
+                "ADDRESS_DETAILS": {
+                    "$ref": "#/definitions/Address"
+                    # Missing "instruction": "-"
+                },
+                "ID_NUMBER": {
+                    "type": "string",
+                    "inferenceType": "explicit",
+                    "instruction": "The unique identification number",
+                },
+            },
+        }
+
+        # Normalize the schema
+        normalized = service._normalize_aws_blueprint_schema(aws_schema)
+
+        # Verify root type was added
+        assert normalized["type"] == "object"
+
+        # Verify definition types were added
+        assert normalized["definitions"]["Address"]["type"] == "object"
+        assert normalized["definitions"]["NameDetails"]["type"] == "object"
+
+        # Verify $ref properties got instruction field
+        assert normalized["properties"]["NAME_DETAILS"]["instruction"] == "-"
+        assert normalized["properties"]["ADDRESS_DETAILS"]["instruction"] == "-"
+
+        # Verify existing fields were not modified
+        assert normalized["class"] == "US-drivers-licenses"
+        assert (
+            normalized["definitions"]["Address"]["properties"]["STREET_ADDRESS"]["type"]
+            == "string"
+        )
+
+    def test_normalize_aws_blueprint_schema_preserves_existing_types(self, service):
+        """Test that normalization preserves existing type fields."""
+        # Schema with existing types
+        schema_with_types = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "class": "Document",
+            "type": "object",  # Already has type
+            "definitions": {
+                "Address": {
+                    "type": "object",  # Already has type
+                    "properties": {
+                        "STREET": {"type": "string", "instruction": "Street address"}
+                    },
+                }
+            },
+            "properties": {
+                "ADDRESS": {
+                    "$ref": "#/definitions/Address",
+                    "instruction": "-",  # Already has instruction
+                }
+            },
+        }
+
+        # Normalize the schema
+        normalized = service._normalize_aws_blueprint_schema(schema_with_types)
+
+        # Verify types were preserved (not duplicated or changed)
+        assert normalized["type"] == "object"
+        assert normalized["definitions"]["Address"]["type"] == "object"
+        assert normalized["properties"]["ADDRESS"]["instruction"] == "-"
+
+    def test_normalize_aws_blueprint_schema_handles_empty_definitions(self, service):
+        """Test normalization with no definitions."""
+        schema_no_defs = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "class": "SimpleDocument",
+            "properties": {"FIELD": {"type": "string", "instruction": "A field"}},
+        }
+
+        # Normalize the schema
+        normalized = service._normalize_aws_blueprint_schema(schema_no_defs)
+
+        # Verify root type was added
+        assert normalized["type"] == "object"
+
+        # Verify no errors with missing definitions
+        assert "definitions" not in normalized or normalized.get("definitions") == {}
+
+    def test_normalize_aws_blueprint_schema_handles_non_object_definitions(
+        self, service
+    ):
+        """Test normalization doesn't add type to definitions without properties."""
+        schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "class": "Document",
+            "definitions": {
+                "StringDef": {
+                    "type": "string"  # Not an object, should not be modified
+                },
+                "ObjectDef": {
+                    # Has properties, should get type
+                    "properties": {"FIELD": {"type": "string"}}
+                },
+            },
+            "properties": {},
+        }
+
+        # Normalize the schema
+        normalized = service._normalize_aws_blueprint_schema(schema)
+
+        # Verify string definition was not modified
+        assert normalized["definitions"]["StringDef"]["type"] == "string"
+
+        # Verify object definition got type added
+        assert normalized["definitions"]["ObjectDef"]["type"] == "object"
+
+    def test_transform_with_normalized_aws_schema(self, service):
+        """Test full transformation flow with normalized AWS schema."""
+        # AWS API response format
+        aws_schema = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "class": "US-drivers-licenses",
+            "description": "US driving license",
+            "definitions": {
+                "Address": {
+                    "properties": {
+                        "STREET": {
+                            "type": "string",
+                            "inferenceType": "explicit",
+                            "instruction": "Street",
+                        }
+                    }
+                }
+            },
+            "properties": {
+                "ADDRESS": {"$ref": "#/definitions/Address"},
+                "ID": {
+                    "type": "string",
+                    "inferenceType": "explicit",
+                    "instruction": "ID",
+                },
+            },
+        }
+
+        # Normalize then transform
+        normalized = service._normalize_aws_blueprint_schema(aws_schema)
+        idp_schema = service.transform_bda_blueprint_to_idp_class_schema(normalized)
+
+        # Verify IDP schema structure
+        assert idp_schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+        assert idp_schema["$id"] == "US-drivers-licenses"
+        assert idp_schema["type"] == "object"
+
+        # Verify definitions were transformed to $defs
+        assert "$defs" in idp_schema
+        assert "Address" in idp_schema["$defs"]
+        assert idp_schema["$defs"]["Address"]["type"] == "object"
+
+        # Verify properties were transformed
+        assert "ADDRESS" in idp_schema["properties"]
+        assert idp_schema["properties"]["ADDRESS"]["$ref"] == "#/$defs/Address"
+
+    def test_normalize_handles_dl_blueprint_schema_with_issues(self, service):
+        """Test normalization fixes array items and double-escaped quotes."""
+        # Create a test schema with the issues that normalization should fix
+        schema_with_issues = {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "class": "US-drivers-licenses",
+            "description": "Test schema for US drivers licenses",
+            "type": "object",
+            "definitions": {
+                "Address": {
+                    # Missing type field - should be added
+                    "properties": {
+                        "STREET_ADDRESS": {
+                            "type": "string",
+                            "inferenceType": "explicit",
+                            "instruction": "The street address",
+                        }
+                    }
+                },
+                "PersonalDetails": {
+                    "properties": {
+                        "SEX": {
+                            "type": "string",
+                            "inferenceType": "explicit",
+                            "instruction": 'One of [\\"M\\", \\"F\\"]',  # Double-escaped quotes
+                        }
+                    },
+                    "type": "object",
+                },
+            },
+            "properties": {
+                "CLASS": {
+                    "type": "string",
+                    "inferenceType": "explicit",
+                    "instruction": 'The single letter class code, one of \\"A\\", \\"B\\" or \\"C\\"',  # Double-escaped
+                },
+                "RESTRICTIONS": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "inferenceType": "explicit",  # Should be removed
+                        "instruction": "Extract this field from the document",  # Should be removed
+                    },
+                    "instruction": "The restrictions listed",
+                },
+                "ENDORSEMENTS": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "inferenceType": "explicit",  # Should be removed
+                        "instruction": "Extract this field from the document",  # Should be removed
+                    },
+                    "instruction": "The endorsement codes if any",
+                },
+                "NAME_DETAILS": {
+                    "$ref": "#/definitions/Address"
+                    # Missing instruction - should be added
+                },
+            },
+        }
+
+        # Normalize the schema
+        normalized = service._normalize_aws_blueprint_schema(schema_with_issues)
+
+        # Write the normalized schema to a file for manual verification
+        import os
+
+        output_path = os.path.join(
+            os.path.dirname(__file__),
+            "../../resources/dl_blueprint_schema_normalized_output.json",
+        )
+        with open(output_path, "w") as f:
+            json.dump(normalized, f, indent=2)
+        print(f"\n✅ Normalized schema written to: {output_path}")
+
+        # Verify the key fixes were applied:
+
+        # 1. Array items only have type field (no inferenceType or instruction)
+        assert normalized["properties"]["RESTRICTIONS"]["items"] == {"type": "string"}
+        assert normalized["properties"]["ENDORSEMENTS"]["items"] == {"type": "string"}
+
+        # 2. Arrays have instruction and inferenceType at the array level
+        assert (
+            normalized["properties"]["RESTRICTIONS"]["instruction"]
+            == "The restrictions listed"
+        )
+        assert (
+            normalized["properties"]["ENDORSEMENTS"]["instruction"]
+            == "The endorsement codes if any"
+        )
+        assert normalized["properties"]["RESTRICTIONS"]["inferenceType"] == "explicit"
+        assert normalized["properties"]["ENDORSEMENTS"]["inferenceType"] == "explicit"
+
+        # 3. Definitions have type field added
+        assert normalized["definitions"]["Address"]["type"] == "object"
+
+        # 4. Double-escaped quotes are fixed
+        assert (
+            normalized["properties"]["CLASS"]["instruction"]
+            == 'The single letter class code, one of "A", "B" or "C"'
+        )
+        assert (
+            normalized["definitions"]["PersonalDetails"]["properties"]["SEX"][
+                "instruction"
+            ]
+            == 'One of ["M", "F"]'
+        )
+
+        # 5. $ref properties have instruction added
+        assert normalized["properties"]["NAME_DETAILS"]["instruction"] == "-"
+
+    def test_sanitize_property_names_removes_special_characters(self, service):
+        """Test that special characters are removed from property names."""
+        # Load test schema with special characters
+        import os
+
+        schema_path = os.path.join(
+            os.path.dirname(__file__),
+            "../../resources/schema_with_special_chars.json",
+        )
+        with open(schema_path, "r") as f:
+            schema = json.load(f)
+
+        # Sanitize the schema
+        sanitized_schema, name_mapping = service._sanitize_property_names(
+            deepcopy(schema)
+        )
+
+        # Verify special characters were removed
+        assert "PropertyWithAmpersand" in sanitized_schema["properties"]
+        assert "Property&WithAmpersand" not in sanitized_schema["properties"]
+
+        assert "PropertyWithSlash" in sanitized_schema["properties"]
+        assert "Property/WithSlash" not in sanitized_schema["properties"]
+
+        assert "PropertyWithAt" in sanitized_schema["properties"]
+        assert "Property@WithAt" not in sanitized_schema["properties"]
+
+        assert "PropertyWithSpaces" in sanitized_schema["properties"]
+        assert "Property With Spaces" not in sanitized_schema["properties"]
+
+        # Verify nested properties are sanitized
+        nested_obj = sanitized_schema["properties"]["NestedObject"]
+        assert "NestedProperty" in nested_obj["properties"]
+        assert "Nested&Property" not in nested_obj["properties"]
+        assert "NestedProperty" in nested_obj["properties"]
+        assert "Nested/Property" not in nested_obj["properties"]
+
+        # Verify array item properties are sanitized
+        array_items = sanitized_schema["properties"]["ArrayProperty"]["items"]
+        assert "ItemField" in array_items["properties"]
+        assert "Item&Field" not in array_items["properties"]
+
+        # Verify name mapping was created
+        assert "Property&WithAmpersand" in name_mapping
+        assert name_mapping["Property&WithAmpersand"] == "PropertyWithAmpersand"
+        assert "Property/WithSlash" in name_mapping
+        assert name_mapping["Property/WithSlash"] == "PropertyWithSlash"
+
+        # Verify normal properties are unchanged
+        assert "Normal_Property" in sanitized_schema["properties"]
+
+    def test_sanitize_property_names_in_idp_to_bda_sync(self, service):
+        """Test that property names are sanitized during IDP to BDA synchronization."""
+        # Load test schema with special characters
+        import os
+
+        schema_path = os.path.join(
+            os.path.dirname(__file__),
+            "../../resources/schema_with_special_chars.json",
+        )
+        with open(schema_path, "r") as f:
+            schema = json.load(f)
+
+        # Mock configuration with schema containing special characters
+        mock_config = MagicMock()
+        mock_config.classes = [schema]
+
+        service.config_manager.get_configuration = MagicMock(return_value=mock_config)
+        service._retrieve_all_blueprints = MagicMock(return_value=[])
+        service.blueprint_creator.create_blueprint = MagicMock(
+            return_value={
+                "status": "success",
+                "blueprint": {
+                    "blueprintArn": "arn:aws:bedrock:us-east-1:123456789012:blueprint/test",
+                    "blueprintName": "test-blueprint",
+                },
+            }
+        )
+        service.blueprint_creator.create_blueprint_version = MagicMock(
+            return_value={"status": "success"}
+        )
+
+        # Execute synchronization
+        service.create_blueprints_from_custom_configuration(
+            version="test-version", sync_direction="idp_to_bda"
+        )
+
+        # Verify blueprint was created
+        assert service.blueprint_creator.create_blueprint.called
+        call_args = service.blueprint_creator.create_blueprint.call_args
+
+        # Get the schema that was passed to create_blueprint
+        blueprint_schema_str = call_args[1]["schema"]
+        blueprint_schema = json.loads(blueprint_schema_str)
+
+        # Verify special characters were removed from property names
+        assert "PropertyWithAmpersand" in blueprint_schema["properties"]
+        assert "Property&WithAmpersand" not in blueprint_schema["properties"]
+
+        assert "PropertyWithSlash" in blueprint_schema["properties"]
+        assert "Property/WithSlash" not in blueprint_schema["properties"]
+
+        # Verify the configuration was updated with sanitized class
+        assert service.config_manager.handle_update_custom_configuration.called
+        call_args = service.config_manager.handle_update_custom_configuration.call_args
+        # Access keyword arguments
+        updated_classes = call_args.kwargs["custom_config"]["classes"]
+
+        # Verify the class in configuration has sanitized property names
+        assert "PropertyWithAmpersand" in updated_classes[0]["properties"]
+        assert "Property&WithAmpersand" not in updated_classes[0]["properties"]
+
+    def test_normalize_real_aws_dl_blueprint_schema(self, service):
+        """Test normalization with real AWS driver's license blueprint schema."""
+        import os
+
+        # Load the real AWS blueprint schema
+        schema_path = os.path.join(
+            os.path.dirname(__file__),
+            "../../resources/dl_blueprint_schema_with_issues.json",
+        )
+        with open(schema_path, "r") as f:
+            aws_schema = json.load(f)
+
+        # Normalize the schema
+        normalized = service._normalize_aws_blueprint_schema(aws_schema)
+
+        # Verify the key fixes were applied:
+
+        # 1. Root type should be added
+        assert normalized["type"] == "object"
+
+        # 2. Definitions should have type field added
+        assert normalized["definitions"]["Address"]["type"] == "object"
+        assert normalized["definitions"]["NameDetails"]["type"] == "object"
+        assert normalized["definitions"]["PersonalDetails"]["type"] == "object"
+
+        # 3. $ref properties should have instruction added
+        assert normalized["properties"]["NAME_DETAILS"]["instruction"] == "-"
+        assert normalized["properties"]["ADDRESS_DETAILS"]["instruction"] == "-"
+        assert normalized["properties"]["PERSONAL_DETAILS"]["instruction"] == "-"
+
+        # 4. Array items should only have type field (already correct in AWS schema)
+        assert normalized["properties"]["RESTRICTIONS"]["items"] == {"type": "string"}
+        assert normalized["properties"]["ENDORSEMENTS"]["items"] == {"type": "string"}
+
+        # 5. Arrays should have instruction and inferenceType at array level (already correct)
+        assert "instruction" in normalized["properties"]["RESTRICTIONS"]
+        assert "inferenceType" in normalized["properties"]["RESTRICTIONS"]
+        assert "instruction" in normalized["properties"]["ENDORSEMENTS"]
+        assert "inferenceType" in normalized["properties"]["ENDORSEMENTS"]
+
+        # Write the normalized schema for verification
+        output_path = os.path.join(
+            os.path.dirname(__file__),
+            "../../resources/dl_blueprint_schema_normalized_from_aws.json",
+        )
+        with open(output_path, "w") as f:
+            json.dump(normalized, f, indent=2)
+        print(f"\n✅ Normalized AWS schema written to: {output_path}")
+
+        # Verify the schema can be used to create a blueprint
+        # Transform to IDP format and back to verify round-trip
+        idp_schema = service.transform_bda_blueprint_to_idp_class_schema(normalized)
+        assert idp_schema["$id"] == "US-drivers-licenses"
+        assert idp_schema["type"] == "object"
+        assert "$defs" in idp_schema
+
+        # Transform back to BDA format
+        bda_schema = service._transform_json_schema_to_bedrock_blueprint(idp_schema)
+        assert bda_schema["class"] == "US-drivers-licenses"
+        assert bda_schema["type"] == "object"
+        assert "definitions" in bda_schema
+
+        print("✅ Round-trip transformation successful")
+
+    def test_transform_implements_all_normalization_rules(self, service):
+        """
+        Verify that _transform_json_schema_to_bedrock_blueprint implements
+        all the rules from _normalize_aws_blueprint_schema.
+        """
+        import os
+
+        # Load test IDP schema
+        schema_path = os.path.join(
+            os.path.dirname(__file__),
+            "../../resources/test_idp_schema_for_transform.json",
+        )
+        with open(schema_path, "r") as f:
+            idp_schema = json.load(f)
+
+        # Transform to BDA blueprint
+        bda_schema = service._transform_json_schema_to_bedrock_blueprint(idp_schema)
+
+        # Verify Rule 1: $schema field is present (draft-07)
+        assert bda_schema["$schema"] == "http://json-schema.org/draft-07/schema#"
+
+        # Verify Rule 2: Root type is present
+        assert bda_schema["type"] == "object"
+
+        # Verify Rule 2: Definitions have type field
+        assert bda_schema["definitions"]["Address"]["type"] == "object"
+
+        # Verify Rule 3: $ref properties have instruction field
+        assert bda_schema["properties"]["address"]["instruction"] == "-"
+        assert bda_schema["properties"]["address"]["$ref"] == "#/definitions/Address"
+
+        # Verify Rule 4: Array items only have type field (no inferenceType or instruction)
+        assert bda_schema["properties"]["tags"]["items"] == {"type": "string"}
+        assert bda_schema["properties"]["scores"]["items"] == {"type": "number"}
+
+        # Verify Rule 4: Arrays have instruction at array level
+        assert "instruction" in bda_schema["properties"]["tags"]
+        assert "instruction" in bda_schema["properties"]["scores"]
+
+        # Verify Rule 4: Arrays do NOT have inferenceType at array level
+        assert "inferenceType" not in bda_schema["properties"]["tags"]
+        assert "inferenceType" not in bda_schema["properties"]["scores"]
+
+        # Verify leaf properties have inferenceType and instruction
+        assert bda_schema["properties"]["name"]["type"] == "string"
+        assert bda_schema["properties"]["name"]["inferenceType"] == "explicit"
+        assert "instruction" in bda_schema["properties"]["name"]
+
+        # Verify definitions use "definitions" not "$defs"
+        assert "definitions" in bda_schema
+        assert "$defs" not in bda_schema
+
+        # Verify $ref paths use "#/definitions/" not "#/$defs/"
+        assert "#/definitions/" in bda_schema["properties"]["address"]["$ref"]
+        assert "#/$defs/" not in bda_schema["properties"]["address"]["$ref"]
+
+        print("✅ All normalization rules are implemented in transform method")

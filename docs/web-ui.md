@@ -19,6 +19,7 @@ _The GenAIIDP Web Interface showing the document tracking dashboard with status 
 - Inspection of processing outputs for section classification and information extraction
 - Accuracy evaluation reports when baseline data is provided
 - View and edit pattern configuration, including document classes, prompt engineering, and model settings
+- Manage multiple configuration versions — create, compare, activate, and delete versions (see [configuration-versions.md](configuration-versions.md))
 - **Confidence threshold configuration** for HITL (Human-in-the-Loop) triggering through the Assessment & HITL Configuration section
 - Document upload from local computer
 - Knowledge base querying for document collections
@@ -81,13 +82,16 @@ The Edit Sections feature uses **2-phase schema knowledge optimization**:
 - **Performance Optimization**: Automatic selective processing for efficiency
 - **Data Preservation**: Unmodified sections retain all processing results
 
-#### Pattern-1 Information
+#### Pattern-1 Support (Data-Only Edit Mode)
 
-Pattern-1 uses **Bedrock Data Automation (BDA)** with automatic section management. When Edit Sections is clicked, users see an informative modal explaining:
+Pattern-1 uses **Bedrock Data Automation (BDA)** with automatic section management. Edit Mode in Pattern-1 provides **data-only editing**:
 
-- **Architecture Differences**: BDA handles section boundaries automatically
-- **Alternative Workflows**: Available options like "View/Edit Data", Configuration updates, and document reprocessing
-- **Future Considerations**: Guidance on using Pattern-2/Pattern-3 for fine-grained section control
+- **Data Editing**: Edit extraction data (predictions and ground truth) via the "Edit Data" button for each section
+- **Section Structure**: Read-only - section boundaries, classifications, and page assignments are managed by BDA
+- **Reprocessing**: "Save and Reprocess" triggers evaluation and summarization steps without re-invoking BDA
+- **BDA Skip Logic**: When reprocessing with existing pages/sections data, BDA invocation is automatically skipped
+
+**Note**: Pattern-2 and Pattern-3 offer full section structure editing. Pattern-1 maintains BDA-managed section boundaries while allowing extraction data modifications.
 
 ## Edit Pages
 

@@ -19,6 +19,7 @@ import { exportToExcel } from '../common/download-func';
 import DeleteDocumentModal from '../common/DeleteDocumentModal';
 import ReprocessDocumentModal from '../common/ReprocessDocumentModal';
 import AbortWorkflowModal from '../common/AbortWorkflowModal';
+import DateRangeModal from '../common/DateRangeModal';
 import claimReviewMutation from '../../graphql/mutations/claimReview';
 import releaseReviewMutation from '../../graphql/mutations/releaseReview';
 
@@ -34,12 +35,15 @@ import {
 } from './documents-table-config';
 
 import { getFilterCounterText, TableEmptyState, TableNoMatchState } from '../common/table';
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
+import { formatConfigVersionText } from '../test-studio/utils/configVersionUtils';
 
 import '@cloudscape-design/global-styles/index.css';
 
 const logger = new ConsoleLogger('DocumentList');
 
 const DocumentList = () => {
+  const { versions } = useConfigurationVersions();
   const [documentList, setDocumentList] = useState([]);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
   const [isReprocessModalVisible, setIsReprocessModalVisible] = useState(false);
@@ -47,6 +51,7 @@ const DocumentList = () => {
   const [isDeleteLoading, setIsDeleteLoading] = useState(false);
   const [isReprocessLoading, setIsReprocessLoading] = useState(false);
   const [isAbortLoading, setIsAbortLoading] = useState(false);
+  const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
   const [currentUsername, setCurrentUsername] = useState('');
   const { settings } = useSettingsContext();
   const { isReviewer, isAdmin } = useUserRole();
@@ -73,6 +78,8 @@ const DocumentList = () => {
     setSelectedItems,
     setToolsOpen,
     periodsToLoad,
+    customDateRange,
+    setCustomDateRange,
     getDocumentDetailsFromIds,
     deleteDocuments,
     reprocessDocuments,
@@ -89,8 +96,9 @@ const DocumentList = () => {
         if (!doc.hitlTriggered) return false;
         // Exclude completed or skipped reviews
         if (doc.hitlCompleted) return false;
-        if (doc.hitlStatus?.toLowerCase() === 'skipped') return false;
-        if (doc.hitlStatus?.toLowerCase() === 'completed') return false;
+        const status = doc.hitlStatus?.toLowerCase().replace(/\s+/g, '') || '';
+        if (status === 'skipped' || status === 'reviewskipped') return false;
+        if (status === 'completed' || status === 'reviewcompleted') return false;
         // Show if unassigned or assigned to current user
         return !doc.hitlReviewOwner || doc.hitlReviewOwner === currentUsername;
       });
@@ -166,13 +174,13 @@ const DocumentList = () => {
     }
   };
 
-  const handleReprocessConfirm = async () => {
+  const handleReprocessConfirm = async (version) => {
     const objectKeys = collectionProps.selectedItems.map((item) => item.objectKey);
-    logger.debug('Reprocessing documents', objectKeys);
+    logger.debug('Reprocessing documents', objectKeys, 'with version', version);
 
     setIsReprocessLoading(true);
     try {
-      const result = await reprocessDocuments(objectKeys);
+      const result = await reprocessDocuments(objectKeys, version);
       logger.debug('Reprocess result', result);
 
       // Close the modal
@@ -295,8 +303,17 @@ const DocumentList = () => {
             setIsLoading={setIsDocumentsListLoading}
             periodsToLoad={periodsToLoad}
             setPeriodsToLoad={setPeriodsToLoad}
+            customDateRange={customDateRange}
+            setCustomDateRange={setCustomDateRange}
+            onCustomDateRange={() => setIsDateRangeModalVisible(true)}
             getDocumentDetailsFromIds={getDocumentDetailsFromIds}
-            downloadToExcel={() => exportToExcel(filteredDocumentList, 'Document-List')}
+            downloadToExcel={() => {
+              const exportData = filteredDocumentList.map((item) => ({
+                ...item,
+                configVersion: formatConfigVersionText(item.configVersion, versions),
+              }));
+              exportToExcel(exportData, 'Document-List');
+            }}
             onReprocess={isReviewer && !isAdmin ? null : () => setIsReprocessModalVisible(true)}
             onDelete={isReviewer && !isAdmin ? null : () => setIsDeleteModalVisible(true)}
             onAbort={isReviewer && !isAdmin ? null : () => setIsAbortModalVisible(true)}
@@ -305,7 +322,7 @@ const DocumentList = () => {
             currentUsername={currentUsername}
           />
         }
-        columnDefinitions={COLUMN_DEFINITIONS_MAIN}
+        columnDefinitions={COLUMN_DEFINITIONS_MAIN(versions)}
         items={items}
         loading={isDocumentsListLoading}
         loadingText="Loading documents"
@@ -349,6 +366,16 @@ const DocumentList = () => {
         onConfirm={handleAbortConfirm}
         selectedItems={collectionProps.selectedItems}
         isLoading={isAbortLoading}
+      />
+
+      <DateRangeModal
+        visible={isDateRangeModalVisible}
+        onDismiss={() => setIsDateRangeModalVisible(false)}
+        onApply={(dateRange) => {
+          setIsDateRangeModalVisible(false);
+          setCustomDateRange(dateRange);
+          localStorage.setItem('customDateRange', JSON.stringify(dateRange));
+        }}
       />
     </>
   );

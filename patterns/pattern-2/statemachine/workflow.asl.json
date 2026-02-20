@@ -258,40 +258,14 @@
                 {
                     "Variable": "$.Result.hitl_triggered",
                     "BooleanEquals": true,
-                    "Next": "HITLReview"
+                    "Next": "MarkHITLPending"
                 }
             ],
             "Default": "SummarizationStep"
         },
-        "HITLReview": {
-            "Type": "Task",
-            "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
-            "Parameters": {
-                "FunctionName": "${ProcessResultsLambdaArn}",
-                "Payload": {
-                    "taskToken.$": "$$.Task.Token",
-                    "action": "wait_for_hitl",
-                    "document.$": "$.Result.document"
-                }
-            },
-            "ResultPath": "$.HITLResult",
-            "Retry": [
-                {
-                    "ErrorEquals": [
-                        "Lambda.ServiceException",
-                        "Lambda.SdkClientException",
-                        "Lambda.TooManyRequestsException",
-                        "ServiceQuotaExceededException",
-                        "ThrottlingException",
-                        "ProvisionedThroughputExceededException",
-                        "RequestLimitExceeded",
-                        "ServiceUnavailableException"
-                    ],
-                    "IntervalSeconds": 2,
-                    "MaxAttempts": 10,
-                    "BackoffRate": 2
-                }
-            ],
+        "MarkHITLPending": {
+            "Type": "Pass",
+            "Comment": "Document marked for async HITL review, workflow continues without waiting",
             "Next": "SummarizationStep"
         },
         "SummarizationStep": {

@@ -12,6 +12,7 @@ This module provides utilities for:
 
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -73,29 +74,33 @@ def deep_update(target: Dict[str, Any], source: Dict[str, Any]) -> Dict[str, Any
     return target
 
 
-def apply_delta_with_deletions(target: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
+def apply_delta_with_deletions(
+    target: Dict[str, Any], delta: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     Apply delta to target with null values treated as deletions.
-    
+
     This is used for sparse delta updates where:
     - null values in delta mean "delete this field from target"
     - Other values are merged/updated normally
     - Empty parent objects are cleaned up after deletions
-    
+
     Args:
         target: Target dictionary to update (modified in place)
         delta: Delta dictionary with updates (null = delete)
-        
+
     Returns:
         Updated target dictionary (modified in place)
     """
     keys_to_delete = []
-    
+
     for key, value in delta.items():
         if value is None:
             # null means delete this key
             keys_to_delete.append(key)
-        elif isinstance(value, dict) and key in target and isinstance(target[key], dict):
+        elif (
+            isinstance(value, dict) and key in target and isinstance(target[key], dict)
+        ):
             # Recurse into nested dicts
             apply_delta_with_deletions(target[key], value)
             # Clean up empty parent after deletions
@@ -104,50 +109,49 @@ def apply_delta_with_deletions(target: Dict[str, Any], delta: Dict[str, Any]) ->
         else:
             # Normal update
             target[key] = deepcopy(value)
-    
+
     # Delete keys marked for deletion
     for key in keys_to_delete:
         if key in target:
             del target[key]
-    
+
     return target
 
 
 def strip_matching_defaults(
-    custom_dict: Dict[str, Any], 
-    default_dict: Dict[str, Any]
+    custom_dict: Dict[str, Any], default_dict: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     Remove fields from custom_dict that match their default_dict equivalents.
-    
+
     This implements "auto-cleanup" for the sparse delta pattern:
     - If a Custom value equals its Default counterpart, remove it from Custom
     - When Custom doesn't have a field, Default is used (by design)
     - This keeps Custom minimal (only true customizations)
-    
+
     Benefits:
     - Self-healing: automatically cleans up redundant entries
     - Simpler frontend: just send values, backend optimizes
     - Resilient: works even if someone manually edits DynamoDB
-    
+
     Args:
         custom_dict: Custom config dictionary (modified in place)
         default_dict: Default config dictionary (read-only reference)
-        
+
     Returns:
         Modified custom_dict with matching defaults removed
-        
+
     Example:
         custom = {"classification": {"model": "nova-lite", "temperature": 0.0}}
         default = {"classification": {"model": "nova-lite", "temperature": 0.5}}
-        # Result: {"classification": {"temperature": 0.0}}  
+        # Result: {"classification": {"temperature": 0.0}}
         # (model removed because it matches default)
     """
     keys_to_remove = []
-    
+
     for key, custom_value in list(custom_dict.items()):
         default_value = default_dict.get(key)
-        
+
         if isinstance(custom_value, dict) and isinstance(default_value, dict):
             # Recurse into nested dicts
             strip_matching_defaults(custom_value, default_value)
@@ -157,11 +161,11 @@ def strip_matching_defaults(
         elif custom_value == default_value:
             # Value matches default - remove it (not needed in Custom)
             keys_to_remove.append(key)
-    
+
     # Remove matching/empty keys
     for key in keys_to_remove:
         del custom_dict[key]
-    
+
     return custom_dict
 
 
@@ -245,7 +249,7 @@ def get_system_defaults_dir() -> Path:
 
     # Priority 3: Legacy - relative to this file or project root
     current_file = Path(__file__)
-    
+
     # Check relative to this file (system_defaults is sibling directory)
     sibling_dir = current_file.parent / "system_defaults"
     if sibling_dir.exists():

@@ -16,134 +16,121 @@ classes:
   x-aws-idp-document-type: BANK_CHECK
   description: Bank check with MICR encoding, payee info, and amounts
   type: object
+  $defs:
+    Check:
+      type: object
+      properties:
+        bank:
+          type: string
+          data_type: string
+          description: Bank name (CHASE, BANK_OF_AMERICA, WELLS_FARGO, CITIBANK,
+            US_BANK)
+          enum:
+          - CHASE
+          - BANK_OF_AMERICA
+          - WELLS_FARGO
+          - CITIBANK
+          - US_BANK
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        firstName:
+          type: string
+          data_type: string
+          description: Account holder first name
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+        lastName:
+          type: string
+          data_type: string
+          description: Account holder last name
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+        address:
+          type: string
+          data_type: string
+          description: Street address
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+        city:
+          type: string
+          data_type: string
+          description: City
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+        state:
+          type: string
+          data_type: string
+          description: State abbreviation
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        zip:
+          type: string
+          data_type: string
+          description: ZIP code
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        date:
+          type: string
+          data_type: string
+          description: Date of the check, formatted as YYYY-MM-DD
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+        payee:
+          type: string
+          data_type: string
+          description: Payee name
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+        amount:
+          type: number
+          data_type: number
+          description: Check amount
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        amountInWords:
+          type: string
+          data_type: string
+          description: Amount in words (excluding the word 'dollars')
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+        memo:
+          type: string
+          data_type: string
+          description: Memo field
+          x-aws-idp-evaluation-method: LEVENSHTEIN
+          x-aws-idp-evaluation-threshold: '0.7'
+          x-aws-idp-confidence-threshold: '0.8'
+        micrCheckNumber:
+          type: number
+          data_type: number
+          description: MICR check number, usually 4 digits
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        micrAccountNumber:
+          type: number
+          data_type: number
+          description: MICR account number, usually 8 - 12 digits
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        micrRoutingNumber:
+          type: number
+          data_type: number
+          description: MICR routing number, usually 9 digits
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
   properties:
     checks:
       type: array
       description: List of checks
       items:
-        type: object
-        properties:
-          bankInfo:
-            type: object
-            description: Bank information
-            properties:
-              bank:
-                type: string
-                data_type: string
-                description: Bank name (CHASE, BANK_OF_AMERICA, WELLS_FARGO, CITIBANK,
-                  US_BANK)
-                enum:
-                - CHASE
-                - BANK_OF_AMERICA
-                - WELLS_FARGO
-                - CITIBANK
-                - US_BANK
-                x-aws-idp-evaluation-method: EXACT
-                x-aws-idp-confidence-threshold: '0.8'
-          personalInfo:
-            type: object
-            description: Account holder personal information
-            properties:
-              firstName:
-                type: string
-                data_type: string
-                description: Account holder first name
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              lastName:
-                type: string
-                data_type: string
-                description: Account holder last name
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              address:
-                type: string
-                data_type: string
-                description: Street address
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              city:
-                type: string
-                data_type: string
-                description: City
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              state:
-                type: string
-                data_type: string
-                description: State abbreviation
-                x-aws-idp-evaluation-method: EXACT
-                x-aws-idp-confidence-threshold: '0.8'
-              zip:
-                type: string
-                data_type: string
-                description: ZIP code
-                x-aws-idp-evaluation-method: EXACT
-                x-aws-idp-confidence-threshold: '0.8'
-          checkInfo:
-            type: object
-            description: Check details
-            properties:
-              date:
-                type: string
-                data_type: string
-                description: Date of the check, formatted as YYYY-MM-DD
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              payee:
-                type: string
-                data_type: string
-                description: Payee name
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              amount:
-                type: number
-                data_type: number
-                description: Check amount
-                x-aws-idp-evaluation-method: NUMERIC_EXACT
-                x-aws-idp-confidence-threshold: '0.8'
-              amountInWords:
-                type: string
-                data_type: string
-                description: Amount in words (excluding the word 'dollars')
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              memo:
-                type: string
-                data_type: string
-                description: Memo field
-                x-aws-idp-evaluation-method: LEVENSHTEIN
-                x-aws-idp-evaluation-threshold: '0.7'
-                x-aws-idp-confidence-threshold: '0.8'
-              micr:
-                type: object
-                description: MICR encoding data
-                properties:
-                  checkNumber:
-                    type: number
-                    data_type: number
-                    description: Check number, usually 4 digits
-                    x-aws-idp-evaluation-method: NUMERIC_EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
-                  accountNumber:
-                    type: number
-                    data_type: number
-                    description: Account number, usually 8 - 12 digits
-                    x-aws-idp-evaluation-method: NUMERIC_EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
-                  routingNumber:
-                    type: number
-                    data_type: number
-                    description: Routing number, usually 9 digits
-                    x-aws-idp-evaluation-method: NUMERIC_EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
+        $ref: '#/$defs/Check'
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: COMMERCIAL_LEASE_AGREEMENT
   x-aws-idp-document-type: COMMERCIAL_LEASE_AGREEMENT
@@ -353,254 +340,229 @@ classes:
   x-aws-idp-document-type: DELIVERY_NOTE
   description: Delivery note with sender/receiver and itemized products
   type: object
-  properties:
-    header:
+  $defs:
+    DeliveryItem:
       type: object
-      description: Delivery note header information
       properties:
-        date:
+        sn:
+          type: number
+          data_type: number
+          description: Serial/line number
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        type:
           type: string
           data_type: string
-          description: Delivery note date
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
+          description: Product type
+          enum:
+          - LED Luminaire
+          - Power Supply
+          - Control System
+          - Mounting Bracket
+          - LED Driver
+          - Cable Assembly
+          - Junction Box
+          - Sensor Module
+          x-aws-idp-evaluation-method: EXACT
           x-aws-idp-confidence-threshold: '0.8'
-        projectName:
+        brand:
           type: string
           data_type: string
-          description: Project name
-          x-aws-idp-evaluation-method: LEVENSHTEIN
-          x-aws-idp-evaluation-threshold: '0.7'
+          description: Brand name
+          enum:
+          - Philips
+          - Osram
+          - Schneider Electric
+          - Siemens
+          - ABB
+          - Lutron
+          - Legrand
+          - Mean Well
+          x-aws-idp-evaluation-method: EXACT
           x-aws-idp-confidence-threshold: '0.8'
-        from:
-          type: object
-          description: Sender information
-          properties:
-            companyName:
-              type: string
-              data_type: string
-              description: Sender company name
-              x-aws-idp-evaluation-method: LEVENSHTEIN
-              x-aws-idp-evaluation-threshold: '0.7'
-              x-aws-idp-confidence-threshold: '0.8'
-            reference:
-              type: string
-              data_type: string
-              description: Sender reference
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            location:
-              type: string
-              data_type: string
-              description: Sender location
-              x-aws-idp-evaluation-method: LEVENSHTEIN
-              x-aws-idp-evaluation-threshold: '0.7'
-              x-aws-idp-confidence-threshold: '0.8'
-            tel:
-              type: string
-              data_type: string
-              description: Sender telephone
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            email:
-              type: string
-              data_type: string
-              description: Sender email
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            vatNumber:
-              type: string
-              data_type: string
-              description: Sender VAT number
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-        to:
-          type: object
-          description: Receiver information
-          properties:
-            companyName:
-              type: string
-              data_type: string
-              description: Receiver company name
-              x-aws-idp-evaluation-method: LEVENSHTEIN
-              x-aws-idp-evaluation-threshold: '0.7'
-              x-aws-idp-confidence-threshold: '0.8'
-            reference:
-              type: string
-              data_type: string
-              description: Receiver reference
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            location:
-              type: string
-              data_type: string
-              description: Receiver location
-              x-aws-idp-evaluation-method: LEVENSHTEIN
-              x-aws-idp-evaluation-threshold: '0.7'
-              x-aws-idp-confidence-threshold: '0.8'
-            attention:
-              type: string
-              data_type: string
-              description: Attention to person
-              x-aws-idp-evaluation-method: LEVENSHTEIN
-              x-aws-idp-evaluation-threshold: '0.7'
-              x-aws-idp-confidence-threshold: '0.8'
-            tel:
-              type: string
-              data_type: string
-              description: Receiver telephone
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            email:
-              type: string
-              data_type: string
-              description: Receiver email
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
-            vatNumber:
-              type: string
-              data_type: string
-              description: Receiver VAT number
-              x-aws-idp-evaluation-method: EXACT
-              x-aws-idp-confidence-threshold: '0.8'
+        reference:
+          type: string
+          data_type: string
+          description: Product reference
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        unit:
+          type: string
+          data_type: string
+          description: Unit of measure
+          enum:
+          - pcs
+          - set
+          - unit
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        quantity:
+          type: number
+          data_type: number
+          description: Quantity
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        specsWatts:
+          type: number
+          data_type: number
+          description: Power in watts
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        specsInputVoltage:
+          type: string
+          data_type: string
+          description: Input voltage
+          enum:
+          - 100-240v
+          - 100-277v
+          - 220-240v
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        specsEfficiency:
+          type: number
+          data_type: number
+          description: Efficiency in percentage (0-100)
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        specsMaterial:
+          type: string
+          data_type: string
+          description: Material
+          enum:
+          - aluminum
+          - steel
+          - plastic
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        specsMountingType:
+          type: string
+          data_type: string
+          description: Mounting type
+          enum:
+          - surface
+          - recessed
+          - track
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        specsWeight:
+          type: number
+          data_type: number
+          description: Weight
+          x-aws-idp-evaluation-method: NUMERIC_EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+        specsProtection:
+          type: string
+          data_type: string
+          description: IP protection rating
+          enum:
+          - ip65
+          - ip66
+          - ip67
+          x-aws-idp-evaluation-method: EXACT
+          x-aws-idp-confidence-threshold: '0.8'
+  properties:
+    date:
+      type: string
+      data_type: string
+      description: Delivery note date
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      x-aws-idp-confidence-threshold: '0.8'
+    projectName:
+      type: string
+      data_type: string
+      description: Project name
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      x-aws-idp-confidence-threshold: '0.8'
+    fromCompanyName:
+      type: string
+      data_type: string
+      description: Sender company name
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      x-aws-idp-confidence-threshold: '0.8'
+    fromReference:
+      type: string
+      data_type: string
+      description: Sender reference number
+      x-aws-idp-evaluation-method: EXACT
+      x-aws-idp-confidence-threshold: '0.8'
+    fromLocation:
+      type: string
+      data_type: string
+      description: Sender location/address
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      x-aws-idp-confidence-threshold: '0.8'
+    fromTel:
+      type: string
+      data_type: string
+      description: Sender telephone number
+      x-aws-idp-evaluation-method: EXACT
+      x-aws-idp-confidence-threshold: '0.8'
+    fromEmail:
+      type: string
+      data_type: string
+      description: Sender email address
+      x-aws-idp-evaluation-method: EXACT
+      x-aws-idp-confidence-threshold: '0.8'
+    fromVatNumber:
+      type: string
+      data_type: string
+      description: Sender VAT number
+      x-aws-idp-evaluation-method: EXACT
+      x-aws-idp-confidence-threshold: '0.8'
+    toCompanyName:
+      type: string
+      data_type: string
+      description: Receiver company name
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      x-aws-idp-confidence-threshold: '0.8'
+    toReference:
+      type: string
+      data_type: string
+      description: Receiver reference number
+      x-aws-idp-evaluation-method: EXACT
+      x-aws-idp-confidence-threshold: '0.8'
+    toLocation:
+      type: string
+      data_type: string
+      description: Receiver location/address
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      x-aws-idp-confidence-threshold: '0.8'
+    toAttention:
+      type: string
+      data_type: string
+      description: Attention to person
+      x-aws-idp-evaluation-method: LEVENSHTEIN
+      x-aws-idp-evaluation-threshold: '0.7'
+      x-aws-idp-confidence-threshold: '0.8'
+    toTel:
+      type: string
+      data_type: string
+      description: Receiver telephone number
+      x-aws-idp-evaluation-method: EXACT
+      x-aws-idp-confidence-threshold: '0.8'
+    toEmail:
+      type: string
+      data_type: string
+      description: Receiver email address
+      x-aws-idp-evaluation-method: EXACT
+      x-aws-idp-confidence-threshold: '0.8'
+    toVatNumber:
+      type: string
+      data_type: string
+      description: Receiver VAT number
+      x-aws-idp-evaluation-method: EXACT
+      x-aws-idp-confidence-threshold: '0.8'
     items:
       type: array
       description: List of delivered items
       items:
-        type: object
-        properties:
-          sn:
-            type: number
-            data_type: number
-            description: Serial/line number
-            x-aws-idp-evaluation-method: NUMERIC_EXACT
-            x-aws-idp-confidence-threshold: '0.8'
-          type:
-            type: string
-            data_type: string
-            description: Product type
-            enum:
-            - LED Luminaire
-            - Power Supply
-            - Control System
-            - Mounting Bracket
-            - LED Driver
-            - Cable Assembly
-            - Junction Box
-            - Sensor Module
-            x-aws-idp-evaluation-method: EXACT
-            x-aws-idp-confidence-threshold: '0.8'
-          brand:
-            type: string
-            data_type: string
-            description: Brand name
-            enum:
-            - Philips
-            - Osram
-            - Schneider Electric
-            - Siemens
-            - ABB
-            - Lutron
-            - Legrand
-            - Mean Well
-            x-aws-idp-evaluation-method: EXACT
-            x-aws-idp-confidence-threshold: '0.8'
-          reference:
-            type: string
-            data_type: string
-            description: Product reference
-            x-aws-idp-evaluation-method: EXACT
-            x-aws-idp-confidence-threshold: '0.8'
-          unit:
-            type: string
-            data_type: string
-            description: Unit of measure
-            enum:
-            - pcs
-            - set
-            - unit
-            x-aws-idp-evaluation-method: EXACT
-            x-aws-idp-confidence-threshold: '0.8'
-          quantity:
-            type: number
-            data_type: number
-            description: Quantity
-            x-aws-idp-evaluation-method: NUMERIC_EXACT
-            x-aws-idp-confidence-threshold: '0.8'
-          productSpecsJson:
-            type: object
-            description: Product specifications
-            properties:
-              power:
-                type: object
-                description: Power specifications
-                properties:
-                  watts:
-                    type: number
-                    data_type: number
-                    description: Power in watts
-                    x-aws-idp-evaluation-method: NUMERIC_EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
-                  inputVoltage:
-                    type: string
-                    data_type: string
-                    description: Input voltage
-                    enum:
-                    - 100-240v
-                    - 100-277v
-                    - 220-240v
-                    x-aws-idp-evaluation-method: EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
-                  efficiency:
-                    type: number
-                    data_type: number
-                    description: Efficiency in percentage (0-100)
-                    x-aws-idp-evaluation-method: NUMERIC_EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
-              physical:
-                type: object
-                description: Physical specifications
-                properties:
-                  material:
-                    type: string
-                    data_type: string
-                    description: Material
-                    enum:
-                    - aluminum
-                    - steel
-                    - plastic
-                    x-aws-idp-evaluation-method: EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
-                  mountingType:
-                    type: string
-                    data_type: string
-                    description: Mounting type
-                    enum:
-                    - surface
-                    - recessed
-                    - track
-                    x-aws-idp-evaluation-method: EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
-                  weight:
-                    type: number
-                    data_type: number
-                    description: Weight
-                    x-aws-idp-evaluation-method: NUMERIC_EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
-              ratings:
-                type: object
-                description: Ratings and certifications
-                properties:
-                  protection:
-                    type: string
-                    data_type: string
-                    description: IP protection rating
-                    enum:
-                    - ip65
-                    - ip66
-                    - ip67
-                    x-aws-idp-evaluation-method: EXACT
-                    x-aws-idp-confidence-threshold: '0.8'
+        $ref: '#/$defs/DeliveryItem'
 - $schema: https://json-schema.org/draft/2020-12/schema
   $id: EQUIPMENT_INSPECTION
   x-aws-idp-document-type: EQUIPMENT_INSPECTION

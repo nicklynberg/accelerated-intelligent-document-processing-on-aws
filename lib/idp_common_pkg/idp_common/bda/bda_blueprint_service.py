@@ -3,7 +3,9 @@
 import json
 import logging
 import os
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copy import deepcopy
 from typing import Optional
 
@@ -34,8 +36,121 @@ class BdaBlueprintService:
         self.blueprint_creator = BDABlueprintCreator()
         self.blueprint_name_prefix = os.environ.get("STACK_NAME", "")
         self.config_manager = ConfigurationManager()
+        self.max_workers = int(os.environ.get("BDA_SYNC_MAX_WORKERS", "5"))
+        # Track skipped properties during schema transformation for reporting
+        self._skipped_properties = []
+        self._current_class = None  # Track which class is being processed
 
         return
+
+    def _normalize_aws_blueprint_schema(self, blueprint_schema: dict) -> dict:
+        """
+        Normalize AWS blueprint schema by fixing common issues.
+
+        Handles:
+        1. Missing $schema field (should be draft-07)
+        2. Missing type fields (root and definitions)
+        3. Missing instruction fields on $ref properties
+        4. Array items with BDA fields (inferenceType, instruction)
+        5. Double-escaped quotes in instruction strings
+
+        Args:
+            blueprint_schema: Raw schema from AWS API
+
+        Returns:
+            Normalized schema with fixes applied
+        """
+        schema = deepcopy(blueprint_schema)
+
+        # Add $schema if missing (BDA uses draft-07)
+        if "$schema" not in schema:
+            schema["$schema"] = "http://json-schema.org/draft-07/schema#"
+            logger.debug("Added missing '$schema' field to root schema")
+
+        # Add root type if missing
+        if "properties" in schema and "type" not in schema:
+            schema["type"] = "object"
+            logger.debug("Added missing 'type': 'object' to root schema")
+
+        # Add type to definitions and fix their properties
+        if "definitions" in schema:
+            for def_name, def_value in schema["definitions"].items():
+                if isinstance(def_value, dict):
+                    # Add type if missing
+                    if "properties" in def_value and "type" not in def_value:
+                        def_value["type"] = "object"
+                        logger.debug(
+                            f"Added missing 'type': 'object' to definition '{def_name}'"
+                        )
+
+                    # Fix properties within definitions
+                    if "properties" in def_value:
+                        self._normalize_properties(
+                            def_value["properties"], f"definitions.{def_name}"
+                        )
+
+        # Fix root-level properties
+        if "properties" in schema:
+            self._normalize_properties(schema["properties"], "root")
+
+        return schema
+
+    def _normalize_properties(self, properties: dict, path: str = "") -> None:
+        """
+        Normalize properties by fixing common issues.
+
+        Args:
+            properties: Properties dict to normalize (modified in-place)
+            path: Current path for logging purposes
+        """
+        for prop_name, prop_value in properties.items():
+            if not isinstance(prop_value, dict):
+                continue
+
+            current_path = f"{path}.{prop_name}" if path else prop_name
+
+            # Fix $ref properties missing instruction
+            if "$ref" in prop_value and "instruction" not in prop_value:
+                prop_value["instruction"] = "-"
+                logger.debug(
+                    f"Added missing 'instruction': '-' to $ref property '{current_path}'"
+                )
+
+            # Fix double-escaped quotes in instruction strings
+            if "instruction" in prop_value and isinstance(
+                prop_value["instruction"], str
+            ):
+                original = prop_value["instruction"]
+                # Replace double-escaped quotes (\") with single quotes (")
+                fixed = original.replace('\\"', '"')
+                if fixed != original:
+                    prop_value["instruction"] = fixed
+                    logger.debug(
+                        f"Fixed double-escaped quotes in instruction for '{current_path}'"
+                    )
+
+            # Fix array items with BDA fields
+            if prop_value.get("type") == "array" and "items" in prop_value:
+                items = prop_value["items"]
+                if isinstance(items, dict):
+                    # Remove BDA fields from array items - keep only type
+                    type_str = items.get("type", "string")
+                    prop_value["items"] = {"type": type_str}
+                    # Ensure the array itself has instruction and inferenceType fields
+                    if "instruction" not in prop_value:
+                        prop_value["instruction"] = "-"
+                        logger.debug(
+                            f"Added missing 'instruction' to array property '{current_path}'"
+                        )
+                    if "inferenceType" not in prop_value:
+                        prop_value["inferenceType"] = "explicit"
+                        logger.debug(
+                            f"Added missing 'inferenceType' to array property '{current_path}'"
+                        )
+
+            # Recursively fix nested object properties
+            if prop_value.get("type") == "object" and "properties" in prop_value:
+                self._normalize_properties(prop_value["properties"], current_path)
 
     def transform_bda_blueprint_to_idp_class_schema(
         self, blueprint_schema: dict
@@ -164,6 +279,11 @@ class BdaBlueprintService:
 
         result = deepcopy(definition)
 
+        # Infer type if missing but properties exist
+        if "properties" in result and "type" not in result:
+            result["type"] = "object"
+            logger.debug("Inferred 'type': 'object' for definition with properties")
+
         # Transform properties if present
         if "properties" in result:
             transformed_properties = {}
@@ -219,13 +339,16 @@ class BdaBlueprintService:
 
         return result
 
-    def _retrieve_all_blueprints(self, project_arn: str):
+    def _retrieve_all_blueprints(
+        self, project_arn: str, include_aws_standard: bool = False
+    ):
         """
         Retrieve all blueprints from the Bedrock Data Automation service.
         If project_arn is provided, retrieves blueprints associated with that project.
 
         Args:
             project_arn (Optional[str]): ARN of the data automation project to filter blueprints
+            include_aws_standard (bool): If True, includes AWS standard blueprints. Default False.
 
         Returns:
             list: List of blueprint names and ARNs
@@ -243,7 +366,11 @@ class BdaBlueprintService:
                     blueprints = blueprint_response.get("blueprints", [])
                     for blueprint in blueprints:
                         blueprint_arn = blueprint.get("blueprintArn", None)
-                        if "aws:blueprint" in blueprint_arn:
+                        # Skip AWS standard blueprints unless explicitly requested
+                        if (
+                            not include_aws_standard
+                            and "aws:blueprint" in blueprint_arn
+                        ):
                             continue
                         response = self.blueprint_creator.get_blueprint(
                             blueprint_arn=blueprint_arn, stage="LIVE"
@@ -257,9 +384,6 @@ class BdaBlueprintService:
                     logger.info(
                         f"{len(all_blueprints)} blueprints retrieved for {project_arn}"
                     )
-                    logger.info(
-                        f"blueprints retrieved {json.dumps(all_blueprints, default=str)}"
-                    )
                     return all_blueprints
 
                 except ClientError as e:
@@ -270,6 +394,87 @@ class BdaBlueprintService:
         except Exception as e:
             logger.error(f"Error retrieving blueprints: {e}")
             return []
+
+    def _sanitize_property_names(self, schema: dict) -> tuple[dict, dict]:
+        """
+        Sanitize property names by removing special characters that BDA doesn't support.
+
+        Special characters like &, /, and others can cause blueprint creation failures.
+        This method removes these characters and creates a mapping for reference.
+
+        Args:
+            schema: JSON Schema to sanitize (will be modified in-place)
+
+        Returns:
+            Tuple of (sanitized_schema, name_mapping) where name_mapping is
+            {original_name: sanitized_name}
+        """
+        import re
+
+        name_mapping = {}
+
+        def sanitize_name(name: str) -> str:
+            """Remove special characters from property name."""
+            # Replace special characters with empty string or underscore
+            # Keep alphanumeric, hyphens, and underscores
+            sanitized = re.sub(r"[^a-zA-Z0-9_-]", "", name)
+
+            # If name changed, log it
+            if sanitized != name:
+                logger.info(f"Sanitized property name: '{name}' -> '{sanitized}'")
+                name_mapping[name] = sanitized
+
+            return sanitized
+
+        def sanitize_properties(properties: dict) -> dict:
+            """Recursively sanitize property names in a properties dict."""
+            sanitized = {}
+            for prop_name, prop_value in properties.items():
+                new_name = sanitize_name(prop_name)
+
+                if isinstance(prop_value, dict):
+                    # Recursively sanitize nested object properties
+                    if (
+                        prop_value.get("type") == "object"
+                        and "properties" in prop_value
+                    ):
+                        prop_value["properties"] = sanitize_properties(
+                            prop_value["properties"]
+                        )
+
+                    # Recursively sanitize array item properties
+                    if prop_value.get("type") == "array" and "items" in prop_value:
+                        items = prop_value["items"]
+                        if isinstance(items, dict) and "properties" in items:
+                            items["properties"] = sanitize_properties(
+                                items["properties"]
+                            )
+
+                sanitized[new_name] = prop_value
+
+            return sanitized
+
+        # Sanitize root properties
+        if "properties" in schema:
+            schema["properties"] = sanitize_properties(schema["properties"])
+
+        # Sanitize $defs properties
+        if "$defs" in schema:
+            for def_name, def_value in schema["$defs"].items():
+                if isinstance(def_value, dict) and "properties" in def_value:
+                    def_value["properties"] = sanitize_properties(
+                        def_value["properties"]
+                    )
+
+        # Sanitize definitions properties (for draft-07 schemas)
+        if "definitions" in schema:
+            for def_name, def_value in schema["definitions"].items():
+                if isinstance(def_value, dict) and "properties" in def_value:
+                    def_value["properties"] = sanitize_properties(
+                        def_value["properties"]
+                    )
+
+        return schema, name_mapping
 
     def _transform_json_schema_to_bedrock_blueprint(self, json_schema: dict) -> dict:
         """
@@ -285,9 +490,10 @@ class BdaBlueprintService:
         - Only LEAF properties get "inferenceType" and "instruction"
         - Object/array types do NOT get these fields
         - Array properties MUST have "instruction" field
+        - Property names must not contain special characters like &, /
 
         Args:
-            json_schema: JSON Schema from configuration
+            json_schema: JSON Schema from configuration (should already be sanitized)
 
         Returns:
             Blueprint schema in BDA-compatible draft-07 format
@@ -348,6 +554,15 @@ class BdaBlueprintService:
                     ):
                         # Use description as instruction if available
                         prop_value["instruction"] = prop_value["description"]
+
+                    # Ensure items only contains "type" field for simple types
+                    # But preserve complex objects with properties for extraction
+                    if "items" in prop_value and isinstance(prop_value["items"], dict):
+                        items = prop_value["items"]
+                        # Only normalize if items is not a $ref and not a complex object
+                        if "$ref" not in items and "properties" not in items:
+                            type_str = items.get("type", "string")
+                            prop_value["items"] = {"type": type_str}
 
                 # Recursively check nested object properties
                 if prop_value.get("type") == "object" and "properties" in prop_value:
@@ -478,16 +693,32 @@ class BdaBlueprintService:
             # Skip nested objects - BDA doesn't support them
             # TODO: Re-enable when BDA supports nested objects
             if value.get(SCHEMA_TYPE) == TYPE_OBJECT:
-                logger.info(
-                    f"Skipping nested object property '{name}' - not supported by BDA"
+                self._skipped_properties.append(
+                    {
+                        "class": self._current_class,
+                        "property": name,
+                        "type": "nested_object",
+                        "message": f"Property '{name}' skipped - BDA does not support nested objects",
+                    }
+                )
+                logger.warning(
+                    f"Skipping nested object property '{name}' in class '{self._current_class}' - not supported by BDA"
                 )
                 continue
 
             # Skip nested arrays - BDA doesn't support arrays within object definitions
             # TODO: Re-enable when BDA supports nested arrays within objects
             if value.get(SCHEMA_TYPE) == TYPE_ARRAY:
-                logger.info(
-                    f"Skipping nested array property '{name}' - not supported by BDA"
+                self._skipped_properties.append(
+                    {
+                        "class": self._current_class,
+                        "property": name,
+                        "type": "nested_array",
+                        "message": f"Property '{name}' skipped - BDA does not support nested arrays within definitions",
+                    }
+                )
+                logger.warning(
+                    f"Skipping nested array property '{name}' in class '{self._current_class}' - not supported by BDA"
                 )
                 continue
 
@@ -751,7 +982,18 @@ class BdaBlueprintService:
         # Remove description field - BDA doesn't use it (only instruction)
         original_description = result.pop(SCHEMA_DESCRIPTION, None)
 
-        prop_type = result.get(SCHEMA_TYPE, "string")
+        # Infer type from structure if missing
+        if SCHEMA_TYPE not in result:
+            if SCHEMA_PROPERTIES in result:
+                result[SCHEMA_TYPE] = TYPE_OBJECT
+                logger.debug("Inferred 'type': 'object' from properties")
+            elif SCHEMA_ITEMS in result:
+                result[SCHEMA_TYPE] = TYPE_ARRAY
+                logger.debug("Inferred 'type': 'array' from items")
+            else:
+                result[SCHEMA_TYPE] = "string"  # Default for leaf properties
+
+        prop_type = result.get(SCHEMA_TYPE)
 
         # Add BDA fields ONLY for leaf/primitive types
         if prop_type not in [TYPE_OBJECT, TYPE_ARRAY]:
@@ -773,11 +1015,15 @@ class BdaBlueprintService:
                 result[SCHEMA_ITEMS] = {
                     REF_FIELD: self._normalize_ref_path(items[REF_FIELD])
                 }
-            else:
-                # For non-$ref items, process recursively
-                result[SCHEMA_ITEMS] = self._add_bda_fields_to_schema(
-                    result[SCHEMA_ITEMS]
-                )
+            elif isinstance(items, dict):
+                # For primitive items (string, number, etc.), keep only type
+                item_type = items.get("type", "string")
+                # Only process recursively if items has nested structure (object with properties)
+                if items.get("type") == "object" and "properties" in items:
+                    result[SCHEMA_ITEMS] = self._add_bda_fields_to_schema(items)
+                else:
+                    # For primitive types, keep only the type field
+                    result[SCHEMA_ITEMS] = {"type": item_type}
 
             # Ensure array has instruction field but NO inferenceType
             if "instruction" not in result:
@@ -818,6 +1064,389 @@ class BdaBlueprintService:
 
         return updates_found
 
+    def _process_single_class(
+        self, custom_class: dict, existing_blueprints: list
+    ) -> dict:
+        """
+        Process a single document class (create or update blueprint).
+        Thread-safe method designed for parallel execution.
+
+        Note: This method does NOT associate blueprints with the BDA project to avoid
+        race conditions. The association is done after all parallel processing completes.
+
+        Args:
+            custom_class: Document class schema to process
+            existing_blueprints: List of existing blueprints for lookup
+
+        Returns:
+            dict: Status information with class, blueprint_arn, blueprint_version, status, direction, classes_modified, warnings
+        """
+        try:
+            blueprint_arn = custom_class.get("blueprint_arn", None)
+            blueprint_name = custom_class.get("blueprint_name", None)
+            docu_class = custom_class.get(
+                ID_FIELD, custom_class.get(X_AWS_IDP_DOCUMENT_TYPE, "")
+            )
+
+            # Set current class context for tracking skipped properties
+            self._current_class = docu_class
+
+            blueprint_exists = self._blueprint_lookup(existing_blueprints, docu_class)
+            if blueprint_exists:
+                blueprint_arn = blueprint_exists.get("blueprintArn")
+                blueprint_name = blueprint_exists.get("blueprintName")
+
+            classes_modified = False
+            blueprint_version = None
+
+            if blueprint_arn:
+                # Check for updates on existing blueprint
+                if self._check_for_updates(
+                    custom_class=custom_class, blueprint=blueprint_exists
+                ):
+                    # Sanitize the class before transformation
+                    sanitized_class, name_mapping = self._sanitize_property_names(
+                        deepcopy(custom_class)
+                    )
+                    if name_mapping:
+                        custom_class.clear()
+                        custom_class.update(sanitized_class)
+                        classes_modified = True
+
+                    blueprint_schema = self._transform_json_schema_to_bedrock_blueprint(
+                        custom_class
+                    )
+
+                    self.blueprint_creator.update_blueprint(
+                        blueprint_arn=blueprint_arn,
+                        stage="LIVE",
+                        schema=json.dumps(blueprint_schema),
+                    )
+                    # Create version but don't associate with project yet (to avoid race condition)
+                    version_result = self.blueprint_creator.create_blueprint_version_without_project_update(
+                        blueprint_arn=blueprint_arn
+                    )
+                    blueprint_version = version_result["blueprint"].get(
+                        "blueprintVersion"
+                    )
+                    logger.info(f"Updated blueprint for class {docu_class}")
+
+            else:
+                # Create new blueprint
+                sanitized_class, name_mapping = self._sanitize_property_names(
+                    deepcopy(custom_class)
+                )
+                if name_mapping:
+                    custom_class.clear()
+                    custom_class.update(sanitized_class)
+                    classes_modified = True
+
+                blueprint_name = (
+                    f"{self.blueprint_name_prefix}-{docu_class}-{uuid.uuid4().hex[:8]}"
+                )
+                blueprint_schema = self._transform_json_schema_to_bedrock_blueprint(
+                    custom_class
+                )
+
+                result = self.blueprint_creator.create_blueprint(
+                    document_type="DOCUMENT",
+                    blueprint_name=blueprint_name,
+                    schema=json.dumps(blueprint_schema),
+                )
+                status = result["status"]
+                if status != "success":
+                    raise Exception(f"Failed to create blueprint: {result}")
+
+                blueprint_arn = result["blueprint"]["blueprintArn"]
+                blueprint_name = result["blueprint"]["blueprintName"]
+
+                # Create version but don't associate with project yet (to avoid race condition)
+                version_result = self.blueprint_creator.create_blueprint_version_without_project_update(
+                    blueprint_arn=blueprint_arn
+                )
+                blueprint_version = version_result["blueprint"].get("blueprintVersion")
+                logger.info(f"Created blueprint for class {docu_class}")
+
+            # Collect any warnings for this class
+            class_warnings = [
+                w for w in self._skipped_properties if w.get("class") == docu_class
+            ]
+
+            return {
+                "class": docu_class,
+                "status": "success",
+                "warnings": class_warnings,
+                "_internal": {
+                    "blueprint_arn": blueprint_arn,
+                    "blueprint_version": blueprint_version,
+                    "classes_modified": classes_modified,
+                },
+            }
+
+        except Exception as e:
+            class_name = (
+                custom_class.get(
+                    ID_FIELD, custom_class.get(X_AWS_IDP_DOCUMENT_TYPE, "unknown")
+                )
+                if custom_class
+                else "unknown"
+            )
+            logger.error(f"Error processing class {class_name}: {e}")
+            logger.error(f"Dump class {json.dumps(custom_class)}")
+            return {
+                "class": class_name,
+                "status": "failed",
+            }
+
+    def _process_classes_parallel(
+        self, classess: list, existing_blueprints: list
+    ) -> tuple:
+        """
+        Process multiple document classes in parallel using ThreadPoolExecutor.
+
+        Args:
+            classess: List of document class schemas to process
+            existing_blueprints: List of existing blueprints for lookup
+
+        Returns:
+            tuple: (classess_status, blueprints_updated, classes_modified)
+        """
+        classess_status = []
+        blueprints_updated = []
+        blueprints_to_associate = []  # Collect blueprints to associate with project
+        classes_modified = False
+        status_lock = threading.Lock()
+
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {
+                executor.submit(
+                    self._process_single_class, custom_class, existing_blueprints
+                ): custom_class
+                for custom_class in classess
+            }
+
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    with status_lock:
+                        # Include warnings in the status for reporting
+                        status_entry = {
+                            "status": result["status"],
+                            "class": result["class"],
+                        }
+                        # Include warnings if present
+                        if result.get("warnings"):
+                            status_entry["warnings"] = result["warnings"]
+                        classess_status.append(status_entry)
+
+                        if result["status"] == "success" and "_internal" in result:
+                            internal = result["_internal"]
+                            blueprints_updated.append(internal["blueprint_arn"])
+                            # Collect blueprint info for project association
+                            blueprints_to_associate.append(
+                                {
+                                    "blueprintArn": internal["blueprint_arn"],
+                                    "blueprintVersion": internal.get(
+                                        "blueprint_version"
+                                    ),
+                                }
+                            )
+                            if internal.get("classes_modified"):
+                                classes_modified = True
+                except Exception as e:
+                    logger.error(f"Thread execution error: {e}")
+
+        # After all parallel processing is complete, update the BDA project once
+        # This avoids race conditions from multiple threads updating the project simultaneously
+        if blueprints_to_associate:
+            logger.info(
+                f"Associating {len(blueprints_to_associate)} blueprints with BDA project"
+            )
+            try:
+                self.blueprint_creator.bulk_update_data_automation_project(
+                    self.dataAutomationProjectArn, blueprints_to_associate
+                )
+            except Exception as e:
+                logger.error(f"Error associating blueprints with project: {e}")
+
+        return classess_status, blueprints_updated, classes_modified
+
+    def _convert_single_aws_blueprint(
+        self, aws_blueprint: dict, existing_classes: list
+    ) -> dict:
+        """
+        Convert a single AWS standard blueprint to custom blueprint.
+        Thread-safe method designed for parallel execution.
+
+        Note: This method does NOT associate blueprints with the BDA project to avoid
+        race conditions. The association is done after all parallel processing completes.
+
+        Args:
+            aws_blueprint: AWS standard blueprint to convert
+            existing_classes: List of existing custom classes
+
+        Returns:
+            dict: Conversion result with status, class, and internal data
+        """
+        try:
+            blueprint_arn = aws_blueprint.get("blueprintArn", "")
+            blueprint_name = aws_blueprint.get("blueprintName", "")
+            blueprint_schema = aws_blueprint.get("schema")
+
+            if isinstance(blueprint_schema, str):
+                blueprint_schema = json.loads(blueprint_schema)
+
+            docu_class = blueprint_schema.get("class", None)
+            class_exists = False
+
+            if docu_class:
+                class_exists = any(
+                    cls.get(ID_FIELD, cls.get(X_AWS_IDP_DOCUMENT_TYPE, ""))
+                    == docu_class
+                    for cls in existing_classes
+                )
+
+            if class_exists:
+                return {
+                    "status": "success",  # Treat skipped as success
+                    "class": docu_class,
+                    "_internal": {
+                        "skipped": True,
+                    },
+                }
+
+            # Normalize and transform
+            blueprint_schema = self._normalize_aws_blueprint_schema(blueprint_schema)
+            idp_class_schema = self.transform_bda_blueprint_to_idp_class_schema(
+                blueprint_schema
+            )
+            docu_class = idp_class_schema.get(
+                ID_FIELD, idp_class_schema.get(X_AWS_IDP_DOCUMENT_TYPE, "Document")
+            )
+
+            # Create new custom blueprint
+            new_blueprint_name = (
+                f"{self.blueprint_name_prefix}-{docu_class}-{uuid.uuid4().hex[:8]}"
+            )
+
+            result = self.blueprint_creator.create_blueprint(
+                document_type="DOCUMENT",
+                blueprint_name=new_blueprint_name,
+                schema=json.dumps(blueprint_schema),
+            )
+
+            status = result.get("status")
+            if status != "success":
+                raise Exception(f"Failed to create custom blueprint: {result}")
+
+            new_blueprint_arn = result["blueprint"]["blueprintArn"]
+
+            # Create version but don't associate with project yet (to avoid race condition)
+            version_result = (
+                self.blueprint_creator.create_blueprint_version_without_project_update(
+                    blueprint_arn=new_blueprint_arn
+                )
+            )
+            blueprint_version = version_result["blueprint"].get("blueprintVersion")
+
+            return {
+                "status": "success",
+                "class": docu_class,
+                "_internal": {
+                    "idp_class_schema": idp_class_schema,
+                    "new_blueprint_arn": new_blueprint_arn,
+                    "blueprint_version": blueprint_version,
+                    "aws_blueprint_arn": blueprint_arn,
+                },
+            }
+
+        except Exception as e:
+            blueprint_name = aws_blueprint.get("blueprintName", "unknown")
+            logger.error(f"Error converting AWS blueprint {blueprint_name}: {e}")
+            return {
+                "status": "failed",
+                "class": blueprint_name,
+            }
+
+    def _convert_aws_standard_blueprints_parallel(
+        self, project_bda_blueprints: list, existing_classes: list
+    ) -> dict:
+        """
+        Convert AWS standard blueprints to custom blueprints in parallel.
+
+        Args:
+            project_bda_blueprints: List of AWS standard blueprints
+            existing_classes: List of existing custom classes
+
+        Returns:
+            dict: Conversion results with converted classes and status
+        """
+        converted_classes = []
+        conversion_status = []
+        new_custom_blueprint_arns = []
+        blueprints_to_associate = []  # Collect blueprints to associate with project
+        aws_blueprint_arns_to_remove = []
+        status_lock = threading.Lock()
+
+        with ThreadPoolExecutor(max_workers=min(3, self.max_workers)) as executor:
+            futures = {
+                executor.submit(
+                    self._convert_single_aws_blueprint, aws_blueprint, existing_classes
+                ): aws_blueprint
+                for aws_blueprint in project_bda_blueprints
+            }
+
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    with status_lock:
+                        conversion_status.append(
+                            {"status": result["status"], "class": result["class"]}
+                        )
+                        if result["status"] == "success" and "_internal" in result:
+                            internal = result["_internal"]
+                            if not internal.get("skipped", False):
+                                converted_classes.append(internal["idp_class_schema"])
+                                new_custom_blueprint_arns.append(
+                                    internal["new_blueprint_arn"]
+                                )
+                                # Collect blueprint info for project association
+                                blueprints_to_associate.append(
+                                    {
+                                        "blueprintArn": internal["new_blueprint_arn"],
+                                        "blueprintVersion": internal.get(
+                                            "blueprint_version"
+                                        ),
+                                    }
+                                )
+                                aws_blueprint_arns_to_remove.append(
+                                    internal["aws_blueprint_arn"]
+                                )
+                except Exception as e:
+                    logger.error(f"Thread execution error during conversion: {e}")
+
+        # After all parallel processing is complete, update the BDA project once
+        # This avoids race conditions from multiple threads updating the project simultaneously
+        if blueprints_to_associate:
+            logger.info(
+                f"Associating {len(blueprints_to_associate)} converted blueprints with BDA project"
+            )
+            try:
+                self.blueprint_creator.bulk_update_data_automation_project(
+                    self.dataAutomationProjectArn, blueprints_to_associate
+                )
+            except Exception as e:
+                logger.error(
+                    f"Error associating converted blueprints with project: {e}"
+                )
+
+        return {
+            "converted_classes": converted_classes,
+            "conversion_status": conversion_status,
+            "new_custom_blueprint_arns": new_custom_blueprint_arns,
+            "aws_blueprint_arns_to_remove": aws_blueprint_arns_to_remove,
+        }
+
     def _blueprint_lookup(self, existing_blueprints, doc_class):
         # Create a lookup dictionary for existing blueprints by name prefix
         _blueprint_prefix = f"{self.blueprint_name_prefix}-{doc_class}"
@@ -828,228 +1457,398 @@ class BdaBlueprintService:
                 return blueprint
         return None
 
-    def create_blueprints_from_custom_configuration(self):
+    def _convert_aws_standard_blueprints_to_custom(self, version: str):
         """
-        Create blueprint from custom configurations.
+        Convert all AWS standard blueprints in the project to custom blueprints.
+
+        This method:
+        1. Retrieves all AWS standard blueprints from the project
+        2. Converts each to an IDP class schema (in parallel)
+        3. Creates new custom blueprints from the schemas
+        4. Removes AWS standard blueprints from the project
+        5. Saves the new IDP classes to configuration
+        Args:
+            version: config version name
+        Returns:
+            dict: Status information with converted blueprints
+
         Raises:
-            Exception: If blueprint creation fails
+            Exception: If conversion fails
         """
-        logger.info("Creating blueprint for document ")
+        if not version:
+            raise ValueError("Converting AWS standard blueprints error missing version")
+
+        logger.info(
+            f"Converting AWS standard blueprints to custom blueprints for version {version}"
+        )
 
         try:
-            config_item = self.config_manager.get_configuration(config_type="Custom")
-
-            # Type check: Custom configuration should return IDPConfig which has classes attribute
-            if not config_item:
-                logger.info("No Custom configuration to process")
-                return {"status": "success", "message": "No classes to process"}
-
-            # Use getattr to safely access classes attribute
-            classess = getattr(config_item, "classes", None)
-
-            if not classess or len(classess) == 0:
-                logger.info("No Custom configuration to process")
-                return {"status": "success", "message": "No classes to process"}
-
-            # At this point, classess is guaranteed to be non-None and non-empty
-            assert classess is not None, "classess should not be None after validation"
-
-            classess_status = []
-            # retrieve all blueprints for this project.
-            existing_blueprints = self._retrieve_all_blueprints(
-                self.dataAutomationProjectArn
+            # Retrieve ALL blueprints including AWS standard ones
+            project_bda_blueprints = self._retrieve_all_blueprints(
+                self.dataAutomationProjectArn, include_aws_standard=True
             )
-            if not existing_blueprints:
-                existing_blueprints = []
 
-            classess_added = []
-            # check for blueprints which doesn't have an IDP class definition
-            # create class definitions and save
-            for bda_blueprint in existing_blueprints:
-                blueprint_name = bda_blueprint.get("blueprintName", "")
-                docu_class_exists = False
-                for custom_class in classess:
-                    docu_class = custom_class.get(
-                        ID_FIELD, custom_class.get(X_AWS_IDP_DOCUMENT_TYPE, "")
-                    )
-                    if docu_class in blueprint_name:
-                        docu_class_exists = True
-                        break
+            if not project_bda_blueprints:
+                return []  # Return empty list for consistency
+
+            # Get existing custom configuration
+            config_item = self.config_manager.get_configuration(
+                config_type="Config", version=version
+            )
+            existing_classes = (
+                getattr(config_item, "classes", []) if config_item else []
+            )
+
+            # Convert blueprints in parallel
+            conversion_results = self._convert_aws_standard_blueprints_parallel(
+                project_bda_blueprints, existing_classes
+            )
+
+            converted_classes = conversion_results["converted_classes"]
+            conversion_status = conversion_results["conversion_status"]
+            aws_blueprint_arns_to_remove = conversion_results[
+                "aws_blueprint_arns_to_remove"
+            ]
+
+            # Remove AWS standard blueprints from project if any were converted
+            if aws_blueprint_arns_to_remove:
                 logger.info(
-                    f"Blueprint {blueprint_name} class exists {docu_class_exists}"
+                    f"Removing {len(aws_blueprint_arns_to_remove)} AWS standard blueprints from project version: {version}"
                 )
-                if not docu_class_exists:
-                    # docu class doesn't exists
-                    # create IDP doc class from blueprint
-                    blueprint_schema = bda_blueprint["schema"]
-                    if isinstance(blueprint_schema, str):
-                        blueprint_schema = json.loads(blueprint_schema)
 
-                    # Transform BDA blueprint to IDP class schema
-                    idp_class_schema = self.transform_bda_blueprint_to_idp_class_schema(
-                        blueprint_schema
-                    )
-                    docu_class = idp_class_schema.get(
-                        ID_FIELD, custom_class.get(X_AWS_IDP_DOCUMENT_TYPE, "")
-                    )
-                    # Add the new class to the classes list
-                    classess_added.append(idp_class_schema)
-                    blueprint_arn = bda_blueprint.get("blueprintArn", "")
-                    classess_status.append(
-                        {
-                            "class": docu_class,
-                            "blueprint_arn": blueprint_arn,
-                            "status": "success",
-                        }
-                    )
-
-                    logger.info(
-                        f"Created IDP class schema from blueprint {blueprint_name}"
-                    )
-
-            blueprints_updated = []
-
-            for custom_class in classess:
                 try:
-                    blueprint_arn = custom_class.get("blueprint_arn", None)
-                    blueprint_name = custom_class.get("blueprint_name", None)
-                    docu_class = custom_class.get(
-                        ID_FIELD, custom_class.get(X_AWS_IDP_DOCUMENT_TYPE, "")
+                    response = self.blueprint_creator.list_blueprints(
+                        self.dataAutomationProjectArn, "LIVE"
                     )
+                    current_blueprints = response.get("blueprints", [])
 
-                    blueprint_exists = self._blueprint_lookup(
-                        existing_blueprints, docu_class
-                    )
-                    if blueprint_exists:
-                        blueprint_arn = blueprint_exists.get("blueprintArn")
-                        blueprint_name = blueprint_exists.get("blueprintName")
-                        logger.info(
-                            f"blueprint already exists for this class {docu_class} updating blueprint {blueprint_arn}"
-                        )
+                    updated_blueprints = [
+                        bp
+                        for bp in current_blueprints
+                        if bp.get("blueprintArn") not in aws_blueprint_arns_to_remove
+                    ]
 
-                    if blueprint_arn:
-                        # Use existing blueprint
-                        # Note: We don't modify custom_class since it's a JSON Schema
-                        logger.info(
-                            f"Found existing blueprint for class {docu_class}: {blueprint_name}"
-                        )
-                        blueprints_updated.append(blueprint_arn)
-
-                        # Check for updates on existing blueprint
-                        if self._check_for_updates(
-                            custom_class=custom_class, blueprint=blueprint_exists
-                        ):
-                            blueprint_schema = (
-                                self._transform_json_schema_to_bedrock_blueprint(
-                                    custom_class
-                                )
-                            )
-                            logger.info(
-                                f"Blueprint schema generate:: for {docu_class} to update"
-                            )
-                            logger.info(json.dumps(blueprint_schema, indent=2))
-                            logger.info("Blueprint schema generate:: END")
-
-                            result = self.blueprint_creator.update_blueprint(
-                                blueprint_arn=blueprint_arn,
-                                stage="LIVE",
-                                schema=json.dumps(blueprint_schema),
-                            )
-                            result = self.blueprint_creator.create_blueprint_version(
-                                blueprint_arn=blueprint_arn,
-                                project_arn=self.dataAutomationProjectArn,
-                            )
-                            # Note: We don't store blueprint_version in custom_class since it's a JSON Schema
-                            logger.info(
-                                f"Updated existing blueprint for class {docu_class}"
-                            )
-                        else:
-                            logger.info(
-                                f"No updates needed for existing blueprint {blueprint_name}"
-                            )
-
-                    else:
-                        # create new blueprint
-                        # Call the create_blueprint method
-                        blueprint_name = f"{self.blueprint_name_prefix}-{docu_class}-{uuid.uuid4().hex[:8]}"
-
-                        blueprint_schema = (
-                            self._transform_json_schema_to_bedrock_blueprint(
-                                custom_class
-                            )
-                        )
-                        logger.info(
-                            f"Blueprint schema generate:: for {docu_class} for create"
-                        )
-                        logger.info("Blueprint schema generate:: END")
-
-                        result = self.blueprint_creator.create_blueprint(
-                            document_type="DOCUMENT",
-                            blueprint_name=blueprint_name,
-                            schema=json.dumps(blueprint_schema),
-                        )
-                        status = result["status"]
-                        logger.info(f"blueprint created status {status}")
-                        if status != "success":
-                            raise Exception(f"Failed to create blueprint: {result}")
-
-                        blueprint_arn = result["blueprint"]["blueprintArn"]
-                        blueprint_name = result["blueprint"]["blueprintName"]
-                        # Note: We don't store blueprint metadata in custom_class since it's a JSON Schema
-                        # update the project or create new project
-                        # update the project with version
-                        result = self.blueprint_creator.create_blueprint_version(
-                            blueprint_arn=blueprint_arn,
-                            project_arn=self.dataAutomationProjectArn,
-                        )
-                        blueprints_updated.append(blueprint_arn)
-                        logger.info(
-                            f"Created new blueprint for class {docu_class}: {blueprint_name}"
-                        )
-                    classess_status.append(
-                        {
-                            "class": docu_class,  # Use the docu_class we extracted earlier
-                            "blueprint_arn": blueprint_arn,
-                            "status": "success",
-                        }
+                    updated_config = {"blueprints": updated_blueprints}
+                    self.blueprint_creator.update_project_with_custom_configurations(
+                        self.dataAutomationProjectArn,
+                        customConfiguration=updated_config,
                     )
 
                 except Exception as e:
-                    class_name = (
-                        custom_class.get(
-                            ID_FIELD,
-                            custom_class.get(X_AWS_IDP_DOCUMENT_TYPE, "unknown"),
-                        )
-                        if custom_class
-                        else "unknown"
-                    )
                     logger.error(
-                        f"Error processing blueprint creation/update for class {class_name}: {e}"
+                        f"Error removing AWS standard blueprints from project: {e}"
                     )
-                    classess_status.append(
-                        {
-                            "class": class_name,
-                            "status": "failed",
-                            "error_message": f"Exception - {str(e)}",
-                        }
+
+            # Save converted classes to custom configuration
+            if converted_classes:
+                all_classes = existing_classes + converted_classes
+                self.config_manager.handle_update_custom_configuration(
+                    custom_config={"classes": all_classes}, version=version
+                )
+
+            return {
+                "status": "success",
+                "converted_count": len(converted_classes),
+                "conversion_details": conversion_status,
+            }
+
+        except Exception as e:
+            logger.error(
+                f"Error converting AWS standard blueprints: {e}", exc_info=True
+            )
+            raise Exception(f"Failed to convert AWS standard blueprints: {str(e)}")
+
+    def create_blueprints_from_custom_configuration(
+        self, version: str, sync_direction: str = "bidirectional"
+    ):
+        """
+        Synchronize blueprints between BDA and IDP based on the specified direction.
+        Uses parallel processing for improved performance.
+
+        Args:
+            version: config version
+            sync_direction: Direction of synchronization
+                - "bda_to_idp": Sync from BDA blueprints to IDP classes (read BDA, update IDP)
+                - "idp_to_bda": Sync from IDP classes to BDA blueprints (read IDP, update BDA)
+                - "bidirectional": Sync both directions (default, backward compatible)
+
+        Raises:
+            Exception: If blueprint creation fails
+        """
+        logger.info(
+            f"Starting blueprint synchronization with direction: {sync_direction}"
+        )
+
+        try:
+            # Validate sync direction
+            valid_directions = ["bda_to_idp", "idp_to_bda", "bidirectional"]
+            if sync_direction not in valid_directions:
+                raise ValueError(
+                    f"Invalid sync_direction: {sync_direction}. Must be one of {valid_directions}"
+                )
+
+            config_item = self.config_manager.get_configuration(
+                config_type="Config", version=version
+            )
+            classess = getattr(config_item, "classes", []) if config_item else []
+
+            classess_status = []
+            classess_added = []
+
+            # ========================================================================
+            # PHASE 1: BDA → IDP Synchronization
+            # Convert BDA blueprints (including AWS standard) to IDP classes
+            # ========================================================================
+            if sync_direction in ["bda_to_idp", "bidirectional"]:
+                logger.info("Phase 1: Synchronizing BDA blueprints to IDP classes")
+
+                # Convert AWS standard blueprints to custom blueprints (in parallel)
+                try:
+                    conversion_result = self._convert_aws_standard_blueprints_to_custom(
+                        version=version
                     )
-            self._synchronize_deletes(
-                existing_blueprints=existing_blueprints,
-                blueprints_updated=blueprints_updated,
-            )
-            # add the new class if any
-            if len(classess_added) > 0:
-                classess.extend(classess_added)
-            self.config_manager.handle_update_custom_configuration(
-                {"classes": classess}
-            )
+
+                    if (
+                        conversion_result
+                        and conversion_result.get("converted_count", 0) > 0
+                    ):
+                        logger.info(
+                            f"Converted {conversion_result.get('converted_count', 0)} AWS standard blueprints"
+                        )
+                        # Refresh classes list as new classes were added
+                        config_item = self.config_manager.get_configuration(
+                            config_type="Config", version=version
+                        )
+                        classess_status.extend(
+                            conversion_result.get("conversion_details", [])
+                        )
+
+                except Exception as e:
+                    logger.error(f"Error converting AWS standard blueprints: {e}")
+
+            # ========================================================================
+            # PHASE 2: IDP → BDA Synchronization
+            # Create/update BDA blueprints from IDP classes (in parallel)
+            # ========================================================================
+            blueprints_updated = []
+            classes_modified = False
+
+            if sync_direction in ["idp_to_bda", "bidirectional"]:
+                logger.info("Phase 2: Synchronizing IDP classes to BDA blueprints")
+
+                # Retrieve all blueprints for this project
+                existing_blueprints = self._retrieve_all_blueprints(
+                    self.dataAutomationProjectArn
+                )
+                if not existing_blueprints:
+                    existing_blueprints = []
+
+                if not config_item:
+                    return []  # Return empty list for consistency
+
+                # version is stored as sparse so it wont have class for default clone versions
+                # Let empty versions proceed to _synchronize_deletes to clear BDA
+
+                # Process classes in parallel
+                status, updated, modified = self._process_classes_parallel(
+                    classess, existing_blueprints
+                )
+                classess_status.extend(status)
+                blueprints_updated.extend(updated)
+                classes_modified = classes_modified or modified
+
+                # Synchronize deletes only when syncing IDP to BDA
+                self._synchronize_deletes(
+                    existing_blueprints=existing_blueprints,
+                    blueprints_updated=blueprints_updated,
+                )
+
+            # Save updated classes if any were added from BDA or if any were sanitized
+            if len(classess_added) > 0 or classes_modified:
+                if len(classess_added) > 0:
+                    classess.extend(classess_added)
+                logger.info(
+                    f"Saving updated classes (added: {len(classess_added)}, modified: {classes_modified})"
+                )
+                self.config_manager.handle_update_custom_configuration(
+                    custom_config={"classes": classess}, version=version
+                )
 
             return classess_status
 
         except Exception as e:
             logger.error(f"Error processing blueprint creation: {e}", exc_info=True)
-            # Re-raise the exception to be handled by the caller
             raise Exception(f"Failed to process blueprint creation: {str(e)}")
+
+    def cleanup_orphaned_blueprints(self, version: str) -> dict:
+        """
+        Delete all BDA blueprints with the stack prefix that are NOT in current IDP config.
+
+        This is useful for cleaning up orphaned blueprints that remain in BDA after
+        document classes have been removed from the IDP configuration.
+        Args:
+            version: config version name
+        Returns:
+            dict: Status information with deleted_count, failed_count, and details
+        """
+        logger.info(
+            f"Starting orphaned blueprint cleanup with prefix: {self.blueprint_name_prefix}"
+        )
+
+        try:
+            # Get all blueprints with our prefix from BDA (account-wide, not project-specific)
+            all_bda_blueprints = self.blueprint_creator.list_all_blueprints_with_prefix(
+                self.blueprint_name_prefix
+            )
+
+            if not all_bda_blueprints:
+                logger.info("No blueprints found with prefix, nothing to clean up")
+                return {
+                    "success": True,
+                    "message": "No orphaned blueprints found",
+                    "deleted_count": 0,
+                    "failed_count": 0,
+                    "details": [],
+                }
+
+            # Get current IDP configuration classes
+            config_item = self.config_manager.get_configuration(
+                config_type="Config", version=version
+            )
+            current_classes = getattr(config_item, "classes", []) if config_item else []
+
+            # Build set of expected blueprint name prefixes from current config
+            expected_prefixes = set()
+            for cls in current_classes:
+                doc_class = cls.get(ID_FIELD, cls.get(X_AWS_IDP_DOCUMENT_TYPE, ""))
+                if doc_class:
+                    expected_prefixes.add(f"{self.blueprint_name_prefix}-{doc_class}")
+
+            logger.info(
+                f"Found {len(expected_prefixes)} expected class prefixes from IDP config"
+            )
+
+            # Find orphaned blueprints (not matching any expected prefix)
+            orphaned_blueprints = []
+            for blueprint in all_bda_blueprints:
+                blueprint_name = blueprint.get("blueprintName", "")
+                is_orphaned = True
+                for prefix in expected_prefixes:
+                    if blueprint_name.startswith(prefix):
+                        is_orphaned = False
+                        break
+                if is_orphaned:
+                    orphaned_blueprints.append(blueprint)
+
+            logger.info(
+                f"Found {len(orphaned_blueprints)} orphaned blueprints to delete"
+            )
+
+            if not orphaned_blueprints:
+                return {
+                    "success": True,
+                    "message": "No orphaned blueprints found",
+                    "deleted_count": 0,
+                    "failed_count": 0,
+                    "details": [],
+                }
+
+            # First, remove orphaned blueprints from the BDA project (if associated)
+            try:
+                response = self.blueprint_creator.list_blueprints(
+                    self.dataAutomationProjectArn, "LIVE"
+                )
+                project_blueprints = response.get("blueprints", [])
+                orphaned_arns = {bp.get("blueprintArn") for bp in orphaned_blueprints}
+
+                # Filter out orphaned blueprints from project
+                updated_blueprints = [
+                    bp
+                    for bp in project_blueprints
+                    if bp.get("blueprintArn") not in orphaned_arns
+                ]
+
+                if len(updated_blueprints) < len(project_blueprints):
+                    logger.info(
+                        f"Removing {len(project_blueprints) - len(updated_blueprints)} orphaned blueprints from project"
+                    )
+                    self.blueprint_creator.update_project_with_custom_configurations(
+                        self.dataAutomationProjectArn,
+                        customConfiguration={"blueprints": updated_blueprints},
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Could not update project to remove orphaned blueprints: {e}"
+                )
+
+            # Delete the orphaned blueprints
+            deleted_count = 0
+            failed_count = 0
+            details = []
+
+            for blueprint in orphaned_blueprints:
+                blueprint_arn = blueprint.get("blueprintArn")
+                blueprint_name = blueprint.get("blueprintName")
+                blueprint_version = blueprint.get("blueprintVersion", "1")
+
+                try:
+                    success = self.blueprint_creator.delete_blueprint(
+                        blueprint_arn, blueprint_version
+                    )
+                    if success:
+                        deleted_count += 1
+                        details.append(
+                            {
+                                "name": blueprint_name,
+                                "arn": blueprint_arn,
+                                "status": "deleted",
+                            }
+                        )
+                        logger.info(f"Deleted orphaned blueprint: {blueprint_name}")
+                    else:
+                        failed_count += 1
+                        details.append(
+                            {
+                                "name": blueprint_name,
+                                "arn": blueprint_arn,
+                                "status": "failed",
+                            }
+                        )
+                except Exception as e:
+                    failed_count += 1
+                    details.append(
+                        {
+                            "name": blueprint_name,
+                            "arn": blueprint_arn,
+                            "status": "failed",
+                            "error": str(e),
+                        }
+                    )
+                    logger.error(
+                        f"Failed to delete orphaned blueprint {blueprint_name}: {e}"
+                    )
+
+            message = f"Deleted {deleted_count} orphaned blueprints"
+            if failed_count > 0:
+                message += f", {failed_count} failed"
+
+            return {
+                "success": failed_count == 0,
+                "message": message,
+                "deleted_count": deleted_count,
+                "failed_count": failed_count,
+                "details": details,
+            }
+
+        except Exception as e:
+            logger.error(f"Error during orphaned blueprint cleanup: {e}", exc_info=True)
+            return {
+                "success": False,
+                "message": f"Cleanup failed: {str(e)}",
+                "deleted_count": 0,
+                "failed_count": 0,
+                "details": [],
+            }
 
     def _synchronize_deletes(self, existing_blueprints, blueprints_updated):
         # remove all blueprints which are not in custom class
@@ -1058,12 +1857,10 @@ class BdaBlueprintService:
         for blueprint in existing_blueprints:
             blueprint_name = blueprint.get("blueprintName", "")
             blueprint_arn = blueprint.get("blueprintArn", "")
-            blueprint_version = blueprint.get("blueprintVersion", "")
             if blueprint_arn in blueprints_updated:
                 continue
             if blueprint_name.startswith(self.blueprint_name_prefix):
                 # delete detected - remove the blueprint
-                logger.info(f"deleting blueprint not in custom class {blueprint_name}")
                 blueprints_to_delete.append(blueprint)
                 blueprints_arn_to_delete.append(blueprint_arn)
 
@@ -1078,7 +1875,7 @@ class BdaBlueprintService:
                 if custom_blueprint.get("blueprintArn") not in blueprints_arn_to_delete:
                     new_custom_configurations.append(custom_blueprint)
             new_custom_configurations = {"blueprints": new_custom_configurations}
-            response = self.blueprint_creator.update_project_with_custom_configurations(
+            self.blueprint_creator.update_project_with_custom_configurations(
                 self.dataAutomationProjectArn,
                 customConfiguration=new_custom_configurations,
             )
@@ -1089,16 +1886,5 @@ class BdaBlueprintService:
                         _blueprint_delete.get("blueprintArn"),
                         _blueprint_delete.get("blueprintVersion"),
                     )
-            except Exception:
-                logger.error(
-                    f"Error during deleting blueprint {blueprint_name} {blueprint_arn} {blueprint_version}"
-                )
-            try:
-                for _blueprint_delete in blueprints_to_delete:
-                    self.blueprint_creator.delete_blueprint(
-                        _blueprint_delete.get("blueprintArn"), None
-                    )
-            except Exception:
-                logger.error(
-                    f"Error during deleting blueprint {blueprint_name} {blueprint_arn} {blueprint_version}"
-                )
+            except Exception as e:
+                logger.error(f"Error deleting blueprint with version: {e}")

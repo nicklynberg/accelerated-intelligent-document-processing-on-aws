@@ -19,6 +19,7 @@ import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import useAppContext from '../../contexts/app';
 import useSettingsContext from '../../contexts/settings';
+import useUserRole from '../../hooks/use-user-role';
 import generateS3PresignedUrl from '../common/generate-s3-presigned-url';
 import PageTextEditorModal from './PageTextEditorModal';
 import processChanges from '../../graphql/queries/processChanges';
@@ -165,6 +166,52 @@ const PagesPanel = ({ pages, documentItem }) => {
 
   const { currentCredentials } = useAppContext();
   const { settings } = useSettingsContext();
+  const { isReviewer, isAdmin } = useUserRole();
+  const isReviewerOnly = isReviewer && !isAdmin;
+
+  // Edit Mode should be disabled for reviewers until they click Start Review (claim the document)
+  const hasReviewOwner = !!(documentItem?.hitlReviewOwner || documentItem?.hitlReviewOwnerEmail);
+  const hitlTriggered = !!documentItem?.hitlTriggered;
+
+  // Check HITL status
+  const hitlStatusLower = documentItem?.hitlStatus?.toLowerCase().replace(/\s+/g, '') || '';
+  const isHitlCompleted = hitlStatusLower === 'completed' || hitlStatusLower === 'reviewcompleted';
+  const isHitlSkipped = hitlStatusLower === 'skipped' || hitlStatusLower === 'reviewskipped';
+
+  // Check if document is currently processing
+  const processingStatuses = ['queued', 'running', 'processing', 'postprocessing', 'summarizing', 'evaluating'];
+  const docStatus = documentItem?.objectStatus?.toLowerCase() || '';
+  const isDocumentProcessing = processingStatuses.includes(docStatus);
+
+  // Disable edit mode for REVIEWERS only if:
+  // - HITL is triggered AND reviewer hasn't claimed review, OR
+  // - Document is processing, OR
+  // - HITL already completed/skipped
+  // Admins can always edit
+  const isEditModeDisabled =
+    isReviewerOnly && ((hitlTriggered && !hasReviewOwner) || isDocumentProcessing || isHitlCompleted || isHitlSkipped);
+
+  // Log for debugging
+  console.log('PagesPanel Edit Mode Check:', {
+    isReviewer,
+    isAdmin,
+    isReviewerOnly,
+    hitlTriggered,
+    hasReviewOwner,
+    hitlStatus: documentItem?.hitlStatus,
+    isHitlCompleted,
+    isHitlSkipped,
+    isDocumentProcessing,
+    isEditModeDisabled,
+  });
+
+  // Auto-exit edit mode for reviewers when document starts processing or HITL is completed/skipped
+  useEffect(() => {
+    if (isReviewerOnly && isEditMode && (isDocumentProcessing || isHitlCompleted || isHitlSkipped)) {
+      console.log('PagesPanel: Auto-exiting edit mode');
+      setIsEditMode(false);
+    }
+  }, [isReviewerOnly, isDocumentProcessing, isHitlCompleted, isHitlSkipped, isEditMode]);
 
   const loadThumbnails = async () => {
     if (!pages) return;
@@ -418,7 +465,7 @@ const PagesPanel = ({ pages, documentItem }) => {
             actions={
               <SpaceBetween direction="horizontal" size="xs">
                 {!isEditMode ? (
-                  <Button variant="primary" iconName="edit" onClick={handleEditPagesClick}>
+                  <Button variant="primary" iconName="edit" onClick={handleEditPagesClick} disabled={isEditModeDisabled}>
                     Edit Mode
                   </Button>
                 ) : (

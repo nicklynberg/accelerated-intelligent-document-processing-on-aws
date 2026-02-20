@@ -7,6 +7,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import useAppContext from '../contexts/app';
 import listDocumentsDateShard from '../graphql/queries/listDocumentsDateShard';
 import listDocumentsDateHour from '../graphql/queries/listDocumentsDateHour';
+import listDocumentsByDateRangeQuery from '../graphql/queries/listDocumentsByDateRange';
 import getDocument from '../graphql/queries/getDocument';
 import deleteDocument from '../graphql/queries/deleteDocument';
 import reprocessDocument from '../graphql/queries/reprocessDocument';
@@ -23,9 +24,32 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   const [periodsToLoad, setPeriodsToLoad] = useState(initialPeriodsToLoad);
   const [isDocumentsListLoading, setIsDocumentsListLoading] = useState(false);
   const [documents, setDocuments] = useState([]);
+  const [customDateRange, setCustomDateRange] = useState(null); // { startDateTime, endDateTime }
+  const [dateRangeNextToken, setDateRangeNextToken] = useState(null);
   const { setErrorMessage } = useAppContext();
 
   const subscriptionsRef = useRef({ onCreate: null, onUpdate: null });
+
+  // Ref to track customDateRange in subscription callbacks (closures capture stale state)
+  const customDateRangeRef = useRef(customDateRange);
+  useEffect(() => {
+    customDateRangeRef.current = customDateRange;
+  }, [customDateRange]);
+
+  /**
+   * Check if a document falls within the active date range filter.
+   * For relative periods (no customDateRange), always returns true.
+   * For custom date ranges, checks the document's InitialEventTime or QueuedTime.
+   */
+  const isDocumentInActiveRange = useCallback((doc) => {
+    const range = customDateRangeRef.current;
+    if (!range) return true; // No custom range = relative period, always accept
+
+    const docTime = doc?.InitialEventTime || doc?.QueuedTime;
+    if (!docTime) return false; // No timestamp = can't verify, exclude
+
+    return docTime >= range.startDateTime && docTime <= range.endDateTime;
+  }, []);
 
   const setDocumentsDeduped = useCallback((documentValues) => {
     logger.debug('setDocumentsDeduped called with:', documentValues);
@@ -118,7 +142,13 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           try {
             const documentValues = await getDocumentDetailsFromIds([objectKey]);
             if (documentValues && documentValues.length > 0) {
-              setDocumentsDeduped(documentValues);
+              // Filter: only add documents that fall within the active date range
+              const inRangeDocuments = documentValues.filter(isDocumentInActiveRange);
+              if (inRangeDocuments.length > 0) {
+                setDocumentsDeduped(inRangeDocuments);
+              } else {
+                logger.debug(`Subscription: new document ${objectKey} outside active date range, skipping`);
+              }
             }
           } catch (error) {
             logger.error('Error processing onCreateDocument subscription:', error);
@@ -159,12 +189,25 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
           try {
             const documentValues = await getDocumentDetailsFromIds([documentUpdateEvent.ObjectKey]);
             if (documentValues && documentValues.length > 0) {
-              setDocumentsDeduped(documentValues);
+              // For updates: only add if document is already in the list OR falls within the active range
+              // This ensures in-range docs get updates, but out-of-range new docs don't sneak in
+              const filteredValues = documentValues.filter((doc) => {
+                if (isDocumentInActiveRange(doc)) return true;
+                // Check if this document is already displayed (allow status updates for existing docs)
+                return false;
+              });
+              if (filteredValues.length > 0) {
+                setDocumentsDeduped(filteredValues);
+              } else {
+                logger.debug(`Subscription: updated document ${documentUpdateEvent.ObjectKey} outside active date range, skipping`);
+              }
             }
           } catch (error) {
             logger.error('Error fetching document details after update:', error);
-            // Fallback to subscription data if fetch fails
-            setDocumentsDeduped([documentUpdateEvent]);
+            // Fallback to subscription data if fetch fails - still apply range filter
+            if (isDocumentInActiveRange(documentUpdateEvent)) {
+              setDocumentsDeduped([documentUpdateEvent]);
+            }
           }
         }
       },
@@ -226,6 +269,51 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     return documentData;
   };
 
+  const sendSetDocumentsForDateRange = async (dateRange, nextToken = null) => {
+    // Server-side paginated query for custom date ranges
+    try {
+      logger.info('Fetching documents by date range', dateRange);
+      const allDocuments = [];
+      let currentToken = nextToken;
+
+      // Fetch all pages (server-side pagination)
+      do {
+        const response = await client.graphql({
+          query: listDocumentsByDateRangeQuery,
+          variables: {
+            startDateTime: dateRange.startDateTime,
+            endDateTime: dateRange.endDateTime,
+            limit: 200,
+            nextToken: currentToken,
+          },
+        });
+
+        const result = response?.data?.listDocumentsByDateRange;
+        if (result?.Documents) {
+          allDocuments.push(...result.Documents);
+        }
+        currentToken = result?.nextToken;
+        logger.debug(`Fetched ${result?.Documents?.length || 0} documents, hasMore=${!!currentToken}`);
+      } while (currentToken);
+
+      logger.info(`Total documents fetched for date range: ${allDocuments.length}`);
+
+      // Transform to match existing document format expected by the UI
+      const documentValues = allDocuments.map((doc) => ({
+        ...doc,
+        ListPK: doc.ListPK || doc.PK,
+        ListSK: doc.ListSK || doc.SK,
+      }));
+
+      setDocumentsDeduped(documentValues);
+      setIsDocumentsListLoading(false);
+    } catch (error) {
+      setIsDocumentsListLoading(false);
+      setErrorMessage('Failed to list documents for date range - please try again later');
+      logger.error('Error fetching documents by date range', error);
+    }
+  };
+
   const sendSetDocumentsForPeriod = async () => {
     // XXX this logic should be moved to the API
     try {
@@ -264,11 +352,11 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       if (periodsToLoad < 1) {
         baseDate = new Date(now);
         const numHours = parseInt(periodsToLoad * hoursInShard, 10);
-        residualHours = [...Array(numHours).keys()].map((h) => baseDate.getUTCHours() - h);
+        residualHours = [...Array(numHours).keys()].map((h) => (((baseDate.getUTCHours() - h) % 24) + 24) % 24);
       } else {
         baseDate = new Date(now - periodsToLoad * hoursInShard * 3600 * 1000);
         const residualBaseHour = baseDate.getUTCHours() % hoursInShard;
-        residualHours = [...Array(hoursInShard - residualBaseHour).keys()].map((h) => baseDate.getUTCHours() + h);
+        residualHours = [...Array(hoursInShard - residualBaseHour).keys()].map((h) => (baseDate.getUTCHours() + h) % 24);
       }
       const baseDateString = baseDate.toISOString().split('T')[0];
 
@@ -342,15 +430,30 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       // send in a timeout to avoid blocking rendering
       setTimeout(() => {
         setDocuments([]);
-        sendSetDocumentsForPeriod();
+        if (customDateRange) {
+          // Use server-side paginated query for custom date ranges
+          sendSetDocumentsForDateRange(customDateRange);
+        } else {
+          // Use existing shard-based client-side mechanism for relative periods
+          sendSetDocumentsForPeriod();
+        }
       }, 1);
     }
   }, [isDocumentsListLoading]);
 
   useEffect(() => {
     logger.debug('list period changed', periodsToLoad);
-    setIsDocumentsListLoading(true);
+    if (!customDateRange) {
+      setIsDocumentsListLoading(true);
+    }
   }, [periodsToLoad]);
+
+  useEffect(() => {
+    if (customDateRange) {
+      logger.debug('custom date range changed', customDateRange);
+      setIsDocumentsListLoading(true);
+    }
+  }, [customDateRange]);
 
   const deleteDocuments = async (objectKeys) => {
     try {
@@ -369,10 +472,14 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     }
   };
 
-  const reprocessDocuments = async (objectKeys) => {
+  const reprocessDocuments = async (objectKeys, version) => {
     try {
-      logger.debug('Reprocessing documents', objectKeys);
-      const result = await client.graphql({ query: reprocessDocument, variables: { objectKeys } });
+      logger.debug('Reprocessing documents', objectKeys, 'with version', version);
+      const variables = { objectKeys };
+      if (version) {
+        variables.version = version;
+      }
+      const result = await client.graphql({ query: reprocessDocument, variables });
       logger.debug('Reprocess documents result', result);
       // Refresh the document list after reprocessing
       setIsDocumentsListLoading(true);
@@ -416,6 +523,8 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
     setIsDocumentsListLoading,
     setPeriodsToLoad,
     periodsToLoad,
+    customDateRange,
+    setCustomDateRange,
     deleteDocuments,
     reprocessDocuments,
     abortWorkflows,

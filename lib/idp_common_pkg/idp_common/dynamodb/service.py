@@ -249,7 +249,7 @@ class DocumentDynamoDBService:
         if document.metering:
             set_expressions.append("#Metering = :Metering")
             expression_names["#Metering"] = "Metering"
-            expression_values[":Metering"] = json.dumps(document.metering)
+            expression_values[":Metering"] = json.dumps(document.metering, default=str)
 
         # Add evaluation status & report if available
         if document.evaluation_status:
@@ -274,9 +274,25 @@ class DocumentDynamoDBService:
             expression_names["#TraceId"] = "TraceId"
             expression_values[":TraceId"] = document.trace_id
 
+        # Add Review Status fields if available
+        if document.hitl_status:
+            set_expressions.append("#HITLStatus = :HITLStatus")
+            expression_names["#HITLStatus"] = "HITLStatus"
+            expression_values[":HITLStatus"] = document.hitl_status
+        if document.hitl_sections_pending:
+            set_expressions.append("#HITLSectionsPending = :HITLSectionsPending")
+            expression_names["#HITLSectionsPending"] = "HITLSectionsPending"
+            expression_values[":HITLSectionsPending"] = document.hitl_sections_pending
+        if document.hitl_sections_completed:
+            set_expressions.append("#HITLSectionsCompleted = :HITLSectionsCompleted")
+            expression_names["#HITLSectionsCompleted"] = "HITLSectionsCompleted"
+            expression_values[":HITLSectionsCompleted"] = (
+                document.hitl_sections_completed
+            )
+
         update_expression = "SET " + ", ".join(set_expressions)
         # Convert any float values to Decimal for DynamoDB compatibility
-        expression_values = convert_floats_to_decimal(expression_values)
+        expression_values = convert_floats_to_decimal(expression_values)  # type: ignore[assignment]
 
         return update_expression, expression_names, expression_values
 
@@ -382,11 +398,16 @@ class DocumentDynamoDBService:
                     )
                 )
 
+        # Convert Review Status fields
+        doc.hitl_status = item.get("HITLStatus")
+        doc.hitl_sections_pending = item.get("HITLSectionsPending", [])
+        doc.hitl_sections_completed = item.get("HITLSectionsCompleted", [])
+
         return doc
 
     def create_document(
         self, document: Document, expires_after: Optional[int] = None
-    ) -> str:
+    ) -> Optional[str]:
         """
         Create a new document in DynamoDB using a transaction.
 
@@ -546,9 +567,9 @@ class DocumentDynamoDBService:
 
         response = self.client.scan(
             filter_expression=filter_expression,
-            expression_attribute_values=expression_attribute_values
-            if expression_attribute_values
-            else None,
+            expression_attribute_values=(
+                expression_attribute_values if expression_attribute_values else None
+            ),
             limit=limit or 50,
             exclusive_start_key=exclusive_start_key,
         )

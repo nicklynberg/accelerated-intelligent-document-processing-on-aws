@@ -1548,7 +1548,7 @@ class ClassificationService:
         self, content: List[Dict[str, Any]], config: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Invoke Bedrock model with standard parameters.
+        Invoke Bedrock model (or LambdaHook) with standard parameters.
 
         Args:
             content: Content to send to the model
@@ -1566,6 +1566,7 @@ class ClassificationService:
             top_p=config["top_p"],
             max_tokens=config["max_tokens"],
             context="Classification",
+            model_lambda_hook_arn=self.config.classification.model_lambda_hook_arn,
         )
 
     def _create_unclassified_result(
@@ -1860,9 +1861,9 @@ class ClassificationService:
             page_ids = list(document.pages.keys())
             section = self._create_section(
                 section_id="1",
-                doc_type=self.single_class_name
-                if self.single_class_name
-                else "undefined",
+                doc_type=(
+                    self.single_class_name if self.single_class_name else "undefined"
+                ),
                 pages=page_ids,
                 confidence=1.0,
             )
@@ -2498,9 +2499,9 @@ class ClassificationService:
             page_ids = list(document.pages.keys())
             section = Section(
                 section_id="1",
-                classification=self.single_class_name
-                if self.single_class_name
-                else "undefined",
+                classification=(
+                    self.single_class_name if self.single_class_name else "undefined"
+                ),
                 confidence=1.0,
                 page_ids=page_ids,
             )

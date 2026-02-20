@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 import os
 import boto3
+import re
 from botocore.config import Config
 from idp_common.s3 import find_matching_files  # type: ignore
 from idp_common.dynamodb import DynamoDBClient  # type: ignore
@@ -13,6 +14,22 @@ MAX_ZIP_SIZE_BYTES = 1073741824  # 1 GB
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+
+def validate_test_set_name(name):
+    """Validate test set name: alphanumeric, spaces, hyphens, underscores only, max 50 chars"""
+    if not name or not isinstance(name, str):
+        return False
+    return re.match(r'^[a-zA-Z0-9\s_-]+$', name) and len(name) <= 50
+
+
+def validate_description(description):
+    """Validate description: max 200 chars only"""
+    if description is None or description == "":
+        return True  # Optional field
+    if not isinstance(description, str):
+        return False
+    return len(description) <= 200
 
 # Configure S3 client with S3v4 signature
 s3_config = Config(
@@ -54,6 +71,15 @@ def add_test_set_from_upload(args):
     
     # Extract test set name from filename (remove .zip extension)
     test_set_name = zip_filename.replace('.zip', '').replace('.ZIP', '')
+    
+    # Validate test set name
+    if not validate_test_set_name(test_set_name):
+        raise Exception("Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)")
+    
+    # Validate description
+    if description and not validate_description(description):
+        raise Exception("Description cannot exceed 200 characters")
+    
     test_set_id = f"{test_set_name.replace(' ', '-').lower()}"
     
     test_set_bucket = os.environ['TEST_SET_BUCKET']
@@ -109,6 +135,14 @@ def add_test_set(args):
     test_set_name = args['name']
     description = args.get('description', '')  # Optional field
     file_count = args['fileCount']
+    
+    # Validate test set name
+    if not validate_test_set_name(test_set_name):
+        raise Exception("Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)")
+    
+    # Validate description
+    if description and not validate_description(description):
+        raise Exception("Description cannot exceed 200 characters")
     
     # Generate test set ID with name format, replace spaces with dashes
     test_set_id = f"{test_set_name.replace(' ', '-').lower()}"
@@ -360,7 +394,12 @@ def _is_valid_test_set_structure(s3_client, bucket, prefix):
         return False
 
 def _validate_test_set_files(s3_client, bucket, prefix):
-    """Validate that input and baseline files match"""
+    """Validate that input and baseline files match.
+    
+    Each input file must have a corresponding baseline folder with the exact same name
+    (including extension). For example, input file 'doc.png' requires baseline folder 'doc.png/'.
+    Any file extension is supported, and mixed extensions within a test set are allowed.
+    """
     try:
         input_files = set()
         baseline_files = set()
@@ -374,7 +413,7 @@ def _validate_test_set_files(s3_client, bucket, prefix):
                     filename = key.split('/')[-1]
                     input_files.add(filename)
         
-        # Get baseline folder names
+        # Get baseline folder names (first folder after /baseline/)
         for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/baseline/"):
             for obj in page.get('Contents', []):
                 key = obj['Key']
@@ -382,12 +421,10 @@ def _validate_test_set_files(s3_client, bucket, prefix):
                     # Extract folder name after /baseline/
                     parts = key.split(f"{prefix}/baseline/", 1)
                     if len(parts) == 2 and '/' in parts[1]:
-                        path_parts = parts[1].split('/')
-                        # Look for .pdf file in path
-                        for part in path_parts:
-                            if part.endswith('.pdf'):
-                                baseline_files.add(part)
-                                break
+                        # First path component is the baseline folder name
+                        folder_name = parts[1].split('/')[0]
+                        if folder_name:
+                            baseline_files.add(folder_name)
         
         # Validate matching
         if len(input_files) == 0:

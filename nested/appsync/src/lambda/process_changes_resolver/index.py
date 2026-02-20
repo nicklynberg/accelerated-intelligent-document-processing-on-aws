@@ -2,14 +2,15 @@
 # SPDX-License-Identifier: MIT-0
 
 import json
-import os
-import boto3
 import logging
+import os
 from datetime import datetime, timezone
 
-# Import IDP Common modules
-from idp_common.models import Document, Section, Status
+import boto3
 from idp_common.docs_service import create_document_service
+
+# Import IDP Common modules
+from idp_common.models import Section, Status
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get('LOG_LEVEL', 'INFO'))
@@ -69,6 +70,43 @@ def handler(event, context):
             logger.info(f"Set document buckets - input_bucket: {input_bucket}, output_bucket: {output_bucket}")
             
             logger.info(f"Found document: {document.id}")
+            
+            # Mark HITL review as completed when processing changes
+            # This handles the case where user edits data and clicks "Process Changes"
+            hitl_status_lower = (document.hitl_status or '').lower().replace(' ', '')
+            completed_statuses = ['completed', 'reviewcompleted', 'skipped', 'reviewskipped']
+            if document.hitl_status and hitl_status_lower not in completed_statuses:
+                identity = event.get('identity', {})
+                username = identity.get('username', 'system')
+                user_email = identity.get('claims', {}).get('email', '')
+                
+                # Mark all pending sections as completed
+                pending_sections = document.hitl_sections_pending or []
+                completed_sections = list(document.hitl_sections_completed or [])
+                completed_sections.extend(pending_sections)
+                
+                document.hitl_status = 'Review Completed'
+                document.hitl_sections_pending = []
+                document.hitl_sections_completed = completed_sections
+                
+                # Update review fields in DynamoDB (not in document model)
+                # HITLReviewedBy tracks who completed the review via Process Changes
+                tracking_table = os.environ.get('TRACKING_TABLE')
+                if tracking_table:
+                    dynamodb_resource = boto3.resource('dynamodb')
+                    table = dynamodb_resource.Table(tracking_table)
+                    table.update_item(
+                        Key={"PK": f"doc#{object_key}", "SK": "none"},
+                        UpdateExpression="SET HITLStatus = :status, HITLReviewedBy = :reviewedBy, HITLReviewedByEmail = :reviewedByEmail, HITLCompleted = :completed",
+                        ExpressionAttributeValues={
+                            ":status": "Review Completed",
+                            ":reviewedBy": username,
+                            ":reviewedByEmail": user_email,
+                            ":completed": True,
+                        },
+                    )
+                
+                logger.info(f"Marked HITL review as completed by {username} via Process Changes")
             
         except Exception as e:
             logger.error(f"Error retrieving document {object_key}: {str(e)}")
@@ -197,7 +235,7 @@ def handler(event, context):
         if working_bucket:
             # Use document compression (always compress with 0KB threshold)
             sqs_message_content = document.serialize_document(working_bucket, "process_changes", logger)
-            logger.info(f"Document compressed for SQS (always compress)")
+            logger.info("Document compressed for SQS (always compress)")
         else:
             # Fallback to direct document dict if no working bucket
             sqs_message_content = document.to_dict()
@@ -226,7 +264,7 @@ def handler(event, context):
             appsync_service = create_document_service(mode='appsync')
             document.status = Status.QUEUED  # Ensure status is QUEUED for UI
             updated_document = appsync_service.update_document(document)
-            logger.info(f"Updated document status to QUEUED in AppSync for immediate UI feedback")
+            logger.info("Updated document status to QUEUED in AppSync for immediate UI feedback")
         except Exception as e:
             logger.warning(f"Failed to update document status in AppSync: {str(e)}")
             # Don't fail the entire operation if AppSync update fails

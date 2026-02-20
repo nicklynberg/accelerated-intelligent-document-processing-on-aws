@@ -694,40 +694,42 @@ class SaveReportingData:
             ),
             "execution_time": eval_result.get("execution_time", 0.0),
             # Doc split classification metrics (None if not available for backward compatibility)
-            "page_level_accuracy": doc_split_metrics.get("page_level_accuracy")
-            if doc_split_metrics
-            else None,
-            "split_accuracy_without_order": doc_split_metrics.get(
-                "split_accuracy_without_order"
-            )
-            if doc_split_metrics
-            else None,
-            "split_accuracy_with_order": doc_split_metrics.get(
-                "split_accuracy_with_order"
-            )
-            if doc_split_metrics
-            else None,
-            "total_pages": doc_split_metrics.get("total_pages")
-            if doc_split_metrics
-            else None,
-            "total_splits": doc_split_metrics.get("total_splits")
-            if doc_split_metrics
-            else None,
-            "correctly_classified_pages": doc_split_metrics.get(
-                "correctly_classified_pages"
-            )
-            if doc_split_metrics
-            else None,
-            "correctly_split_without_order": doc_split_metrics.get(
-                "correctly_split_without_order"
-            )
-            if doc_split_metrics
-            else None,
-            "correctly_split_with_order": doc_split_metrics.get(
-                "correctly_split_with_order"
-            )
-            if doc_split_metrics
-            else None,
+            "page_level_accuracy": (
+                doc_split_metrics.get("page_level_accuracy")
+                if doc_split_metrics
+                else None
+            ),
+            "split_accuracy_without_order": (
+                doc_split_metrics.get("split_accuracy_without_order")
+                if doc_split_metrics
+                else None
+            ),
+            "split_accuracy_with_order": (
+                doc_split_metrics.get("split_accuracy_with_order")
+                if doc_split_metrics
+                else None
+            ),
+            "total_pages": (
+                doc_split_metrics.get("total_pages") if doc_split_metrics else None
+            ),
+            "total_splits": (
+                doc_split_metrics.get("total_splits") if doc_split_metrics else None
+            ),
+            "correctly_classified_pages": (
+                doc_split_metrics.get("correctly_classified_pages")
+                if doc_split_metrics
+                else None
+            ),
+            "correctly_split_without_order": (
+                doc_split_metrics.get("correctly_split_without_order")
+                if doc_split_metrics
+                else None
+            ),
+            "correctly_split_with_order": (
+                doc_split_metrics.get("correctly_split_with_order")
+                if doc_split_metrics
+                else None
+            ),
         }
 
         # Save document metrics in Parquet format

@@ -207,9 +207,11 @@ class ExtractionService:
                 cleaned[key] = self._clean_schema_for_prompt(value)
             elif isinstance(value, list):
                 cleaned[key] = [
-                    self._clean_schema_for_prompt(item)
-                    if isinstance(item, dict)
-                    else item
+                    (
+                        self._clean_schema_for_prompt(item)
+                        if isinstance(item, dict)
+                        else item
+                    )
                     for item in value
                 ]
             else:
@@ -970,6 +972,7 @@ class ExtractionService:
                 top_p=top_p,
                 max_tokens=max_tokens,
                 context="Extraction",
+                model_lambda_hook_arn=self.config.extraction.model_lambda_hook_arn,
             )
 
             extracted_text = bedrock.extract_text_from_response(

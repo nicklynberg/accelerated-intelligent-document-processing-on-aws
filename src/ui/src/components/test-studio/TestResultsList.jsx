@@ -2,15 +2,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import React, { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { Table, Button, SpaceBetween, ButtonDropdown, Pagination, Box, TextFilter, Flashbar } from '@cloudscape-design/components';
+import { Table, Button, SpaceBetween, ButtonDropdown, Pagination, Box, TextFilter, Flashbar, Link } from '@cloudscape-design/components';
 import { useCollection } from '@cloudscape-design/collection-hooks';
 import { generateClient } from 'aws-amplify/api';
 import GET_TEST_RUNS from '../../graphql/queries/getTestRuns';
 import DELETE_TESTS from '../../graphql/queries/deleteTests';
 import DeleteTestModal from './DeleteTestModal';
+import DateRangeModal from '../common/DateRangeModal';
 import { paginationLabels } from '../common/labels';
 import TestRunnerStatus from './TestRunnerStatus';
 import { TableHeader } from '../common/table';
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
+import { formatConfigVersionLink, formatConfigVersionText } from './utils/configVersionUtils';
 
 const client = generateClient();
 
@@ -23,6 +26,7 @@ const TIME_PERIOD_OPTIONS = [
   { id: 'refresh-1w', hours: 168, text: '1 week' },
   { id: 'refresh-2w', hours: 336, text: '2 weeks' },
   { id: 'refresh-1m', hours: 720, text: '30 days' },
+  { id: 'custom-range', hours: -1, text: 'Custom range...' },
 ].map((option) => ({ ...option, text: option.text })); // Ensure text is the display text
 
 const TestRunIdCell = ({ item, onSelect }) => (
@@ -79,11 +83,14 @@ TextCell.propTypes = {
 const TIME_PERIOD_STORAGE_KEY = 'testResultsTimePeriodHours';
 
 const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, setSelectedItems, activeTestRuns = [], onTestComplete }) => {
+  const { versions } = useConfigurationVersions();
   const [testRuns, setTestRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
+  const [isDateRangeModalVisible, setIsDateRangeModalVisible] = useState(false);
+  const [customDateRange, setCustomDateRange] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [pageSize, setPageSize] = useState(10);
 
@@ -99,8 +106,13 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
   }, []);
 
   const handleTimePeriodChange = ({ detail }) => {
+    if (detail.id === 'custom-range') {
+      setIsDateRangeModalVisible(true);
+      return;
+    }
     const selectedOption = TIME_PERIOD_OPTIONS.find((opt) => opt.id === detail.id);
     if (selectedOption) {
+      setCustomDateRange(null); // Clear custom range when switching to relative
       setTimePeriodHours(selectedOption.hours);
       localStorage.setItem(TIME_PERIOD_STORAGE_KEY, JSON.stringify(selectedOption.hours));
     }
@@ -135,10 +147,13 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
   const fetchTestRuns = async () => {
     try {
       setLoading(true);
-      console.log('Fetching test runs with timePeriodHours:', timePeriodHours);
+      const variables = customDateRange
+        ? { startDateTime: customDateRange.startDateTime, endDateTime: customDateRange.endDateTime }
+        : { timePeriodHours };
+      console.log('Fetching test runs with variables:', variables);
       const result = await client.graphql({
         query: GET_TEST_RUNS,
-        variables: { timePeriodHours },
+        variables,
       });
       console.log('Raw GraphQL result:', result);
       console.log('getTestRuns data:', result.data.getTestRuns);
@@ -157,6 +172,7 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
         createdAt: run.startTime.toISOString(),
         completedAt: null,
         context: run.context || 'N/A',
+        configVersion: run.configVersion || null,
       }));
 
       // Filter out completed runs that match active run IDs to avoid duplicates
@@ -178,14 +194,16 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
 
   useEffect(() => {
     fetchTestRuns();
-  }, [timePeriodHours, activeTestRuns]);
+  }, [timePeriodHours, activeTestRuns, customDateRange]);
 
   const downloadToExcel = () => {
     // Convert test runs data to CSV format
-    const headers = ['Test Run ID', 'Test Set', 'Status', 'Files Count', 'Created At', 'Completed At'];
+    const headers = ['Test Run ID', 'Test Set', 'Context', 'Config Version', 'Status', 'Files Count', 'Created At', 'Completed At'];
     const csvData = testRuns.map((run) => [
       run.testRunId,
       run.testSetName || '',
+      run.context || '',
+      formatConfigVersionText(run.configVersion, versions),
       run.status,
       run.filesCount || 0,
       run.createdAt || '',
@@ -270,7 +288,15 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
         actionButtons={
           <SpaceBetween direction="horizontal" size="xs">
             <ButtonDropdown loading={loading} onItemClick={handleTimePeriodChange} items={TIME_PERIOD_OPTIONS}>
-              {`Load: ${TIME_PERIOD_OPTIONS.find((opt) => opt.hours === timePeriodHours)?.text || ''}`}
+              {customDateRange
+                ? (() => {
+                    const s = new Date(customDateRange.startDateTime);
+                    const e = new Date(customDateRange.endDateTime);
+                    const fmt = (d) =>
+                      `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+                    return `Load: ${fmt(s)} → ${fmt(e)}`;
+                  })()
+                : `Load: ${TIME_PERIOD_OPTIONS.find((opt) => opt.hours === timePeriodHours)?.text || ''}`}
             </ButtonDropdown>
             <Button iconName="refresh" variant="normal" loading={loading} onClick={handleRefresh} />
             <Button iconName="download" variant="normal" loading={loading} onClick={downloadToExcel} />
@@ -290,6 +316,7 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
         }
       />
       <Table
+        resizableColumns
         items={items}
         selectedItems={selectedItems}
         onSelectionChange={({ detail }) => setSelectedItems(detail.selectedItems)}
@@ -314,11 +341,18 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
             width: 150,
           },
           {
-            id: 'context',
-            header: 'Context',
-            cell: getContextCell,
-            sortingField: 'context',
-            width: 300,
+            id: 'filesCount',
+            header: 'Files Count',
+            cell: (item) => item.filesCount,
+            sortingField: 'filesCount',
+            width: 100,
+          },
+          {
+            id: 'configVersion',
+            header: 'Config Version',
+            cell: (item) => formatConfigVersionLink(item.configVersion, versions),
+            sortingField: 'configVersion',
+            width: 150,
           },
           {
             id: 'status',
@@ -328,10 +362,11 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
             width: 200,
           },
           {
-            id: 'filesCount',
-            header: 'Files Count',
-            cell: (item) => item.filesCount,
-            sortingField: 'filesCount',
+            id: 'context',
+            header: 'Context',
+            cell: getContextCell,
+            sortingField: 'context',
+            width: 200,
           },
           {
             id: 'createdAt',
@@ -394,6 +429,15 @@ const TestResultsList = ({ timePeriodHours, setTimePeriodHours, selectedItems, s
         selectedItems={selectedItems}
         itemType="test run"
         loading={deleteLoading}
+      />
+
+      <DateRangeModal
+        visible={isDateRangeModalVisible}
+        onDismiss={() => setIsDateRangeModalVisible(false)}
+        onApply={(dateRange) => {
+          setIsDateRangeModalVisible(false);
+          setCustomDateRange(dateRange);
+        }}
       />
     </SpaceBetween>
   );

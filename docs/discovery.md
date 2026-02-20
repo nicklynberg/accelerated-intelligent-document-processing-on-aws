@@ -1237,7 +1237,7 @@ def discovery_with_fallback(discovery_service, document_key, ground_truth_key=No
 
 ## BdaIDP Sync Feature
 
-The BdaIDP Sync feature provides bidirectional synchronization between BDA (Bedrock Data Automation) blueprints and IDP (Intelligent Document Processing) custom classes. This feature enables seamless integration between BDA's blueprint management system and IDP's document class configuration.
+The BdaIDP Sync feature provides bidirectional synchronization between BDA (Bedrock Data Automation) blueprints and IDP custom classes. This feature enables seamless integration between BDA's blueprint management system and IDP's document class configuration, with support for AWS Standard blueprints and optimized parallel processing.
 
 
 
@@ -1249,71 +1249,234 @@ https://github.com/user-attachments/assets/6016614d-e582-4956-8c39-c189a52f63c6
 
 The sync feature operates through the `sync_bda_idp_resolver` Lambda function, which orchestrates the synchronization process:
 
-1. **Bidirectional Sync**: Synchronizes both directions - IDP classes to BDA blueprints and BDA blueprints to IDP classes
-2. **Automatic Detection**: Identifies new blueprints in BDA that don't have corresponding IDP classes
+1. **Flexible Sync Directions**: Supports three synchronization modes:
+   - `bidirectional`: Syncs both directions (default, backward compatible)
+   - `bda_to_idp`: Syncs from BDA blueprints to IDP classes only
+   - `idp_to_bda`: Syncs from IDP classes to BDA blueprints only
+2. **AWS Standard Blueprint Support**: Automatically converts AWS-managed blueprints to custom blueprints
 3. **Schema Transformation**: Converts between IDP JSON Schema format and BDA blueprint format
 4. **Change Detection**: Only updates when actual schema changes are detected
 5. **Cleanup Management**: Removes orphaned blueprints that no longer have corresponding IDP classes
+6. **Parallel Processing**: Uses multi-threading for improved performance with configurable worker count
 
 ### Sync Process Flow
 
 ```mermaid
 graph TD
-    A[Sync Request] --> B[Load Custom Classes from IDP]
-    B --> C[Retrieve BDA Blueprints]
-    C --> D{Blueprint without IDP Class?}
-    D -->|Yes| E[Create IDP Class from Blueprint]
-    D -->|No| F[Process IDP Classes]
-    E --> G[Add to IDP Configuration]
-    F --> H{IDP Class has Blueprint?}
-    H -->|Yes| I[Check for Changes]
-    H -->|No| J[Create New Blueprint]
-    I -->|Changes Found| K[Update Blueprint]
-    I -->|No Changes| L[Skip Update]
-    J --> M[Create Blueprint Version]
-    K --> M
-    M --> N[Update Project]
-    N --> O[Cleanup Orphaned Blueprints]
-    O --> P[Save Updated Configuration]
+    A[Sync Request with Direction] --> B{Sync Direction?}
+    B -->|bda_to_idp or bidirectional| C[Phase 1: BDA to IDP Sync]
+    B -->|idp_to_bda or bidirectional| D[Phase 2: IDP to BDA Sync]
+    
+    C --> E[Retrieve BDA Blueprints]
+    E --> F{AWS Standard Blueprints?}
+    F -->|Yes| G[Convert AWS Blueprints in Parallel]
+    F -->|No| H[Load Custom Classes]
+    G --> I[Normalize AWS Blueprint Schema]
+    I --> J[Transform to IDP Format]
+    J --> K[Create Custom Blueprints]
+    K --> L[Remove AWS Blueprints from Project]
+    L --> M[Save New IDP Classes]
+    
+    D --> N[Load IDP Custom Classes]
+    N --> O[Retrieve Existing BDA Blueprints]
+    O --> P[Process Classes in Parallel]
+    P --> Q{Blueprint Exists?}
+    Q -->|Yes| R[Check for Changes with DeepDiff]
+    Q -->|No| S[Sanitize Property Names]
+    R -->|Changes Found| T[Sanitize Property Names]
+    R -->|No Changes| U[Skip Update]
+    S --> V[Transform to BDA Format]
+    T --> V
+    V --> W[Create/Update Blueprint]
+    W --> X[Create Blueprint Version]
+    X --> Y[Update Project]
+    Y --> Z[Cleanup Orphaned Blueprints]
+    Z --> AA[Save Modified Classes]
+    
+    M --> AB[Sync Complete]
+    AA --> AB
+    U --> AB
 ```
 
 ### Key Features
 
-**🔄 Bidirectional Synchronization**
-- IDP classes automatically create/update BDA blueprints
-- BDA blueprints automatically create corresponding IDP classes
-- Maintains consistency between both systems
+**🔄 Flexible Sync Directions**
+- **Bidirectional** (default): Full two-way synchronization between BDA and IDP
+- **BDA to IDP**: One-way sync from BDA blueprints to IDP classes
+- **IDP to BDA**: One-way sync from IDP classes to BDA blueprints
+- Configurable via `sync_direction` parameter in API calls
 
 **🎯 Intelligent Change Detection**
-- Uses DeepDiff to compare schemas and detect actual changes
+- Uses DeepDiff library to compare schemas and detect actual changes
 - Only triggers updates when meaningful differences are found
 - Prevents unnecessary blueprint versions and API calls
+- Compares transformed schemas to ensure accurate change detection
 
 **🧹 Automatic Cleanup**
 - Removes BDA blueprints that no longer have corresponding IDP classes
 - Maintains clean blueprint inventory in BDA projects
 - Prevents accumulation of obsolete blueprints
+- Only runs during `idp_to_bda` or `bidirectional` sync
 
 **📋 Schema Transformation**
 - Converts IDP JSON Schema (draft 2020-12) to BDA blueprint format (draft-07)
 - Handles field type mapping and structural differences
 - Preserves semantic meaning across format conversions
+- Bidirectional transformation support for both sync directions
+
+**🏢 AWS Standard Blueprint Management**
+- Automatically detects AWS-managed blueprints in BDA projects
+- Converts AWS Standard blueprints to custom blueprints
+- Normalizes AWS blueprint schemas to fix common issues
+- Creates corresponding IDP classes for AWS blueprints
+- Removes AWS blueprints from project after conversion
+
+**⚡ Parallel Processing**
+- Multi-threaded processing for improved performance
+- Configurable worker count via `BDA_SYNC_MAX_WORKERS` environment variable (default: 5)
+- Parallel blueprint creation and updates
+- Parallel AWS blueprint conversion
+- Thread-safe operations with proper locking mechanisms
+
+**🔧 Property Name Sanitization**
+- Automatically removes special characters from property names
+- Ensures BDA compatibility by sanitizing field names
+- Maintains mapping of original to sanitized names
+- Prevents blueprint creation failures due to invalid characters
+
+### Sync Direction Configuration
+
+The sync direction can be specified when calling the sync operation:
+
+**GraphQL API:**
+```graphql
+mutation SyncBdaIdp {
+  syncBdaIdp(direction: "bidirectional") {
+    success
+    message
+    processedClasses
+    direction
+  }
+}
+```
+
+**Python API:**
+```python
+from idp_common.bda.bda_blueprint_service import BdaBlueprintService
+
+# Initialize service
+service = BdaBlueprintService(
+    dataAutomationProjectArn="arn:aws:bedrock:us-west-2:123456789012:project/my-project"
+)
+
+# Bidirectional sync (default)
+result = service.create_blueprints_from_custom_configuration(
+    sync_direction="bidirectional"
+)
+
+# BDA to IDP only
+result = service.create_blueprints_from_custom_configuration(
+    sync_direction="bda_to_idp"
+)
+
+# IDP to BDA only
+result = service.create_blueprints_from_custom_configuration(
+    sync_direction="idp_to_bda"
+)
+```
+
+**Environment Configuration:**
+```bash
+# Configure maximum parallel workers (default: 5)
+BDA_SYNC_MAX_WORKERS=10
+```
+
+### AWS Standard Blueprint Conversion
+
+The sync feature includes automatic conversion of AWS Standard blueprints to custom blueprints:
+
+**Conversion Process:**
+1. **Detection**: Identifies AWS-managed blueprints (containing `aws:blueprint` in ARN)
+2. **Normalization**: Fixes common issues in AWS blueprint schemas:
+   - Adds missing `$schema` field (draft-07)
+   - Adds missing `type` fields to root and definitions
+   - Adds missing `instruction` fields to `$ref` properties
+   - Fixes array items with BDA-specific fields
+   - Fixes double-escaped quotes in instruction strings
+3. **Transformation**: Converts normalized BDA schema to IDP class format
+4. **Blueprint Creation**: Creates new custom blueprint from transformed schema
+5. **Project Update**: Removes AWS blueprint and adds custom blueprint to project
+6. **Configuration Save**: Saves new IDP class to configuration table
+
+**Schema Normalization Examples:**
+
+```python
+# Before normalization (AWS blueprint)
+{
+  "definitions": {
+    "Address": {
+      "properties": {
+        "street": {
+          "$ref": "#/definitions/Street"
+          # Missing instruction field
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "inferenceType": "explicit",  # Should not be in items
+            "instruction": "Item description"
+          }
+        }
+      }
+    }
+  }
+}
+
+# After normalization
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",  # Added
+  "type": "object",  # Added
+  "definitions": {
+    "Address": {
+      "type": "object",  # Added
+      "properties": {
+        "street": {
+          "$ref": "#/definitions/Street",
+          "instruction": "-"  # Added
+        },
+        "items": {
+          "type": "array",
+          "instruction": "-",  # Added
+          "inferenceType": "explicit",  # Moved to array level
+          "items": {
+            "type": "string"  # Cleaned up
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Parallel Conversion:**
+- AWS blueprints are converted in parallel using ThreadPoolExecutor
+- Configurable worker count (default: min(3, BDA_SYNC_MAX_WORKERS))
+- Thread-safe operations with proper locking
+- Skips blueprints that already have corresponding IDP classes
 
 ### Limitations and Constraints
 
-#### AWS Managed Blueprints Exclusion
+#### AWS Standard Blueprint Handling
 
-**AWS Managed Blueprints are ignored during sync operations:**
+**AWS Standard Blueprints are automatically converted:**
 - AWS-provided blueprints (identifiable by `aws:blueprint` in ARN) are read-only
-- These blueprints cannot be modified or deleted by users
-- Sync process automatically skips AWS managed blueprints to prevent errors
-- Only user-created blueprints participate in synchronization
-
-```python
-# Example: AWS managed blueprint detection
-if "aws:blueprint" in blueprint_arn:
-    continue  # Skip AWS managed blueprints
-```
+- During `bda_to_idp` or `bidirectional` sync, AWS blueprints are:
+  - Automatically converted to custom blueprints
+  - Transformed into IDP classes
+  - Removed from the BDA project after successful conversion
+- Conversion only occurs if no corresponding IDP class exists
+- Failed conversions are logged but don't stop the sync process
 
 #### BDA Schema Limitations
 
@@ -1405,9 +1568,61 @@ Schemas with nested objects or arrays will cause sync failures:
 }
 ```
 
+### Performance Optimization
+
+**Multi-Threading Configuration:**
+
+The sync feature uses parallel processing to improve performance:
+
+```python
+# Configure in environment
+BDA_SYNC_MAX_WORKERS=10  # Default: 5
+
+# Processing breakdown:
+# - IDP to BDA sync: Uses max_workers threads
+# - AWS blueprint conversion: Uses min(3, max_workers) threads
+# - Thread-safe operations with locking mechanisms
+```
+
+**Performance Characteristics:**
+
+| Operation | Processing Mode | Default Workers | Typical Time |
+|-----------|----------------|-----------------|--------------|
+| IDP to BDA Sync | Parallel | 5 | 2-5s per class |
+| AWS Blueprint Conversion | Parallel | 3 | 3-7s per blueprint |
+| Change Detection | Sequential | N/A | <1s per class |
+| Schema Transformation | Sequential | N/A | <1s per class |
+
+**Optimization Tips:**
+- Increase `BDA_SYNC_MAX_WORKERS` for large numbers of classes (10-20 recommended)
+- Monitor CloudWatch logs for thread execution times
+- Consider sync direction to avoid unnecessary operations
+- Use `idp_to_bda` when only updating blueprints from IDP changes
+- Use `bda_to_idp` when only importing AWS blueprints or BDA changes
+
 ### Best Practices for Sync Success
 
-#### 1. Use Simplified IDP Schemas
+#### 1. Choose Appropriate Sync Direction
+
+**Use Case-Based Selection:**
+```python
+# After modifying IDP classes in UI
+service.create_blueprints_from_custom_configuration(
+    sync_direction="idp_to_bda"  # Only update BDA blueprints
+)
+
+# After adding AWS Standard blueprints to BDA project
+service.create_blueprints_from_custom_configuration(
+    sync_direction="bda_to_idp"  # Only import to IDP
+)
+
+# For complete synchronization
+service.create_blueprints_from_custom_configuration(
+    sync_direction="bidirectional"  # Full two-way sync
+)
+```
+
+#### 2. Use Simplified IDP Schemas
 
 **Flatten Complex Structures:**
 ```json
@@ -1450,7 +1665,7 @@ Schemas with nested objects or arrays will cause sync failures:
 }
 ```
 
-#### 2. Pre-Sync Validation
+#### 3. Pre-Sync Validation
 
 **Check Schema Structure Before Sync:**
 ```bash
@@ -1462,30 +1677,51 @@ Schemas with nested objects or arrays will cause sync failures:
 - ✅ No nested objects within object definitions
 - ✅ No arrays within object definitions  
 - ✅ All array properties have description or instruction fields
-- ✅ Field names follow BDA naming conventions
+- ✅ Field names follow BDA naming conventions (no special characters like &, /)
 - ✅ Schema uses supported data types (string, number, boolean)
+- ✅ Property names are less than 60 characters
+- ✅ No double-escaped quotes in instruction strings
 
-#### 3. Error Handling and Recovery
+#### 4. Error Handling and Recovery
 
 **Monitor Sync Results:**
 ```json
 // Sync response includes detailed status for each class
 {
   "success": true,
-  "message": "Successfully synchronized 2 document classes",
+  "message": "Successfully synchronized 2 document classes bidirectionally",
   "processedClasses": ["Invoice", "Receipt"],
+  "direction": "bidirectional",
   "error": {
     "type": "PARTIAL_SYNC_ERROR",
-    "message": "Failed to sync classes: ComplexForm"
+    "message": "Failed to sync classes: ComplexForm",
+    "failedClasses": ["ComplexForm"]
   }
 }
 ```
 
 **Handle Partial Failures:**
-- Review failed classes for nested structures
-- Simplify problematic schemas
-- Re-run sync after schema modifications
-- Monitor CloudWatch logs for detailed error information
+- Review failed classes for nested structures or special characters
+- Check CloudWatch logs for specific error messages
+- Simplify problematic schemas (flatten nested objects)
+- Sanitize property names (remove special characters)
+- Re-run sync after schema modifications with appropriate direction
+- Monitor thread execution times for performance issues
+
+**Common Failure Scenarios:**
+```python
+# Scenario 1: Special characters in property names
+# Error: "Skipping property 'Employee&Name' - contains special characters"
+# Solution: Property names are automatically sanitized, check logs for mapping
+
+# Scenario 2: Nested object structures
+# Error: "Skipping nested object property 'address' - not supported by BDA"
+# Solution: Flatten the structure into individual fields
+
+# Scenario 3: AWS blueprint conversion failure
+# Error: "Failed to convert AWS blueprint: schema validation error"
+# Solution: Check AWS blueprint schema format, may need manual intervention
+```
 
 ### Troubleshooting Sync Issues
 
@@ -1500,31 +1736,75 @@ Solution: Flatten the object structure into individual fields
 **2. Array Instruction Missing**
 ```
 Error: Array property missing required 'instruction' field
-Solution: Add description or instruction field to array properties
+Solution: Array properties are automatically defaulted to "-" if missing
+Note: This is handled automatically by the sync process
 ```
 
 **3. Schema Validation Failures**
 ```
 Error: BDA schema validation failed
 Solution: Ensure schema follows BDA draft-07 format requirements
+Check for: missing type fields, invalid references, unsupported structures
+```
+
+**4. Special Character Errors**
+```
+Error: Property name contains invalid characters: 'Employee&Name'
+Solution: Property names are automatically sanitized
+Check logs for name mapping: 'Employee&Name' -> 'EmployeeName'
+```
+
+**5. AWS Blueprint Conversion Errors**
+```
+Error: Failed to normalize AWS blueprint schema
+Solution: Check AWS blueprint format, may have unsupported structures
+Review normalization logs for specific issues
+```
+
+**6. Thread Execution Errors**
+```
+Error: Thread execution error during parallel processing
+Solution: Check CloudWatch logs for specific thread failures
+Consider reducing BDA_SYNC_MAX_WORKERS if experiencing timeouts
 ```
 
 #### Debugging Steps
 
 1. **Check CloudWatch Logs:**
-   - Review `sync_bda_idp_resolver` function logs
+   - Review `sync_bda_idp_resolver` function logs for sync orchestration
+   - Check `BdaBlueprintService` logs for detailed processing information
    - Look for specific error messages about skipped properties
    - Identify which classes failed and why
+   - Review thread execution logs for parallel processing issues
+   - Check for property name sanitization mappings
 
 2. **Validate Schema Structure:**
    - Use JSON Schema validators to check format compliance
    - Look for nested objects and arrays in definitions
    - Verify all required fields are present
+   - Check for special characters in property names
+   - Ensure array properties have instruction or description fields
+   - Validate that schemas follow BDA draft-07 requirements
 
 3. **Test with Simplified Schema:**
    - Create a minimal test schema without nested structures
    - Verify sync works with simple structure
+   - Test with single class before batch processing
+   - Use appropriate sync direction for testing
    - Gradually add complexity while monitoring for failures
+   - Monitor performance with different worker counts
+
+4. **Verify Sync Direction:**
+   - Confirm correct sync direction for your use case
+   - Check that AWS blueprints are only processed in `bda_to_idp` or `bidirectional` mode
+   - Verify cleanup only runs in `idp_to_bda` or `bidirectional` mode
+   - Test each direction independently if issues occur
+
+5. **Monitor Performance:**
+   - Check thread execution times in CloudWatch logs
+   - Adjust `BDA_SYNC_MAX_WORKERS` based on performance
+   - Monitor API throttling from BDA service
+   - Review parallel processing efficiency
 
 ### Schema Design Recommendations
 

@@ -26,6 +26,6 @@ The defaults are organized into modular files:
 
 Usage:
     from idp_common.config.merge_utils import load_system_defaults
-    
+
     defaults = load_system_defaults("pattern-2")
 """

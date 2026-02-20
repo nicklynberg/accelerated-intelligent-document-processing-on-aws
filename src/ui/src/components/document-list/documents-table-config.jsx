@@ -6,11 +6,12 @@ import { Button, ButtonDropdown, CollectionPreferences, Link, SpaceBetween } fro
 import { TableHeader } from '../common/table';
 import { DOCUMENTS_PATH } from '../../routes/constants';
 import { renderHitlStatus } from '../common/hitl-status-renderer';
+import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
 
 export const KEY_COLUMN_ID = 'objectKey';
 export const UNIQUE_TRACK_ID = 'uniqueId';
 
-export const COLUMN_DEFINITIONS_MAIN = [
+export const COLUMN_DEFINITIONS_MAIN = (versions = []) => [
   {
     id: KEY_COLUMN_ID,
     header: 'Document ID',
@@ -30,18 +31,11 @@ export const COLUMN_DEFINITIONS_MAIN = [
     width: 150,
   },
   {
-    id: 'hitlStatus',
-    header: 'HITL Status',
-    cell: (item) => renderHitlStatus(item),
-    sortingField: 'hitlStatus',
+    id: 'configVersion',
+    header: 'Config Version',
+    cell: (item) => formatConfigVersionLink(item.configVersion, versions),
+    sortingField: 'configVersion',
     width: 150,
-  },
-  {
-    id: 'hitlReviewOwner',
-    header: 'Review Owner',
-    cell: (item) => item.hitlReviewOwnerEmail || item.hitlReviewOwner || '-',
-    sortingField: 'hitlReviewOwner',
-    width: 180,
   },
   {
     id: 'initialEventTime',
@@ -79,9 +73,30 @@ export const COLUMN_DEFINITIONS_MAIN = [
     sortingField: 'confidenceAlertCount',
     width: 150,
   },
+  {
+    id: 'hitlStatus',
+    header: 'Review Status',
+    cell: (item) => renderHitlStatus(item),
+    sortingField: 'hitlStatus',
+    width: 150,
+  },
+  {
+    id: 'hitlReviewOwner',
+    header: 'Review Owner',
+    cell: (item) => item.hitlReviewOwnerEmail || item.hitlReviewOwner || '-',
+    sortingField: 'hitlReviewOwner',
+    width: 180,
+  },
+  {
+    id: 'hitlReviewedBy',
+    header: 'Review Completed By',
+    cell: (item) => item.hitlReviewedByEmail || item.hitlReviewedBy || '-',
+    sortingField: 'hitlReviewedBy',
+    width: 180,
+  },
 ];
 
-export const DEFAULT_SORT_COLUMN = COLUMN_DEFINITIONS_MAIN[4]; // initialEventTime (index changed)
+export const DEFAULT_SORT_COLUMN = { sortingField: 'initialEventTime' };
 
 export const SELECTION_LABELS = {
   itemSelectionLabel: (data, row) => `select ${row.objectKey}`,
@@ -101,13 +116,15 @@ const VISIBLE_CONTENT_OPTIONS = [
     options: [
       { id: 'objectKey', label: 'Document ID', editable: false },
       { id: 'objectStatus', label: 'Status' },
-      { id: 'hitlStatus', label: 'HITL Status' },
-      { id: 'hitlReviewOwner', label: 'Review Owner' },
       { id: 'initialEventTime', label: 'Submitted' },
       { id: 'completionTime', label: 'Completed' },
       { id: 'duration', label: 'Duration' },
+      { id: 'configVersion', label: 'Config Version' },
       { id: 'evaluationStatus', label: 'Evaluation' },
       { id: 'confidenceAlertCount', label: 'Confidence Alerts' },
+      { id: 'hitlStatus', label: 'Review Status' },
+      { id: 'hitlReviewOwner', label: 'Review Owner' },
+      { id: 'hitlReviewedBy', label: 'Review Completed By' },
     ],
   },
 ];
@@ -115,13 +132,11 @@ const VISIBLE_CONTENT_OPTIONS = [
 const VISIBLE_CONTENT = [
   'objectKey',
   'objectStatus',
-  'hitlStatus',
-  'hitlReviewOwner',
+  'configVersion',
   'initialEventTime',
-  'completionTime',
   'duration',
-  'evaluationStatus',
   'confidenceAlertCount',
+  'hitlStatus',
 ];
 
 export const DEFAULT_PREFERENCES = {
@@ -171,6 +186,7 @@ const TIME_PERIOD_DROPDOWN_CONFIG = {
   'refresh-1w': { count: 7 * DOCUMENT_LIST_SHARDS_PER_DAY, text: '1 week' },
   'refresh-2w': { count: 14 * DOCUMENT_LIST_SHARDS_PER_DAY, text: '2 weeks' },
   'refresh-1m': { count: 30 * DOCUMENT_LIST_SHARDS_PER_DAY, text: '30 days' },
+  'custom-range': { count: -1, text: 'Custom range...' },
 };
 const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map((k) => ({
   id: k,
@@ -179,6 +195,9 @@ const TIME_PERIOD_DROPDOWN_ITEMS = Object.keys(TIME_PERIOD_DROPDOWN_CONFIG).map(
 
 // local storage key to persist the last periods to load
 export const PERIODS_TO_LOAD_STORAGE_KEY = 'periodsToLoad';
+
+// local storage key to persist custom date range
+export const CUSTOM_DATE_RANGE_STORAGE_KEY = 'customDateRange';
 
 // Statuses that can be aborted
 const ABORTABLE_STATUSES = [
@@ -207,21 +226,45 @@ export const DocumentsCommonHeader = ({
 }) => {
   const onPeriodToLoadChange = ({ detail }) => {
     const { id } = detail;
+    if (id === 'custom-range') {
+      // Signal parent to show date range picker
+      if (props.onCustomDateRange) {
+        props.onCustomDateRange();
+      }
+      return;
+    }
     const shardCount = TIME_PERIOD_DROPDOWN_CONFIG[id].count;
+    // Clear any custom date range when switching to relative period
+    if (props.setCustomDateRange) {
+      props.setCustomDateRange(null);
+      localStorage.removeItem(CUSTOM_DATE_RANGE_STORAGE_KEY);
+    }
     props.setPeriodsToLoad(shardCount);
     localStorage.setItem(PERIODS_TO_LOAD_STORAGE_KEY, JSON.stringify(shardCount));
   };
 
+  // Determine display text
+  const getDisplayText = () => {
+    if (props.customDateRange) {
+      const start = new Date(props.customDateRange.startDateTime);
+      const end = new Date(props.customDateRange.endDateTime);
+      const formatDate = (d) =>
+        `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      return `${formatDate(start)} → ${formatDate(end)}`;
+    }
+    return TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
+  };
+
   // eslint-disable-next-line
-  const periodText = TIME_PERIOD_DROPDOWN_ITEMS.filter((i) => i.count === props.periodsToLoad)[0]?.text || '';
+  const periodText = getDisplayText();
 
   const hasSelectedItems = selectedItems.length > 0;
   // Check if any selected items can be aborted
   const hasAbortableItems = selectedItems.some((item) => ABORTABLE_STATUSES.includes(item.objectStatus));
   // Check if any selected items can be claimed (pending HITL and not owned)
   const hasClaimableItems = selectedItems.some((item) => item.hitlTriggered && !item.hitlCompleted && !item.hitlReviewOwner);
-  // Check if any selected items can be released (HITL in progress and owned by someone)
-  const hasReleasableItems = selectedItems.some((item) => item.hitlReviewOwner && item.objectStatus === 'HITL_IN_PROGRESS');
+  // Check if any selected items can be released (has review owner and HITL not completed)
+  const hasReleasableItems = selectedItems.some((item) => item.hitlReviewOwner && !item.hitlCompleted);
 
   return (
     <TableHeader

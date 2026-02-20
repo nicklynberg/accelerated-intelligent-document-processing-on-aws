@@ -22,7 +22,6 @@ const JSONViewer = ({
   sectionData,
   onOpen,
   onClose,
-  onReviewComplete,
   disabled,
   isReadOnly = false,
   // Section navigation props
@@ -230,7 +229,6 @@ const JSONViewer = ({
             onSave={handleSave}
             isReadOnly={isReadOnly}
             sectionData={memoizedSectionData}
-            onReviewComplete={onReviewComplete}
             allSections={allSections}
             currentSectionIndex={currentSectionIndex}
             onNavigateToSection={onNavigateToSection}

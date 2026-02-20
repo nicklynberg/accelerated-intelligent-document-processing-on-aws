@@ -251,6 +251,14 @@ class EvaluationService:
         schema[X_AWS_IDP_DOCUMENT_TYPE] = document_class
         schema[X_AWS_IDP_EVALUATION_MATCH_THRESHOLD] = 0.8
 
+        # Normalize integer types to number to handle decimal values in extraction
+        # This prevents type mismatch errors when baseline has int but prediction has float
+        self._normalize_integer_to_number(schema)
+
+        # Normalize null types to string - genson produces "type": "null" for fields
+        # with null values in baseline data, which Stickler doesn't support
+        self._normalize_null_types(schema)
+
         # Add evaluation method extensions recursively
         self._add_evaluation_extensions_recursive(schema)
 
@@ -264,6 +272,78 @@ class EvaluationService:
         )
 
         return schema
+
+    def _normalize_null_types(self, schema: Dict[str, Any]) -> None:
+        """
+        Recursively convert 'null' types to 'string' in auto-generated schemas.
+
+        The genson library produces "type": "null" for fields where the baseline
+        data has a null/None value. Stickler's JsonSchemaFieldConverter only supports
+        ['string', 'number', 'integer', 'boolean'] and crashes on 'null'.
+
+        By converting to 'string', we allow the field to pass through and be
+        compared as an empty/missing value during evaluation.
+
+        For union types like ["string", "null"] or ["number", "null"], we keep
+        only the non-null type.
+
+        Args:
+            schema: Schema object to modify in-place
+        """
+        schema_type = schema.get("type")
+
+        if schema_type == "null":
+            schema["type"] = "string"
+        elif isinstance(schema_type, list):
+            # Handle union types from genson (e.g., ["string", "null"], ["number", "null"])
+            non_null = [t for t in schema_type if t != "null"]
+            if non_null:
+                # Use the first non-null type (e.g., "string" or "number")
+                schema["type"] = non_null[0] if len(non_null) == 1 else non_null
+            else:
+                # All types are null (shouldn't happen, but be safe)
+                schema["type"] = "string"
+
+        # Recursively process nested structures
+        if "properties" in schema:
+            for prop_schema in schema["properties"].values():
+                self._normalize_null_types(prop_schema)
+
+        if "items" in schema:
+            items = schema["items"]
+            if isinstance(items, dict):
+                self._normalize_null_types(items)
+
+    def _normalize_integer_to_number(self, schema: Dict[str, Any]) -> None:
+        """
+        Recursively convert 'integer' types to 'number' in auto-generated schemas.
+
+        This prevents Pydantic validation errors when the baseline data has an
+        integer value but the prediction has a float (e.g., baseline edited to 9999
+        but prediction is 2111.2). By using 'number' type instead of 'integer',
+        we allow both int and float values to pass validation.
+
+        Args:
+            schema: Schema object to modify in-place
+        """
+        schema_type = schema.get("type")
+
+        # Convert integer to number
+        if schema_type == "integer":
+            schema["type"] = "number"
+        elif isinstance(schema_type, list):
+            # Handle union types from genson (e.g., ["string", "integer"])
+            schema["type"] = ["number" if t == "integer" else t for t in schema_type]
+
+        # Recursively process nested structures
+        if "properties" in schema:
+            for prop_schema in schema["properties"].values():
+                self._normalize_integer_to_number(prop_schema)
+
+        if "items" in schema:
+            items = schema["items"]
+            if isinstance(items, dict):
+                self._normalize_integer_to_number(items)
 
     def _add_evaluation_extensions_recursive(self, schema: Dict[str, Any]) -> None:
         """
@@ -684,9 +764,9 @@ class EvaluationService:
                 conf_threshold = confidence_value.get("confidence_threshold")
                 return {
                     "confidence": float(confidence_value["confidence"]),
-                    "confidence_threshold": float(conf_threshold)
-                    if conf_threshold is not None
-                    else None,
+                    "confidence_threshold": (
+                        float(conf_threshold) if conf_threshold is not None else None
+                    ),
                 }
 
             return None
@@ -1008,12 +1088,14 @@ class EvaluationService:
                 evaluation_method=evaluation_method_value,
                 evaluation_threshold=field_threshold,
                 comparator_type=field_config.get("comparator"),
-                confidence=confidence_info.get("confidence")
-                if confidence_info
-                else None,
-                confidence_threshold=confidence_info.get("confidence_threshold")
-                if confidence_info
-                else None,
+                confidence=(
+                    confidence_info.get("confidence") if confidence_info else None
+                ),
+                confidence_threshold=(
+                    confidence_info.get("confidence_threshold")
+                    if confidence_info
+                    else None
+                ),
                 weight=field_config.get("weight"),  # Stickler field weight
                 field_comparison_details=detailed_comparisons,  # Nested field-by-field comparisons
             )
@@ -1233,14 +1315,32 @@ class EvaluationService:
                 or expected_type is float
             ):
                 if isinstance(value, str):
-                    # Try to convert string to number
+                    # Empty strings for numeric fields should be treated as missing (None)
+                    # This prevents Pydantic validation errors like:
+                    # "Input should be a valid number, unable to parse string as a number"
+                    if not value.strip():
+                        return None
+                    # Try to convert non-empty string to number
                     try:
-                        return float(value) if expected_type is float else int(value)
+                        return (
+                            float(value)
+                            if expected_type is float
+                            else int(float(value))
+                        )
                     except ValueError:
                         logger.warning(
                             f"Could not convert '{value}' to {expected_type} for field {field_name}"
                         )
-                        return value
+                        # Return None instead of original string to prevent Pydantic crash
+                        # The field will be treated as missing/empty during comparison
+                        return None
+                elif isinstance(value, float) and expected_type is int:
+                    # Coerce float to int when schema expects int
+                    # This handles cases where baseline has int but prediction has float
+                    return int(value)
+                elif isinstance(value, int) and expected_type is float:
+                    # Coerce int to float when schema expects float
+                    return float(value)
                 return value
 
             # Handle boolean
@@ -1376,6 +1476,12 @@ class EvaluationService:
             # This prevents Pydantic validation errors from type mismatches
             coerced_expected = self._coerce_data_to_schema(cleaned_expected, ModelClass)
             coerced_actual = self._coerce_data_to_schema(cleaned_actual, ModelClass)
+
+            # Remove None values introduced by coercion (e.g., empty strings converted to None
+            # for numeric fields). Without this second pass, Pydantic would reject None for
+            # required numeric fields in nested objects like LineItems[].LineItemRate.
+            coerced_expected = self._remove_none_values(coerced_expected)
+            coerced_actual = self._remove_none_values(coerced_actual)
 
             # Create model instances from coerced data
             # Stickler handles validation and structure

@@ -2,11 +2,24 @@
 // SPDX-License-Identifier: MIT-0
 
 // src/components/upload-document/UploadDocumentPanel.jsx
-import React, { useState } from 'react';
-import { Button, Container, Header, SpaceBetween, FormField, StatusIndicator, Alert, Input } from '@cloudscape-design/components';
+import React, { useState, useEffect } from 'react';
+import {
+  Button,
+  Container,
+  Header,
+  SpaceBetween,
+  FormField,
+  StatusIndicator,
+  Alert,
+  Input,
+  FileUpload,
+  Select,
+} from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 
 import uploadDocument from '../../graphql/queries/uploadDocument';
+
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
 
 import useSettingsContext from '../../contexts/settings';
 
@@ -14,11 +27,28 @@ const client = generateClient();
 
 const UploadDocumentPanel = () => {
   const { settings } = useSettingsContext();
+  const { versions, getVersionOptions } = useConfigurationVersions();
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState([]);
   const [error, setError] = useState(null);
   const [prefix, setPrefix] = useState('');
+  const [selectedVersion, setSelectedVersion] = useState(null);
+
+  // Set default to active version when versions are loaded
+  useEffect(() => {
+    if (versions.length > 0 && !selectedVersion) {
+      const activeVersion = versions.find((v) => v.isActive);
+      if (activeVersion) {
+        // Use the same logic as getVersionOptions to ensure consistency
+        const versionOptions = getVersionOptions();
+        const activeVersionOption = versionOptions.find((option) => option.value === activeVersion.versionName);
+        if (activeVersionOption) {
+          setSelectedVersion(activeVersionOption);
+        }
+      }
+    }
+  }, [versions, selectedVersion, getVersionOptions]);
 
   if (!settings.InputBucket) {
     return (
@@ -28,8 +58,8 @@ const UploadDocumentPanel = () => {
     );
   }
 
-  const handleFileChange = (e) => {
-    setSelectedFiles(Array.from(e.target.files));
+  const handleFileChange = (files) => {
+    setSelectedFiles(files);
     setUploadStatus([]);
     setError(null);
   };
@@ -68,6 +98,7 @@ const UploadDocumentPanel = () => {
               contentType: file.type,
               prefix: prefix || '', // Use the user-provided prefix or empty string
               bucket: settings.InputBucket, // Explicitly pass the input bucket
+              version: selectedVersion?.value, // Pass selected version (optional)
             },
           });
 
@@ -151,8 +182,36 @@ const UploadDocumentPanel = () => {
           <Input value={prefix} onChange={handlePrefixChange} placeholder="Leave empty for root folder" disabled={isUploading} />
         </FormField>
 
-        <FormField label="Select files to upload">
-          <input type="file" multiple onChange={handleFileChange} disabled={isUploading} />
+        <FormField label="Configuration Version" description="Select which configuration version to use for processing these documents">
+          <Select
+            selectedOption={selectedVersion}
+            onChange={({ detail }) => setSelectedVersion(detail.selectedOption)}
+            options={getVersionOptions()}
+            placeholder={versions.length === 0 ? 'Loading versions...' : 'Select configuration version'}
+            disabled={isUploading || versions.length === 0}
+            loadingText="Loading versions..."
+          />
+        </FormField>
+
+        <FormField label="Select files to upload" constraintText="Supported formats: PDF, PNG, JPEG, TIFF. Multiple files allowed.">
+          <FileUpload
+            onChange={({ detail }) => handleFileChange(detail.value)}
+            value={selectedFiles}
+            i18nStrings={{
+              uploadButtonText: (multiple) => (multiple ? 'Choose files' : 'Choose file'),
+              dropzoneText: (multiple) => (multiple ? 'Drop files to upload' : 'Drop file to upload'),
+              removeFileAriaLabel: (fileIndex) => `Remove file ${fileIndex + 1}`,
+              errorIconAriaLabel: 'Error',
+              warningIconAriaLabel: 'Warning',
+            }}
+            accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif"
+            multiple
+            showFileSize
+            showFileLastModified
+            showFileThumbnail
+            tokenLimit={10}
+            disabled={isUploading}
+          />
         </FormField>
 
         <Button variant="primary" onClick={uploadFiles} loading={isUploading} disabled={selectedFiles.length === 0 || isUploading}>

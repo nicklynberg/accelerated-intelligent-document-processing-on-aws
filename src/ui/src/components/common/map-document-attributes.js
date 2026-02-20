@@ -3,7 +3,7 @@
 
 import { getDocumentConfidenceAlertCount } from './confidence-alerts-utils';
 
-// Helper function to determine HITL status without nested ternaries
+// Helper function to determine Review Status without nested ternaries
 const getHitlStatus = (status) => {
   if (!status || status === 'N/A') {
     return 'N/A';
@@ -11,13 +11,11 @@ const getHitlStatus = (status) => {
   return status;
 };
 
-// Helper function to check if HITL is completed
+// Helper function to check if HITL is completed (includes skipped as review is done)
 const isHitlCompleted = (status) => {
   if (!status) return false;
   const statusLower = status.toLowerCase();
-  return (
-    statusLower === 'completed' || statusLower.includes('complete') || statusLower.includes('done') || statusLower.includes('finished')
-  );
+  return statusLower === 'completed' || statusLower === 'skipped' || statusLower.includes('complete') || statusLower.includes('skipped');
 };
 
 /* Maps document attributes from API to a format that can be used in tables and panel */
@@ -45,6 +43,7 @@ const mapDocumentsAttributes = (documents) => {
       ListSK: listSK,
       HITLStatus: hitlStatus,
       HITLReviewURL: hitlReviewURL,
+      ConfigVersion: configVersion,
     } = item;
 
     // Extract HITL sections arrays
@@ -53,6 +52,8 @@ const mapDocumentsAttributes = (documents) => {
     const hitlSectionsSkipped = item.HITLSectionsSkipped || [];
     const hitlReviewOwner = item.HITLReviewOwner || '';
     const hitlReviewOwnerEmail = item.HITLReviewOwnerEmail || '';
+    const hitlReviewedBy = item.HITLReviewedBy || '';
+    const hitlReviewedByEmail = item.HITLReviewedByEmail || '';
     // HITLReviewHistory comes as AWSJSON (string), parse if needed
     let hitlReviewHistory = item.HITLReviewHistory || [];
     if (typeof hitlReviewHistory === 'string') {
@@ -86,8 +87,8 @@ const mapDocumentsAttributes = (documents) => {
     // Calculate confidence alert count
     const confidenceAlertCount = getDocumentConfidenceAlertCount(sections);
 
-    // Extract HITL metadata - use original working logic
-    const hitlTriggered = hitlStatus && hitlStatus !== 'N/A';
+    // Extract HITL metadata - use HITLTriggered from backend, fallback to status check
+    const hitlTriggered = item.HITLTriggered === true || (hitlStatus && hitlStatus !== 'N/A');
     const hitlCompleted = isHitlCompleted(hitlStatus);
 
     // Create a unique ID combining PK and SK for proper row tracking
@@ -129,7 +130,10 @@ const mapDocumentsAttributes = (documents) => {
       hitlSectionsSkipped,
       hitlReviewOwner,
       hitlReviewOwnerEmail,
+      hitlReviewedBy,
+      hitlReviewedByEmail,
       hitlReviewHistory,
+      configVersion,
     };
 
     console.log('mapped-document-attributes', mapping);

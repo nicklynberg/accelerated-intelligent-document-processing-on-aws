@@ -5,6 +5,128 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.4.15]
+
+### Added
+
+- **Lambda Hook Inference (Custom LLM Integration)**
+  - Customers can provide their own custom Lambda function to integrate with any LLM — models hosted on SageMaker, ECS, EC2, or external APIs — by selecting `LambdaHook` as the model in any pipeline step
+  - **Per-Step Granularity**: Configure LambdaHook independently for OCR, Classification, Extraction, Assessment, and Summarization (Pattern-2)
+  - **Converse API-Compatible Contract**: Lambda receives the same Converse API payload structure used with Bedrock, and returns a Converse API-compatible response — documented request/response format for easy implementation
+  - **S3 Image References**: Inline image bytes automatically uploaded to S3 and replaced with `s3Location` references to avoid Lambda's 6MB payload limit
+  - **GENAIIDP- Naming Convention**: Lambda function names must start with `GENAIIDP-` for secure, scoped IAM permissions
+  - **Built-in Retry Logic**: Exponential backoff with jitter for transient errors (throttling, timeouts), matching Bedrock retry behavior
+  - **Metering Integration**: Token usage from Lambda response tracked in document metering data for cost calculations
+  - **Sample Functions**: Examples in `samples/lambda-hook-inference/` — Bedrock proxy (with customization points) and SageMaker endpoint hook, with SAM template
+  - **Documentation**: New [lambda-hook-inference.md](docs/lambda-hook-inference.md) with architecture diagram, configuration guide, payload contract, SageMaker example, IAM, and limitations
+
+- **Configuration Versioning System**
+  - Manage multiple named configuration versions as complete, self-contained snapshots
+  - **Version Management UI**: Configuration Versions table with create, compare, activate, delete, and import operations; version comparison with CSV/JSON export
+  - **Full Config Storage**: Each version stores the complete configuration; editing and saving a version persists the full config, making behavior predictable and debuggable
+  - **Active Version**: One version is marked active for new document processing; selectable when uploading documents, running tests, or reprocessing
+  - **Version Tracking**: Config version recorded per document (S3 metadata + DynamoDB) and displayed across Document List, Document Details, Test Studio results, and all exports
+  - **Unsaved Changes Protection**: Per-field unsaved change indicators (orange dots), info banner with "Discard changes" button, and browser navigation guards (`beforeunload` + SPA hash navigation)
+  - **CLI Integration**: `--config-version` parameter for `run-inference`, `config-download`, and `config-upload` commands with version validation before processing
+  - **Test Studio Integration**: Version selector in Test Runner, version tracking per test run, version displayed in Test Results and Test Comparison views
+  - **Legacy Support**: Existing sparse-delta configs auto-detected and seamlessly migrated to full format on first read
+  - **Stack Upgrade Independence**: Stack upgrades update only the `default` version; user versions are locked snapshots that users explicitly manage
+  - **Documentation**: New [configuration-versions.md](docs/configuration-versions.md) with comprehensive feature documentation
+  - **~200 lines of merge/delta/sync code removed**: Eliminated runtime merge logic, auto-sync on default updates, null-as-deletion semantics, and auto-cleanup of matching defaults
+
+- **Custom Date Range Selector for Document List and Test Executions** - [GitHub Issue #177](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/177)
+  - Added "Custom range..." option to the time period dropdown in both Document List and Test Studio → Test Results
+  - Users can now select absolute start/end dates to query historical documents beyond the previous 30-day limit
+  - **Scalable Server-Side Architecture**: Custom date ranges use a new `listDocumentsByDateRange` Lambda resolver that iterates shards server-side and batch-fetches documents, avoiding the client-side fan-out scalability issue
+  - **Existing Behavior Preserved**: Relative period presets (2h through 30d) continue using the proven client-side shard mechanism — zero changes to existing code paths
+  - **365-Day Maximum**: Date range capped at 365 days in the UI to prevent unbounded queries
+
+### Fixed
+
+- **Schema Builder Few-Shot Examples Input Focus Loss** - [GitHub Issue #174](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/174)
+  - Fixed cursor jumping out of input fields after each keystroke when editing few-shot examples in the Schema Builder
+
+
+- **Code Intelligence Agent - DeepWiki MCP Transport Migration**
+  - Fixed "client initialization failed" error when using Code Intelligence Agent in Agent Companion Chat
+  - **Root Cause**: DeepWiki deprecated their SSE transport endpoint (`/sse`) and now returns HTTP 410 Gone
+  - **Solution**: Migrated from SSE (`sse_client`) to Streamable HTTP (`streamablehttp_client`) transport using the new `/mcp` endpoint
+  - See DeepWiki documentation: https://docs.devin.ai/work-with-devin/deepwiki-mcp
+
+### Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.15.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.15.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.15.yaml`
+
+
+## [0.4.14]
+
+### Added
+
+- **Enhanced BDA to IDP Sync for Pattern-1**
+  - Separate "Sync from BDA" and "Sync to BDA" buttons in the UI for explicit directional control instead of bidirectional-only sync
+  - Parallel blueprint processing for improved sync performance on configurations with many document classes
+  - Orphaned blueprint cleanup automatically detects and removes BDA blueprints no longer defined in IDP configuration
+  - Warning notifications for skipped properties due to BDA limitations (nested arrays/objects), with guidance to flatten schemas using top-level `$defs`
+  - AWS standard blueprint filtering prevents unintended modifications to AWS-managed blueprints
+
+- **Human-in-the-Loop (HITL) Review Workflow Improvements**
+  - **Review Ownership Model**: Reviewers must now claim documents using "Start Review" before editing, preventing concurrent edits
+  - **Review In Progress Status**: New status displayed when a reviewer has claimed a document
+  - **Filtered Document List for Reviewers**: Reviewers now see only documents pending review or their own in-progress reviews
+  - **Admin Skip All Reviews**: Admins can skip all remaining section reviews without triggering document reprocessing
+  - **Release Review**: Reviewers can release claimed documents back to pending status; Admins can release any review
+  - **Review Completed By Field**: New column showing who completed or skipped the review (renamed from "Reviewed By")
+
+- **Pattern-1 Edit Mode with Data-Only Editing and Reprocessing**
+  - Added Edit Mode capability for Pattern-1 (BDA) stacks, enabling users to edit extraction data without modifying section structure
+  - **Data-Only Editing**: Click "Edit Mode" then use "Edit Data" buttons on each section to open the Visual Editor for modifying predictions and ground truth
+  - **Reprocessing Without BDA**: "Save and Reprocess" triggers evaluation and summarization steps without re-invoking Bedrock Data Automation (BDA)
+  - **Section Structure Protection**: Section structure (IDs, classes, page assignments) remains read-only as managed by BDA blueprints
+  - **Skip Logic Implementation**: State machine automatically detects existing pages/sections data and bypasses BDA invocation for reprocessing scenarios
+  - **Use Cases**: Correct extraction errors, add baseline data for evaluation comparison, re-run evaluation after data corrections, update document summaries
+
+### Changed
+
+- **HITL Decoupled from Step Functions**: HITL review operations now update document status directly in DynamoDB without triggering workflow reprocessing, improving reliability and reducing unintended side effects
+
+- **Renamed TestSet from RVL-CDIP-N-MP to DocSplit-Poly-Seq**
+  - Updated Test Studio test set name to better reflect its purpose as a document splitting and classification benchmark
+  - The underlying HuggingFace dataset source (`jordyvl/rvl_cdip_n_mp`) remains unchanged
+
+- **Review Status Labels**: Renamed status values for consistency:
+  - "Pending Review" → "Review Pending"
+  - "Reviewed By" column → "Review Completed By"
+
+### Fixed
+
+- **HITL Decimal Serialization Error**: Fixed "Object of type Decimal is not JSON serializable" error when performing HITL operations (Start Review, Release Review, Skip All Reviews) by properly converting DynamoDB Decimal types
+
+- **HITL Operations Clearing Estimated Cost**: Fixed issue where Start Review and Release Review operations were inadvertently clearing the Metering/Estimated Cost data by re-serializing the entire document; operations now update only HITL-specific fields
+
+- **Pattern-1 Page/Section Number Alignment with Pattern-2 and Ground Truth**
+  - Fixed page and section numbering mismatch between Pattern-1 (BDA) and Pattern-2 that caused evaluation failures when using shared test sets
+  - **Root Cause**: BDA outputs 0-based indices while Pattern-2 and ground truth test sets use 1-based page IDs
+  - **Solution**: Pattern-1 postprocessing now transforms S3 paths and Document model IDs to 1-based (`pages/1/`, `sections/1/`, `page_ids: ["1", "2"]`) while preserving 0-based `page_indices` arrays in result.json for internal consistency
+  - **Key Distinction**: `page_indices` (array indices) remain 0-based, `page_id`/`section_id` (identifiers) are now 1-based
+  - Both patterns now align correctly for evaluation with shared test sets and ground truth data
+
+- **TIFF Image Format Support for Bedrock-Compatible Processing**
+  - Fixed classification failure when processing TIFF image files ("Unsupported image format: TIFF")
+  - OCR step now converts non-Bedrock-compatible formats (TIFF, BMP) to JPEG during page image extraction
+  - Multi-page TIFF files handled like PDFs - each page becomes a separate document page
+
+- **Discovery Feature Overwriting Existing Classes During Class Discovery**
+  - Fixed issue where using Discovery to discover a new document type would delete all existing classes from the configuration
+  - **Root Cause**: Custom config `classes` array was replacing Default `classes` array during runtime merge, causing loss of existing classes
+  - **Solution**: Discovery now reads both Default and Custom classes, merges them with the newly discovered class, and saves the complete merged list to Custom config
+  - Ensures discovered classes are additive to existing configuration rather than replacing it
+
+### Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.4.14.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.4.14.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.4.14.yaml`
+
 ## [0.4.13]
 
 ### Added
@@ -185,7 +307,7 @@ SPDX-License-Identifier: MIT-0
     - Mark Section Review Complete to approve individual sections
     - Skip All Reviews (Admin only) to bypass pending reviews and continue workflow
     - Release Review to unlock document for other reviewers
-  - **Real-time Status Updates**: HITL Status, Review Status, Review Owner, and Reviewed By fields update in real-time across all user sessions via GraphQL subscriptions
+  - **Real-time Status Updates**: Review Status, Review Status, Review Owner, and Reviewed By fields update in real-time across all user sessions via GraphQL subscriptions
   - See [Human-in-the-Loop Review Documentation](./docs/human-review.md) for detailed workflow information
   - **Note**: These are Phase 1 of HITL process updates. In upcoming phases, we are working to deliver futher improvements to human review capabilities with the ability to update document classification, extraction, and resubmit for incremental processing as part of a holistic approach to huiman reviews.
 - **User Management**
@@ -193,7 +315,7 @@ SPDX-License-Identifier: MIT-0
   - Cognito user groups (Admin, Reviewer) for role-based access control
   - Automatic user synchronization with Cognito
 
-- **RVL-CDIP-N-MP-Packets Test Set Auto-Deployment**
+- **DocSplit-Poly-Seq Test Set Auto-Deployment**
   - Automatically deploys 500 multi-page packet PDFs from HuggingFace dataset (https://huggingface.co/datasets/jordyvl/rvl_cdip_n_mp) during stack deployment
   - **13 Document Types**: invoice, email, form, letter, memo, resume, budget, news article, scientific publication, specification, questionnaire, handwritten, and language (non-English) documents
   - **Multi-Document Packets**: Each of 500 packets contains 2-10 distinct subdocuments of different types for comprehensive splitting and classification testing

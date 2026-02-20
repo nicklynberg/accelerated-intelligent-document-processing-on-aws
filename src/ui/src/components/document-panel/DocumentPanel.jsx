@@ -15,6 +15,8 @@ import {
   StatusIndicator,
 } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
+import useConfigurationVersions from '../../hooks/use-configuration-versions';
+import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import './DocumentPanel.css';
 import DocumentViewers from '../document-viewers/DocumentViewers';
@@ -352,10 +354,10 @@ const MeteringExpandableSection = ({ meteringData, documentItem }) => {
   );
 };
 
-const DocumentAttributes = ({ item }) => {
+const DocumentAttributes = ({ item, versions }) => {
   return (
     <Container>
-      <ColumnLayout columns={7} variant="text-grid">
+      <ColumnLayout columns={8} variant="text-grid">
         <SpaceBetween size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
@@ -404,6 +406,15 @@ const DocumentAttributes = ({ item }) => {
         <SpaceBetween size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
+              <strong>Config Version</strong>
+            </Box>
+            <div>{formatConfigVersionLink(item.configVersion, versions)}</div>
+          </div>
+        </SpaceBetween>
+
+        <SpaceBetween size="xs">
+          <div>
+            <Box margin={{ bottom: 'xxxs' }} color="text-label">
               <strong>Page Count</strong>
             </Box>
             <div>{item.pageCount || 0}</div>
@@ -422,7 +433,7 @@ const DocumentAttributes = ({ item }) => {
         <SpaceBetween size="xs">
           <div>
             <Box margin={{ bottom: 'xxxs' }} color="text-label">
-              <strong>HITL Status</strong>
+              <strong>Review Status</strong>
             </Box>
             <div>{renderHitlStatus(item)}</div>
           </div>
@@ -434,6 +445,15 @@ const DocumentAttributes = ({ item }) => {
               <strong>Review Owner</strong>
             </Box>
             <div>{item.hitlReviewOwnerEmail || item.hitlReviewOwner || '-'}</div>
+          </div>
+        </SpaceBetween>
+
+        <SpaceBetween size="xs">
+          <div>
+            <Box margin={{ bottom: 'xxxs' }} color="text-label">
+              <strong>Review Completed By</strong>
+            </Box>
+            <div>{item.hitlReviewedByEmail || item.hitlReviewedBy || '-'}</div>
           </div>
         </SpaceBetween>
 
@@ -474,6 +494,7 @@ const ABORTABLE_STATUSES = [
 ];
 
 export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, onDelete, onReprocess, onAbort }) => {
+  const { versions } = useConfigurationVersions();
   logger.debug('DocumentPanel item', item);
 
   // State for Step Function flow viewer
@@ -501,8 +522,11 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
 
   // Check if Start Review button should be shown
   const hasReviewOwner = localItem?.hitlReviewOwner || localItem?.hitlReviewOwnerEmail;
-  const hitlTriggered = localItem?.hitlTriggered && !localItem?.hitlCompleted;
-  const showStartReview = isReviewer && hitlTriggered && !hasReviewOwner;
+  const hitlStatusLower = localItem?.hitlStatus?.toLowerCase().replace(/\s+/g, '') || '';
+  const isHitlSkipped = hitlStatusLower === 'skipped' || hitlStatusLower === 'reviewskipped';
+  const isHitlCompleted = hitlStatusLower === 'completed' || hitlStatusLower === 'reviewcompleted';
+  const hasPendingHITL = localItem?.hitlTriggered && !isHitlCompleted && !isHitlSkipped;
+  const showStartReview = isReviewer && hasPendingHITL && !hasReviewOwner;
 
   // Handle Start Review button click
   const handleStartReview = async () => {
@@ -607,7 +631,12 @@ export const DocumentPanel = ({ item, setToolsOpen, getDocumentDetailsFromIds, o
         }
       >
         <SpaceBetween size="l">
-          <DocumentAttributes item={enhancedItem} setToolsOpen={setToolsOpen} getDocumentDetailsFromIds={getDocumentDetailsFromIds} />
+          <DocumentAttributes
+            item={enhancedItem}
+            versions={versions}
+            setToolsOpen={setToolsOpen}
+            getDocumentDetailsFromIds={getDocumentDetailsFromIds}
+          />
 
           {localItem.metering && (
             <div>
