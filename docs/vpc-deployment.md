@@ -22,40 +22,41 @@ You need an existing VPC with:
 
 ### Required VPC Endpoints
 
-#### Gateway Endpoints
+> **GovCloud note:** Only Pattern 2 (Textract + Bedrock) is supported in GovCloud. Pattern 1 requires Bedrock Data Automation which is not available in GovCloud regions, and Pattern 3 requires SageMaker hosting which has limited GovCloud support. All endpoints listed below are available in `us-gov-west-1`.
+
+#### Gateway Endpoints (no additional cost)
 - **S3**: `com.amazonaws.region.s3`
 - **DynamoDB**: `com.amazonaws.region.dynamodb`
 
 #### Interface Endpoints (All Patterns)
-- **Lambda**: `com.amazonaws.region.lambda`
-- **STS**: `com.amazonaws.region.sts`
-- **SQS**: `com.amazonaws.region.sqs`
-- **Step Functions**: `com.amazonaws.region.states`
-- **KMS**: `com.amazonaws.region.kms`
-- **CloudWatch Logs**: `com.amazonaws.region.logs`
-- **CloudWatch Monitoring**: `com.amazonaws.region.monitoring`
-- **SNS**: `com.amazonaws.region.sns`
-- **EventBridge**: `com.amazonaws.region.events`
-- **ECR API**: `com.amazonaws.region.ecr.api`
-- **ECR DKR**: `com.amazonaws.region.ecr.dkr`
-- **CodeBuild**: `com.amazonaws.region.codebuild`
-- **Secrets Manager**: `com.amazonaws.region.secretsmanager`
-- **SSM**: `com.amazonaws.region.ssm`
-- **Bedrock Runtime**: `com.amazonaws.region.bedrock-runtime`
-- **Bedrock**: `com.amazonaws.region.bedrock`
-- **Athena**: `com.amazonaws.region.athena`
-- **Glue**: `com.amazonaws.region.glue`
+- **SQS**: `com.amazonaws.region.sqs` — queue processing
+- **Step Functions**: `com.amazonaws.region.states` — workflow orchestration
+- **Lambda**: `com.amazonaws.region.lambda` — cross-function invocation
+- **CloudWatch Logs**: `com.amazonaws.region.logs` — runtime logging (all functions)
+- **CloudWatch Monitoring**: `com.amazonaws.region.monitoring` — metrics publishing
+- **KMS**: `com.amazonaws.region.kms` — encryption/decryption
+- **SSM**: `com.amazonaws.region.ssm` — Parameter Store lookups
+- **STS**: `com.amazonaws.region.sts` — role assumption
+- **Bedrock Runtime**: `com.amazonaws.region.bedrock-runtime` — classification, extraction, assessment, summarization, evaluation, rule validation
+- **EventBridge**: `com.amazonaws.region.events` — workflow event routing
+- **CodeBuild**: `com.amazonaws.region.codebuild` — Docker image builds
+- **ECR API**: `com.amazonaws.region.ecr.api` — container registry
+- **ECR Docker**: `com.amazonaws.region.ecr.dkr` — container image pulls
+- **Glue**: `com.amazonaws.region.glue` — reporting catalog
 
 #### Pattern 1 Additional Endpoints
 - **BDA Runtime**: `com.amazonaws.region.bedrock-data-automation-runtime`
 - **BDA**: `com.amazonaws.region.bedrock-data-automation`
 
 #### Pattern 2 Additional Endpoints
-- **Textract**: `com.amazonaws.region.textract`
+- **Textract**: `com.amazonaws.region.textract` — OCR processing
 
 #### Pattern 3 Additional Endpoints
-- **Textract**: `com.amazonaws.region.textract`
-- **SageMaker Runtime**: `com.amazonaws.region.sagemaker.runtime`
+- **Textract**: `com.amazonaws.region.textract` — OCR processing
+- **SageMaker Runtime**: `com.amazonaws.region.sagemaker.runtime` — custom classification model inference
+
+#### API Package Endpoints (GovCloud Deployment Options B and C)
+- **Execute API**: `com.amazonaws.region.execute-api` — private API Gateway access
 
 ### Security Group Requirements
 
@@ -106,7 +107,7 @@ The script skips endpoints that already exist and reports a summary of created/s
 1. Deploy the stack using the standard deployment method
 2. In the **Parameters** section, provide the VPC configuration:
    - **VpcId**: Your VPC ID (e.g., `vpc-12345678`)
-   - **LambdaSecurityGroupId**: Security group ID for Lambda functions (e.g., `sg-12345678`)
+   - **LambdaSecurityGroupId**: Security group for VPC-enabled Lambda functions and CodeBuild projects (e.g., `sg-12345678`)
    - **PrivateSubnetIds**: Comma-separated list of private subnet IDs (e.g., `subnet-12345678,subnet-87654321`)
 
 ### Using AWS CLI
