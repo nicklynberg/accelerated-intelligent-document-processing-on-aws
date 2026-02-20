@@ -22,7 +22,23 @@ You need an existing VPC with:
 - Security group allowing HTTPS outbound traffic (port 443)
 - VPC endpoints for required AWS services (see below)
 
-> **Why a NAT Gateway?** CodeBuild runs inside the VPC to build Docker images and needs internet access to pull base images from Docker Hub and dependencies from PyPI. The NAT Gateway provides outbound internet access from private subnets without exposing inbound access. A single NAT Gateway in one public subnet is sufficient — all private subnets can route through it.
+> **Why a NAT Gateway?** CodeBuild runs inside the VPC to build Docker images and needs internet access to pull base images and Python dependencies. The NAT Gateway provides outbound internet access from private subnets without exposing inbound access. A single NAT Gateway in one public subnet is sufficient — all private subnets can route through it.
+
+#### Environments Without Internet Access
+
+This solution assumes a NAT Gateway with an Internet Gateway is available. If your environment does not permit outbound internet access (e.g. air-gapped or fully isolated VPCs), the following external dependencies must be available from a private registry:
+
+**Container images** — referenced in `Dockerfile.optimized` (project root):
+- `ghcr.io/astral-sh/uv:0.9.6` — uv package manager
+- `public.ecr.aws/lambda/python:3.12-arm64` — AWS Lambda Python base image
+
+**BuildKit image** — pulled implicitly by `docker buildx create` in `patterns/pattern-2/buildspec.yml`:
+- `moby/buildkit:buildx-stable-1`
+
+**Python packages** — installed via `uv pip install` during the Docker build:
+- All packages listed in each function's `requirements.txt`
+
+To use a private registry, update the `FROM` lines in `Dockerfile.optimized` to point to your internal mirror and configure `patterns/pattern-2/buildspec.yml` to reference your private BuildKit image and Python package index.
 
 ### Required VPC Endpoints
 
