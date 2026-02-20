@@ -112,11 +112,11 @@ class BatchProcessor:
         # Use batch_prefix if provided (CLI compatibility)
         if batch_prefix is not None:
             output_prefix = batch_prefix
-        
+
         # Store config_path for later use
         if config_path is not None:
             self.config_path = config_path
-        
+
         if manifest_path:
             return self._process_from_manifest(
                 manifest_path, output_prefix, batch_id, number_of_files, config_version
