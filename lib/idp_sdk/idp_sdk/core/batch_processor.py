@@ -87,6 +87,8 @@ class BatchProcessor:
         batch_id: Optional[str] = None,
         number_of_files: Optional[int] = None,
         config_version: Optional[str] = None,
+        config_path: Optional[str] = None,
+        batch_prefix: Optional[str] = None,
     ) -> Dict:
         """
         Universal entry point for batch processing - routes to appropriate method
@@ -101,10 +103,20 @@ class BatchProcessor:
             batch_id: Optional custom batch ID (auto-generated if not provided)
             number_of_files: Limit number of files to process
             config_version: Configuration version to use
+            config_path: Optional path to configuration YAML file
+            batch_prefix: Alias for output_prefix (for CLI compatibility)
 
         Returns:
             Dictionary with batch processing results
         """
+        # Use batch_prefix if provided (CLI compatibility)
+        if batch_prefix is not None:
+            output_prefix = batch_prefix
+        
+        # Store config_path for later use
+        if config_path is not None:
+            self.config_path = config_path
+        
         if manifest_path:
             return self._process_from_manifest(
                 manifest_path, output_prefix, batch_id, number_of_files, config_version
