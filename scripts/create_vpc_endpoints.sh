@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Creates all VPC endpoints required for GenAI IDP VPC-only deployment.
-# Usage: ./create_vpc_endpoints.sh --vpc-id vpc-xxx --subnet-ids subnet-a,subnet-b --security-group-id sg-xxx [--region us-east-1] [--pattern 1|2|3]
+# Creates all VPC endpoints required for GenAI IDP VPC-only deployment (Pattern 2).
+# Usage: ./create_vpc_endpoints.sh --vpc-id vpc-xxx --subnet-ids subnet-a,subnet-b --security-group-id sg-xxx --region us-gov-west-1
 set -euo pipefail
 
 usage() {
@@ -12,7 +12,6 @@ Required:
   --subnet-ids          Comma-separated private subnet IDs
   --security-group-id   Security group ID (must allow inbound 443 from VPC CIDR)
   --region              AWS region
-  --pattern             Pattern number(s) to deploy: 1, 2, 3, or comma-separated (default: all)
   --dry-run             Print commands without executing
   --help                Show this help
 EOF
@@ -20,14 +19,13 @@ EOF
 }
 
 # Parse args
-VPC_ID="" SUBNET_IDS="" SG_ID="" REGION="" PATTERNS="1,2,3" DRY_RUN=false
+VPC_ID="" SUBNET_IDS="" SG_ID="" REGION="" DRY_RUN=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     --vpc-id)           VPC_ID="$2"; shift 2;;
     --subnet-ids)       SUBNET_IDS="$2"; shift 2;;
     --security-group-id) SG_ID="$2"; shift 2;;
     --region)           REGION="$2"; shift 2;;
-    --pattern)          PATTERNS="$2"; shift 2;;
     --dry-run)          DRY_RUN=true; shift;;
     --help)             usage;;
     *)                  echo "Unknown option: $1"; usage;;
@@ -42,58 +40,26 @@ GATEWAY_ENDPOINTS=(
   "dynamodb"
 )
 
-# Core interface endpoints (all patterns)
+# Interface endpoints for Pattern 2 (Textract + Bedrock)
 INTERFACE_ENDPOINTS=(
-  "lambda"
-  "sts"
   "sqs"
   "states"
-  "kms"
+  "lambda"
   "logs"
   "monitoring"
-  "sns"
+  "kms"
+  "ssm"
+  "sts"
+  "bedrock-runtime"
+  "textract"
   "events"
+  "codebuild"
   "ecr.api"
   "ecr.dkr"
-  "codebuild"
-  "secretsmanager"
-  "ssm"
-  "bedrock-runtime"
-  "bedrock"
-  "athena"
   "glue"
 )
 
-# Pattern-specific endpoints
-PATTERN1_ENDPOINTS=(
-  "bedrock-data-automation-runtime"
-  "bedrock-data-automation"
-)
-
-PATTERN2_ENDPOINTS=(
-  "textract"
-)
-
-PATTERN3_ENDPOINTS=(
-  "textract"
-  "sagemaker.runtime"
-)
-
-# Build final endpoint list based on selected patterns
-EXTRA_ENDPOINTS=()
-IFS=',' read -ra PAT_ARRAY <<< "$PATTERNS"
-for p in "${PAT_ARRAY[@]}"; do
-  case "$p" in
-    1) EXTRA_ENDPOINTS+=("${PATTERN1_ENDPOINTS[@]}");;
-    2) EXTRA_ENDPOINTS+=("${PATTERN2_ENDPOINTS[@]}");;
-    3) EXTRA_ENDPOINTS+=("${PATTERN3_ENDPOINTS[@]}");;
-    *) echo "Warning: Unknown pattern $p, skipping";;
-  esac
-done
-
-# Deduplicate extras
-EXTRA_UNIQUE=($(printf '%s\n' "${EXTRA_ENDPOINTS[@]}" | sort -u))
-ALL_INTERFACE=("${INTERFACE_ENDPOINTS[@]}" "${EXTRA_UNIQUE[@]}")
+ALL_INTERFACE=("${INTERFACE_ENDPOINTS[@]}")
 
 # Get existing endpoints to skip duplicates
 echo "Checking existing VPC endpoints in $VPC_ID..."

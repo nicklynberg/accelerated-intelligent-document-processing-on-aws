@@ -6,7 +6,7 @@ This guide covers deploying the GenAI IDP solution in a VPC-secured environment 
 
 VPC-secured deployment mode enables the GenAI IDP solution to run within your private network infrastructure, providing:
 
-- Network isolation for Lambda functions and SageMaker endpoints
+- Network isolation for Lambda functions
 - Private communication between AWS services through VPC endpoints
 - Enhanced security through security group controls
 - Compliance with organizational network security requirements
@@ -17,18 +17,22 @@ VPC-secured deployment mode enables the GenAI IDP solution to run within your pr
 
 You need an existing VPC with:
 - Private subnets (minimum 2 for high availability)
+- At least one public subnet with an Internet Gateway route
+- A NAT Gateway in the public subnet, with `0.0.0.0/0` routes in all private subnet route tables pointing to it
 - Security group allowing HTTPS outbound traffic (port 443)
 - VPC endpoints for required AWS services (see below)
 
+> **Why a NAT Gateway?** CodeBuild runs inside the VPC to build Docker images and needs internet access to pull base images from Docker Hub and dependencies from PyPI. The NAT Gateway provides outbound internet access from private subnets without exposing inbound access. A single NAT Gateway in one public subnet is sufficient — all private subnets can route through it.
+
 ### Required VPC Endpoints
 
-> **GovCloud note:** Only Pattern 2 (Textract + Bedrock) is supported in GovCloud. Pattern 1 requires Bedrock Data Automation which is not available in GovCloud regions, and Pattern 3 requires SageMaker hosting which has limited GovCloud support. All endpoints listed below are available in `us-gov-west-1`.
+> **Note:** VPC-only deployment is currently supported for Pattern 2 (Textract + Bedrock) only.
 
 #### Gateway Endpoints (no additional cost)
 - **S3**: `com.amazonaws.region.s3`
 - **DynamoDB**: `com.amazonaws.region.dynamodb`
 
-#### Interface Endpoints (All Patterns)
+#### Interface Endpoints
 - **SQS**: `com.amazonaws.region.sqs` — queue processing
 - **Step Functions**: `com.amazonaws.region.states` — workflow orchestration
 - **Lambda**: `com.amazonaws.region.lambda` — cross-function invocation
@@ -38,22 +42,12 @@ You need an existing VPC with:
 - **SSM**: `com.amazonaws.region.ssm` — Parameter Store lookups
 - **STS**: `com.amazonaws.region.sts` — role assumption
 - **Bedrock Runtime**: `com.amazonaws.region.bedrock-runtime` — classification, extraction, assessment, summarization, evaluation, rule validation
+- **Textract**: `com.amazonaws.region.textract` — OCR processing
 - **EventBridge**: `com.amazonaws.region.events` — workflow event routing
 - **CodeBuild**: `com.amazonaws.region.codebuild` — Docker image builds
 - **ECR API**: `com.amazonaws.region.ecr.api` — container registry
 - **ECR Docker**: `com.amazonaws.region.ecr.dkr` — container image pulls
 - **Glue**: `com.amazonaws.region.glue` — reporting catalog
-
-#### Pattern 1 Additional Endpoints
-- **BDA Runtime**: `com.amazonaws.region.bedrock-data-automation-runtime`
-- **BDA**: `com.amazonaws.region.bedrock-data-automation`
-
-#### Pattern 2 Additional Endpoints
-- **Textract**: `com.amazonaws.region.textract` — OCR processing
-
-#### Pattern 3 Additional Endpoints
-- **Textract**: `com.amazonaws.region.textract` — OCR processing
-- **SageMaker Runtime**: `com.amazonaws.region.sagemaker.runtime` — custom classification model inference
 
 #### API Package Endpoints (GovCloud Deployment Options B and C)
 - **Execute API**: `com.amazonaws.region.execute-api` — private API Gateway access
@@ -74,27 +68,18 @@ Create a security group with the following rules:
 Use the provided script to create all required VPC endpoints:
 
 ```bash
-# All patterns
 ./scripts/create_vpc_endpoints.sh \
   --vpc-id vpc-12345678 \
   --subnet-ids subnet-aaa,subnet-bbb \
   --security-group-id sg-12345678 \
-  --region us-east-1
-
-# Specific pattern(s) only
-./scripts/create_vpc_endpoints.sh \
-  --vpc-id vpc-12345678 \
-  --subnet-ids subnet-aaa,subnet-bbb \
-  --security-group-id sg-12345678 \
-  --region us-east-1 \
-  --pattern 1,2
+  --region us-gov-west-1
 
 # Preview without creating
 ./scripts/create_vpc_endpoints.sh \
   --vpc-id vpc-12345678 \
   --subnet-ids subnet-aaa,subnet-bbb \
   --security-group-id sg-12345678 \
-  --region us-east-1 \
+  --region us-gov-west-1 \
   --dry-run
 ```
 
@@ -141,8 +126,7 @@ idp-cli deploy \
 After deployment, verify VPC configuration:
 
 1. **Lambda Functions**: Check that functions are deployed in the specified VPC and subnets
-2. **SageMaker Endpoint**: Verify the endpoint is configured with VPC settings (Pattern 3 only)
-3. **Network Connectivity**: Test document processing to ensure all services can communicate through VPC endpoints
+2. **Network Connectivity**: Test document processing to ensure all services can communicate through VPC endpoints
 
 ## Troubleshooting
 
@@ -155,14 +139,6 @@ After deployment, verify VPC configuration:
 - Verify all required VPC endpoints are created and accessible
 - Check security group rules allow HTTPS outbound traffic
 - Ensure DNS resolution is working in the VPC
-
-#### SageMaker Endpoint Connection Issues (Pattern 3)
-**Symptoms**: Classification function cannot invoke SageMaker endpoint
-**Cause**: SageMaker endpoint not accessible from Lambda VPC
-**Solution**:
-- Verify SageMaker Runtime VPC endpoint exists
-- Check security group allows communication between Lambda and SageMaker
-- Ensure subnets have proper routing to VPC endpoints
 
 #### ECR Image Pull Failures
 **Symptoms**: Lambda functions fail to start with image pull errors

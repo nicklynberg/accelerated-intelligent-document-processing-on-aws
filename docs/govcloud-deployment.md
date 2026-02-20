@@ -26,7 +26,7 @@ The GovCloud template supports three deployment configurations. Choose the one t
 ### What Gets Deployed in Each Package
 
 **Vanilla (all packages include this):**
-- Core document processing engine (all 3 patterns)
+- Core document processing engine (Pattern 2 only in GovCloud)
 - Step Functions workflows
 - S3 buckets, DynamoDB tables, SQS queues, EventBridge rules
 - CloudWatch dashboards, alarms, SNS notifications

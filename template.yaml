@@ -1611,9 +1611,6 @@ Resources:
         ConfigLibraryHash: "<CONFIG_LIBRARY_HASH_TOKEN>"
         EnableXRayTracing: !Ref EnableXRayTracing
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
-        VpcId: !Ref VpcId
-        LambdaSecurityGroupId: !Ref LambdaSecurityGroupId
-        PrivateSubnetIds: !Join [",", !Ref PrivateSubnetIds]
         ReportingBucket: !If
           - ShouldCreateReportingBucket
           - !Ref ReportingBucket
@@ -1729,9 +1726,6 @@ Resources:
         ConfigLibraryHash: "<CONFIG_LIBRARY_HASH_TOKEN>"
         EnableXRayTracing: !Ref EnableXRayTracing
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
-        VpcId: !Ref VpcId
-        LambdaSecurityGroupId: !Ref LambdaSecurityGroupId
-        PrivateSubnetIds: !Join [",", !Ref PrivateSubnetIds]
         ReportingBucket: !If
           - ShouldCreateReportingBucket
           - !Ref ReportingBucket
