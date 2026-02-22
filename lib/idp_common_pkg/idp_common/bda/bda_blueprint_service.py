@@ -1816,6 +1816,60 @@ class BdaBlueprintService:
             logger.error(f"Error processing blueprint creation: {e}", exc_info=True)
             raise Exception(f"Failed to process blueprint creation: {str(e)}")
 
+    def delete_project(self, project_arn: str) -> bool:
+        """
+        Delete a BDA project and clean up its tracking entry in DynamoDB.
+
+        This is used when deleting a config version that has a linked BDA project.
+        It deletes the BDA project from AWS and removes the DynamoDB tracking entry.
+
+        Args:
+            project_arn: The ARN of the BDA project to delete
+
+        Returns:
+            True if deletion was successful, False otherwise
+        """
+        import boto3
+
+        try:
+            logger.info(f"Deleting BDA project: {project_arn}")
+
+            # Delete the BDA project from AWS
+            self.blueprint_creator.bedrock_client.delete_data_automation_project(
+                projectArn=project_arn
+            )
+            logger.info(f"Successfully deleted BDA project from AWS: {project_arn}")
+
+            # Clean up DynamoDB tracking entry
+            configuration_table_name = os.environ.get("CONFIGURATION_TABLE_NAME")
+            if configuration_table_name:
+                try:
+                    dynamodb = boto3.resource("dynamodb")
+                    table = dynamodb.Table(configuration_table_name)
+                    # Find and delete BdaProject# entries that reference this ARN
+                    response = table.scan(
+                        FilterExpression="begins_with(Configuration, :prefix)",
+                        ExpressionAttributeValues={":prefix": "BdaProject#"},
+                    )
+                    for item in response.get("Items", []):
+                        if item.get("ProjectArn") == project_arn:
+                            table.delete_item(
+                                Key={"Configuration": item["Configuration"]}
+                            )
+                            logger.info(
+                                f"Deleted DynamoDB tracking entry: {item['Configuration']}"
+                            )
+                except Exception as db_e:
+                    logger.warning(
+                        f"Failed to clean up DynamoDB tracking for {project_arn}: {db_e}"
+                    )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to delete BDA project {project_arn}: {e}")
+            return False
+
     def cleanup_orphaned_blueprints(self, version: str) -> dict:
         """
         Delete all BDA blueprints with the stack prefix that are NOT in current IDP config.

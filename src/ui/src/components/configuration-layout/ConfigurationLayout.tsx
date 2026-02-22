@@ -2121,7 +2121,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 <Button variant="normal" onClick={() => fetchConfiguration(currentVersionName)} loading={refreshing} iconName="refresh">
                   Refresh
                 </Button>
-                {isPattern1 && (
+                {(isPattern1 || mergedConfig?.use_bda) && (
                   <>
                     <Button variant="normal" onClick={() => handleSyncBdaIdp('bda_to_idp')} loading={syncingDirection === 'bda_to_idp'}>
                       Sync from BDA
