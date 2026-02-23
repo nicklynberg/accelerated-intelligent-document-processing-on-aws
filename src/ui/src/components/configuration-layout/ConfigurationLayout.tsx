@@ -461,6 +461,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
   // BDA project selection modal state
   const [bdaSyncMode, setBdaSyncMode] = useState<string>('create'); // 'create' or 'existing'
   const [bdaProjectArnInput, setBdaProjectArnInput] = useState('');
+  const [showSyncFromBdaModal, setShowSyncFromBdaModal] = useState(false);
+  const [syncFromBdaArnInput, setSyncFromBdaArnInput] = useState('');
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editorRef = useRef<any>(null);
@@ -2135,7 +2137,18 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 </Button>
                 {(isPattern1 || mergedConfig?.use_bda) && (
                   <>
-                    <Button variant="normal" onClick={() => handleSyncBdaIdp('bda_to_idp')} loading={syncingDirection === 'bda_to_idp'}>
+                    <Button
+                      variant="normal"
+                      onClick={() => {
+                        if (currentVersion?.bdaProjectArn) {
+                          handleSyncBdaIdp('bda_to_idp');
+                        } else {
+                          setSyncFromBdaArnInput('');
+                          setShowSyncFromBdaModal(true);
+                        }
+                      }}
+                      loading={syncingDirection === 'bda_to_idp'}
+                    >
                       Sync from BDA
                     </Button>
                     <Button variant="normal" onClick={() => setShowSyncToBdaConfirmModal(true)} loading={syncingDirection === 'idp_to_bda'}>
@@ -2269,8 +2282,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 </Alert>
               ) : (
                 <Alert type="warning" header="BDA Enabled — No Project Linked">
-                  BDA is enabled but no BDA project is linked to this version. Click <strong>Sync to BDA</strong> to create or link a
-                  project.
+                  BDA is enabled but no BDA project is linked to this version. Use <strong>Sync to BDA</strong> to create or link a
+                  project, or <strong>Sync from BDA</strong> to import blueprints from an existing project.
                 </Alert>
               )}
             </>
@@ -2612,6 +2625,61 @@ const ConfigurationLayout = (): React.JSX.Element => {
               />
             </FormField>
           )}
+        </SpaceBetween>
+      </Modal>
+
+      {/* Sync from BDA — Prompt for BDA Project ARN (when no project linked) */}
+      <Modal
+        visible={showSyncFromBdaModal}
+        onDismiss={() => {
+          setShowSyncFromBdaModal(false);
+          setSyncFromBdaArnInput('');
+        }}
+        header="Sync from BDA"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button
+                variant="link"
+                onClick={() => {
+                  setShowSyncFromBdaModal(false);
+                  setSyncFromBdaArnInput('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setShowSyncFromBdaModal(false);
+                  handleSyncBdaIdp('bda_to_idp', syncFromBdaArnInput.trim());
+                  setSyncFromBdaArnInput('');
+                }}
+                loading={syncingDirection === 'bda_to_idp'}
+                disabled={!syncFromBdaArnInput.trim() || !syncFromBdaArnInput.startsWith('arn:aws')}
+              >
+                Sync from BDA
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          <Box>
+            No BDA project is currently linked to this config version. Enter the ARN of the BDA project to import blueprints from.
+            The project will be linked to this version for future syncs.
+          </Box>
+          <FormField
+            label="BDA Project ARN"
+            description="Enter the ARN of the BDA Data Automation project to sync from."
+            errorText={syncFromBdaArnInput && !syncFromBdaArnInput.startsWith('arn:aws') ? 'ARN must start with arn:aws' : ''}
+          >
+            <Input
+              value={syncFromBdaArnInput}
+              onChange={({ detail }) => setSyncFromBdaArnInput(detail.value)}
+              placeholder="arn:aws:bedrock:us-east-1:123456789012:data-automation-project/..."
+            />
+          </FormField>
         </SpaceBetween>
       </Modal>
 

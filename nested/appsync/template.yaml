@@ -966,6 +966,16 @@ Resources:
                 - ssm:GetParameter
                 - ssm:PutParameter
               Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/FlowDefinitionArn"
+            # BDA permissions for project lifecycle (delete linked BDA project when version is deleted)
+            - Effect: Allow
+              Action:
+                - bedrock:DeleteDataAutomationProject
+                - bedrock:GetDataAutomationProject
+                - bedrock:DeleteBlueprint
+                - bedrock:ListBlueprints
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint/*"
 
 
   ##########################################################################
