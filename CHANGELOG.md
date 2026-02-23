@@ -25,7 +25,8 @@ SPDX-License-Identifier: MIT-0
 - **Added support for Claude Sonnet 4.6 model and Long Context (1M) variant**
 - **Included MCP tools `process`, `reprocess`, `status`, `search` for document processing**
 - **Added `process` and `reprocess` CLI commands for batch operations via command line**
-  - **Maintained `run-inference` and `rerun-inference` CLI commands with deprecation notices**
+- **Added external mcp client example `examples/external-mcp-client`**
+- **Maintained `run-inference` and `rerun-inference` CLI commands with deprecation notices**
 
 ### Fixed
 
