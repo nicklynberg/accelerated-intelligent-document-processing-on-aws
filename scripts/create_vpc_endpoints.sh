@@ -10,7 +10,7 @@ Usage: $(basename "$0") [OPTIONS]
 Required:
   --vpc-id              VPC ID
   --subnet-ids          Comma-separated private subnet IDs
-  --security-group-id   Security group ID (must allow inbound 443 from VPC CIDR)
+  --security-group-id   Security group ID (must allow inbound 443 from either: VPC CIDR or SG of resource using vpce)
   --region              AWS region
   --dry-run             Print commands without executing
   --help                Show this help

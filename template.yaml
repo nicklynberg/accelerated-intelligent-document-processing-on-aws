@@ -417,6 +417,24 @@ Parameters:
     AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}(,\s*([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2})*$'
     ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
 
+  # Headless API Configuration
+  EnableHeadless:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Enable headless mode which deploys the Jobs REST API Gateway and supporting Lambda functions.
+      Requires VpcId, PrivateSubnetIds, ApiGatewayVpcEndpointId, and LambdaSecurityGroupId.
+
+  # VPC Configuration
+  DeployInVPC:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      When enabled, deploys all core document processing Lambda functions into the VPC.
+      Requires VpcId, PrivateSubnetIds, and LambdaSecurityGroupId.
+
   # Jobs API VPC Configuration
   VpcId:
     Type: String
@@ -473,8 +491,8 @@ Rules:
         AssertDescription: UDOP Model Artifact Path is required when IDPPattern is 'Pattern1'
 
 Conditions:
-  DeployInVPC: !Not [!Equals [!Ref VpcId, ""]]
-  DeployApiGateway: !Not [!Equals [!Ref VpcId, ""]]
+  DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
+  DeployApiGateway: !Equals [!Ref EnableHeadless, 'true']
   ShouldDeployBastionHost: !Equals [!Ref DeployBastionHost, 'true']
   
   IsPattern1:
@@ -595,6 +613,19 @@ Metadata:
         Parameters:
           - EnableMCP
       - Label:
+          default: "Headless API Configuration"
+        Parameters:
+          - EnableHeadless
+          - DeployInVPC
+          - VpcId
+          - PrivateSubnetIds
+          - ApiGatewayVpcEndpointId
+          - LambdaSecurityGroupId
+          - ApiStageName
+          - DeployBastionHost
+          - BastionHostSubnetId
+          - BastionHostSecurityGroupId
+      - Label:
           default: "General Configuration"
         Parameters:
           - MaxConcurrentWorkflows
@@ -665,6 +696,10 @@ Metadata:
         default: "WAF Allowed IPv4 Ranges"
       EnableMCP:
         default: "Enable MCP Integration"
+      EnableHeadless:
+        default: "Enable Headless API"
+      DeployInVPC:
+        default: "Deploy All Compute in VPC"
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -787,6 +822,7 @@ Resources:
   ##########################################################################
   # Private API Gateway with Cognito Authorization
   ##########################################################################
+
 
   ApiGateway:
     Type: AWS::Serverless::Api
