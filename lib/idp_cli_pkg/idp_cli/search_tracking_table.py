@@ -47,9 +47,7 @@ class TrackingTableSearcher:
         # Get table name
         self.table_name = self.resources.get("DocumentsTable")
 
-    def search_by_pk_and_status(
-        self, pk: str, object_status: str
-    ) -> dict:
+    def search_by_pk_and_status(self, pk: str, object_status: str) -> dict:
         """Search for documents by PK substring and ObjectStatus.
 
         Args:
@@ -134,7 +132,7 @@ class TrackingTableSearcher:
 
         if show_details and count > 0:
             items = results.get("items", [])
-            
+
             # Create a table to display item details
             table = Table(title="\nMatching Documents (showing first 50)")
             table.add_column("ObjectKey", style="cyan")
@@ -146,15 +144,19 @@ class TrackingTableSearcher:
                 object_key = item.get("ObjectKey", {}).get("S", "N/A")
                 status = item.get("ObjectStatus", {}).get("S", "N/A")
                 pk_value = item.get("PK", {}).get("S", "N/A")
-                
+
                 table.add_row(object_key, status, pk_value)
 
             console.print(table)
 
             if count > 50:
-                console.print(f"\n[yellow]Note: Showing first 50 of {count} results[/yellow]")
+                console.print(
+                    f"\n[yellow]Note: Showing first 50 of {count} results[/yellow]"
+                )
 
-    def calculate_timing_statistics(self, results: dict, include_metering: bool = True) -> dict:
+    def calculate_timing_statistics(
+        self, results: dict, include_metering: bool = True
+    ) -> dict:
         """Calculate timing statistics from search results.
 
         Args:
@@ -174,7 +176,7 @@ class TrackingTableSearcher:
         processing_data = []  # List of (duration, object_key) tuples
         queue_data = []
         total_data = []
-        
+
         # Metering data: stage -> list of (gb_seconds, object_key) tuples
         metering_data = {
             "Assessment": [],
@@ -183,7 +185,7 @@ class TrackingTableSearcher:
             "Extraction": [],
             "Summarization": [],
         }
-        
+
         valid_count = 0
         missing_data_count = 0
         metering_count = 0
@@ -200,21 +202,21 @@ class TrackingTableSearcher:
                 if workflow_start and completion_time:
                     start_dt = datetime.fromisoformat(workflow_start)
                     complete_dt = datetime.fromisoformat(completion_time)
-                    
+
                     # Processing time: WorkflowStartTime to CompletionTime
                     processing_duration = (complete_dt - start_dt).total_seconds()
                     processing_data.append((processing_duration, object_key))
-                    
+
                     # Total time: QueuedTime to CompletionTime
                     if queued_time:
                         queued_dt = datetime.fromisoformat(queued_time)
                         total_duration = (complete_dt - queued_dt).total_seconds()
                         total_data.append((total_duration, object_key))
-                        
+
                         # Queue time: QueuedTime to WorkflowStartTime
                         queue_duration = (start_dt - queued_dt).total_seconds()
                         queue_data.append((queue_duration, object_key))
-                    
+
                     valid_count += 1
                 else:
                     missing_data_count += 1
@@ -225,6 +227,7 @@ class TrackingTableSearcher:
                     if metering_raw:
                         # Metering can be stored as JSON string or native DynamoDB map
                         import json
+
                         if metering_raw.get("S"):
                             # JSON string format
                             try:
@@ -236,15 +239,17 @@ class TrackingTableSearcher:
                             metering = self._parse_dynamodb_map(metering_raw["M"])
                         else:
                             metering = {}
-                        
+
                         # Extract Lambda duration for each stage
                         for stage in metering_data.keys():
                             duration_key = f"{stage}/lambda/duration"
                             if duration_key in metering:
                                 gb_seconds = metering[duration_key].get("gb_seconds", 0)
                                 if gb_seconds > 0:
-                                    metering_data[stage].append((gb_seconds, object_key))
-                        
+                                    metering_data[stage].append(
+                                        (gb_seconds, object_key)
+                                    )
+
                         if any(metering_data.values()):
                             metering_count += 1
 
@@ -263,7 +268,7 @@ class TrackingTableSearcher:
             times = [d[0] for d in data_list]
             min_item = min(data_list, key=lambda x: x[0])
             max_item = max(data_list, key=lambda x: x[0])
-            
+
             return {
                 "average": statistics.mean(times),
                 "median": statistics.median(times),
@@ -295,7 +300,7 @@ class TrackingTableSearcher:
         if include_metering and metering_count > 0:
             stats["metering_count"] = metering_count
             stats["metering"] = {}
-            
+
             for stage, data in metering_data.items():
                 if data:
                     stats["metering"][stage] = calc_stats(data)
@@ -304,10 +309,10 @@ class TrackingTableSearcher:
 
     def _parse_dynamodb_map(self, dynamodb_map: dict) -> dict:
         """Parse DynamoDB Map format to Python dict.
-        
+
         Args:
             dynamodb_map: DynamoDB Map structure with type descriptors
-            
+
         Returns:
             Parsed Python dictionary
         """
@@ -356,9 +361,11 @@ class TrackingTableSearcher:
         console.print()
         console.print("[bold]Timing Statistics:[/bold]")
         console.print(f"  Valid documents: [green]{stats['valid_count']}[/green]")
-        
+
         if stats.get("missing_data_count", 0) > 0:
-            console.print(f"  Missing data: [yellow]{stats['missing_data_count']}[/yellow]")
+            console.print(
+                f"  Missing data: [yellow]{stats['missing_data_count']}[/yellow]"
+            )
 
         # Helper function to format seconds to human-readable
         def format_duration(seconds: float) -> str:
@@ -374,14 +381,16 @@ class TrackingTableSearcher:
         # Processing Time Statistics
         if "processing_time" in stats:
             console.print()
-            console.print("[bold cyan]Processing Time (WorkflowStartTime → CompletionTime):[/bold cyan]")
+            console.print(
+                "[bold cyan]Processing Time (WorkflowStartTime → CompletionTime):[/bold cyan]"
+            )
             pt = stats["processing_time"]
-            
+
             table = Table(show_header=True, header_style="bold magenta")
             table.add_column("Metric", style="cyan")
             table.add_column("Value", style="yellow")
             table.add_column("ObjectKey", style="dim")
-            
+
             table.add_row("Average", format_duration(pt["average"]), "")
             table.add_row("Median", format_duration(pt["median"]), "")
             table.add_row("Minimum", format_duration(pt["min"]), pt.get("min_key", ""))
@@ -389,20 +398,22 @@ class TrackingTableSearcher:
             if pt["stdev"] > 0:
                 table.add_row("Std Dev", format_duration(pt["stdev"]), "")
             table.add_row("Total", format_duration(pt["total"]), "")
-            
+
             console.print(table)
 
         # Queue Time Statistics
         if "queue_time" in stats:
             console.print()
-            console.print("[bold cyan]Queue Time (QueuedTime → WorkflowStartTime):[/bold cyan]")
+            console.print(
+                "[bold cyan]Queue Time (QueuedTime → WorkflowStartTime):[/bold cyan]"
+            )
             qt = stats["queue_time"]
-            
+
             table = Table(show_header=True, header_style="bold magenta")
             table.add_column("Metric", style="cyan")
             table.add_column("Value", style="yellow")
             table.add_column("ObjectKey", style="dim")
-            
+
             table.add_row("Average", format_duration(qt["average"]), "")
             table.add_row("Median", format_duration(qt["median"]), "")
             table.add_row("Minimum", format_duration(qt["min"]), qt.get("min_key", ""))
@@ -410,20 +421,22 @@ class TrackingTableSearcher:
             if qt["stdev"] > 0:
                 table.add_row("Std Dev", format_duration(qt["stdev"]), "")
             table.add_row("Total", format_duration(qt["total"]), "")
-            
+
             console.print(table)
 
         # Total Time Statistics
         if "total_time" in stats:
             console.print()
-            console.print("[bold cyan]Total Time (QueuedTime → CompletionTime):[/bold cyan]")
+            console.print(
+                "[bold cyan]Total Time (QueuedTime → CompletionTime):[/bold cyan]"
+            )
             tt = stats["total_time"]
-            
+
             table = Table(show_header=True, header_style="bold magenta")
             table.add_column("Metric", style="cyan")
             table.add_column("Value", style="yellow")
             table.add_column("ObjectKey", style="dim")
-            
+
             table.add_row("Average", format_duration(tt["average"]), "")
             table.add_row("Median", format_duration(tt["median"]), "")
             table.add_row("Minimum", format_duration(tt["min"]), tt.get("min_key", ""))
@@ -431,38 +444,50 @@ class TrackingTableSearcher:
             if tt["stdev"] > 0:
                 table.add_row("Std Dev", format_duration(tt["stdev"]), "")
             table.add_row("Total", format_duration(tt["total"]), "")
-            
+
             console.print(table)
 
         # Lambda Metering Statistics
         if "metering" in stats and stats["metering"]:
             console.print()
-            console.print("[bold green]Lambda Metering (GB-seconds by Stage):[/bold green]")
-            console.print(f"  Documents with metering: [green]{stats.get('metering_count', 0)}[/green]")
-            
+            console.print(
+                "[bold green]Lambda Metering (GB-seconds by Stage):[/bold green]"
+            )
+            console.print(
+                f"  Documents with metering: [green]{stats.get('metering_count', 0)}[/green]"
+            )
+
             for stage, stage_stats in stats["metering"].items():
                 console.print()
                 console.print(f"[bold yellow]{stage}:[/bold yellow]")
-                
+
                 table = Table(show_header=True, header_style="bold magenta")
                 table.add_column("Metric", style="cyan")
                 table.add_column("GB-seconds", style="yellow")
                 table.add_column("ObjectKey", style="dim")
-                
+
                 table.add_row("Average", f"{stage_stats['average']:.2f}", "")
                 table.add_row("Median", f"{stage_stats['median']:.2f}", "")
-                table.add_row("Minimum", f"{stage_stats['min']:.2f}", stage_stats.get("min_key", ""))
-                table.add_row("Maximum", f"{stage_stats['max']:.2f}", stage_stats.get("max_key", ""))
+                table.add_row(
+                    "Minimum",
+                    f"{stage_stats['min']:.2f}",
+                    stage_stats.get("min_key", ""),
+                )
+                table.add_row(
+                    "Maximum",
+                    f"{stage_stats['max']:.2f}",
+                    stage_stats.get("max_key", ""),
+                )
                 if stage_stats["stdev"] > 0:
                     table.add_row("Std Dev", f"{stage_stats['stdev']:.2f}", "")
                 table.add_row("Total", f"{stage_stats['total']:.2f}", "")
-                
+
                 console.print(table)
-                
+
                 # Add cost estimate (AWS Lambda pricing: $0.0000166667 per GB-second)
                 cost_per_gb_second = 0.0000166667
-                total_cost = stage_stats['total'] * cost_per_gb_second
-                avg_cost = stage_stats['average'] * cost_per_gb_second
-                console.print(f"  [dim]Estimated cost: ${total_cost:.4f} total, ${avg_cost:.6f} avg per document[/dim]")
-
-
+                total_cost = stage_stats["total"] * cost_per_gb_second
+                avg_cost = stage_stats["average"] * cost_per_gb_second
+                console.print(
+                    f"  [dim]Estimated cost: ${total_cost:.4f} total, ${avg_cost:.6f} avg per document[/dim]"
+                )

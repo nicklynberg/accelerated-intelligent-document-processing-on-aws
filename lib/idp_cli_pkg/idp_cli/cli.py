@@ -1785,7 +1785,7 @@ def status(
         if batch_id:
             # Use TrackingTableSearcher for PK substring search
             searcher = TrackingTableSearcher(stack_name=stack_name, region=region)
-            
+
             # Default to searching all statuses if not specified
             if object_status:
                 # Search with specific status filter
@@ -1795,18 +1795,26 @@ def status(
             else:
                 # Search across all statuses by doing multiple searches
                 # This ensures we get all documents matching the PK substring
-                all_statuses = ["COMPLETED", "FAILED", "QUEUED", "RUNNING", "PROCESSING"]
+                all_statuses = [
+                    "COMPLETED",
+                    "FAILED",
+                    "QUEUED",
+                    "RUNNING",
+                    "PROCESSING",
+                ]
                 all_items = []
-                
+
                 console.print(
                     f"[yellow]Searching for documents with PK containing '{batch_id}'...[/yellow]"
                 )
-                
+
                 for status in all_statuses:
-                    results = searcher.search_by_pk_and_status(pk=batch_id, object_status=status)
+                    results = searcher.search_by_pk_and_status(
+                        pk=batch_id, object_status=status
+                    )
                     if results.get("success") and results.get("items"):
                         all_items.extend(results["items"])
-                
+
                 search_results = {
                     "success": True,
                     "count": len(all_items),
@@ -1814,15 +1822,21 @@ def status(
                     "pk": batch_id,
                     "object_status": "ALL",
                 }
-                
-                console.print(f"[green]✓ Found {len(all_items)} matching documents[/green]")
+
+                console.print(
+                    f"[green]✓ Found {len(all_items)} matching documents[/green]"
+                )
 
             if not search_results.get("success"):
-                console.print(f"[red]✗ Search failed: {search_results.get('error')}[/red]")
+                console.print(
+                    f"[red]✗ Search failed: {search_results.get('error')}[/red]"
+                )
                 sys.exit(1)
 
             if search_results.get("count", 0) == 0:
-                console.print(f"[yellow]No documents found matching batch-id '{batch_id}'")
+                console.print(
+                    f"[yellow]No documents found matching batch-id '{batch_id}'"
+                )
                 if object_status:
                     console.print(f" with status '{object_status}'")
                 console.print("[/yellow]")
@@ -1864,11 +1878,11 @@ def status(
                 search_results, include_metering=include_metering
             )
             searcher.display_timing_statistics(timing_stats)
-            
+
             # If not waiting, we're done
             if not wait:
                 sys.exit(0)
-            
+
             console.print()
 
         if wait:
