@@ -2125,7 +2125,7 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: !Ref CustomerManagedEncryptionKeyArn
-          # AppSync permissions for updating document status (only if AppSync API is available)
+          # AppSync permissions for document status queries and updates (only if AppSync API is available)
           - !If
             - HasAppSyncApi
             - Effect: Allow
@@ -2133,6 +2133,7 @@ Resources:
                 - appsync:GraphQL
               Resource: 
                 - !Sub "${AppSyncApiArn}/types/Mutation/*"
+                - !Sub "${AppSyncApiArn}/types/Query/*"
             - !Ref AWS::NoValue
           - Effect: Allow
             Action:

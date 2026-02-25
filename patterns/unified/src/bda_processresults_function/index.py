@@ -515,13 +515,19 @@ def process_bda_pages(
             page_to_class_map[page_id] = section_class
 
     try:
-        # List all objects in the standard output directory
-        response = s3_client.list_objects_v2(
-            Bucket=bda_result_bucket, Prefix=standard_output_prefix
-        )
+        # List all objects in the standard output directory using pagination
+        logger.info(f"Listing standard output objects at s3://{bda_result_bucket}/{standard_output_prefix}")
+        paginator = s3_client.get_paginator("list_objects_v2")
+        all_contents = []
+        for page_response in paginator.paginate(Bucket=bda_result_bucket, Prefix=standard_output_prefix):
+            all_contents.extend(page_response.get("Contents", []))
+        
+        logger.info(f"Found {len(all_contents)} objects in standard output directory")
+        result_json_files = [obj["Key"] for obj in all_contents if obj["Key"].endswith("result.json")]
+        logger.info(f"Found {len(result_json_files)} result.json files: {result_json_files}")
 
         # Process all standard_output result.json files which may contain multiple pages
-        for obj in response.get("Contents", []):
+        for obj in all_contents:
             obj_key = obj["Key"]
 
             # Only process result.json files
@@ -532,14 +538,19 @@ def process_bda_pages(
                 # Get the raw JSON result from the BDA result bucket
                 result_obj = s3_client.get_object(Bucket=bda_result_bucket, Key=obj_key)
                 raw_json = json.loads(result_obj["Body"].read().decode("utf-8"))
+                
+                # Log top-level keys for debugging
+                logger.info(f"Standard output result.json keys: {list(raw_json.keys())}")
+                pages_in_json = raw_json.get("pages", [])
+                logger.info(f"Standard output has {len(pages_in_json)} pages in 'pages' array")
 
-                # Check if this contains pages
+                # Check if this contains pages (PAGE granularity format)
                 if "pages" in raw_json and len(raw_json["pages"]) > 0:
-                    # Process each page in the multi-page result
-                    for page in raw_json["pages"]:
-                        page_index = page.get("page_index")
+                    # Process each page in the multi-page result (PAGE/ELEMENT granularity)
+                    for page_data in raw_json["pages"]:
+                        page_index = page_data.get("page_index")
                         if page_index is None:
-                            logger.warning(f"Page in {obj_key} has no page_index")
+                            logger.warning(f"Page in {obj_key} has no page_index, page keys: {list(page_data.keys())}")
                             continue
 
                         # Convert from 0-based (BDA) to 1-based (consistency with pattern-2)
@@ -607,22 +618,148 @@ def process_bda_pages(
                         create_metadata_file(parsed_result_uri, doc_class, "page")
 
                         # Create Page object and add to document
-                        page = Page(
+                        page_obj = Page(
                             page_id=page_id,
                             image_uri=image_uri,
                             raw_text_uri=raw_text_uri,
                             parsed_text_uri=parsed_result_uri,
                             classification=doc_class,
                         )
-                        document.pages[page_id] = page
+                        document.pages[page_id] = page_obj
 
                     logger.info(f"Processed multi-page result file {obj_key}")
 
+                elif "metadata" in raw_json:
+                    # DOCUMENT granularity format: metadata has page index, text in companion result.txt
+                    metadata = raw_json.get("metadata", {})
+                    start_page = metadata.get("start_page_index", 0)
+                    end_page = metadata.get("end_page_index", start_page)
+                    logger.info(f"Processing DOCUMENT-granularity standard output {obj_key}: pages {start_page}-{end_page}")
+
+                    # Try to read companion result.txt for the actual text content
+                    result_txt_key = obj_key.replace("result.json", "result.txt")
+                    page_text = ""
+                    try:
+                        txt_obj = s3_client.get_object(Bucket=bda_result_bucket, Key=result_txt_key)
+                        page_text = txt_obj["Body"].read().decode("utf-8")
+                        logger.info(f"Read {len(page_text)} chars from {result_txt_key}")
+                    except ClientError:
+                        # Fallback to document.representation.text if result.txt doesn't exist
+                        doc_repr = raw_json.get("document", {}).get("representation", {})
+                        page_text = doc_repr.get("text", "") or doc_repr.get("markdown", "")
+                        logger.warning(f"result.txt not found for {obj_key}, using document.representation ({len(page_text)} chars)")
+
+                    # Create pages for each page index in this segment
+                    for page_index in range(start_page, end_page + 1):
+                        page_id = str(page_index + 1)  # Convert to 1-based
+
+                        page_path = f"{pages_output_prefix}{page_id}/"
+                        page_result_path = f"{page_path}result.json"
+
+                        # Write the result.json to the page directory
+                        write_content(
+                            raw_json,
+                            output_bucket,
+                            page_result_path,
+                            content_type="application/json",
+                        )
+
+                        raw_text_uri = build_s3_uri(output_bucket, page_result_path)
+
+                        # Define image path
+                        image_path = f"{page_path}image.jpg"
+                        try:
+                            s3_client.head_object(Bucket=output_bucket, Key=image_path)
+                            image_uri = build_s3_uri(output_bucket, image_path)
+                        except ClientError:
+                            image_uri = None
+                            logger.warning(f"image.jpg not found for page {page_id}")
+
+                        doc_class = page_to_class_map.get(page_id, "")
+
+                        # Create parsedResult.json with the text from result.txt
+                        parsed_result = {"text": page_text}
+                        parsed_result_path = f"{page_path}parsedResult.json"
+                        write_content(
+                            parsed_result,
+                            output_bucket,
+                            parsed_result_path,
+                            content_type="application/json",
+                        )
+                        parsed_result_uri = build_s3_uri(output_bucket, parsed_result_path)
+
+                        logger.info(f"Created parsedResult.json for page {page_id} (DOCUMENT granularity, {len(page_text)} chars)")
+
+                        create_metadata_file(parsed_result_uri, doc_class, "page")
+
+                        page_obj = Page(
+                            page_id=page_id,
+                            image_uri=image_uri,
+                            raw_text_uri=raw_text_uri,
+                            parsed_text_uri=parsed_result_uri,
+                            classification=doc_class,
+                        )
+                        document.pages[page_id] = page_obj
+
+                    logger.info(f"Processed DOCUMENT-granularity result file {obj_key} (pages {start_page}-{end_page})")
+                else:
+                    logger.warning(f"Standard output result.json at {obj_key} has unrecognized format. Keys: {list(raw_json.keys())}")
+
             except Exception as e:
-                logger.error(f"Error processing result file {obj_key}: {str(e)}")
+                logger.error(f"Error processing result file {obj_key}: {str(e)}", exc_info=True)
                 document.errors.append(
                     f"Error processing result file {obj_key}: {str(e)}"
                 )
+
+        # Fallback: if no pages were created from standard output, create pages from sections
+        # This ensures summarization always has pages to work with
+        if len(document.pages) == 0 and len(document.sections) > 0:
+            logger.warning(
+                f"No pages created from standard output. Creating fallback pages from "
+                f"{len(document.sections)} sections with page_ids."
+            )
+            # Collect all unique page_ids from sections
+            all_page_ids = set()
+            for section in document.sections:
+                for page_id in section.page_ids:
+                    all_page_ids.add(page_id)
+            
+            for page_id in sorted(all_page_ids, key=lambda x: int(x)):
+                page_path = f"{pages_output_prefix}{page_id}/"
+                image_path = f"{page_path}image.jpg"
+                
+                # Check if image exists (created by create_pdf_page_images earlier)
+                try:
+                    s3_client.head_object(Bucket=output_bucket, Key=image_path)
+                    image_uri = build_s3_uri(output_bucket, image_path)
+                except ClientError:
+                    image_uri = None
+                    logger.warning(f"Fallback: image.jpg not found for page {page_id}")
+                
+                doc_class = page_to_class_map.get(page_id, "")
+                
+                # Create a minimal parsedResult.json with empty text
+                # The summarization step will still work but with limited text
+                parsed_result = {"text": f"[Page {page_id}]"}
+                parsed_result_path = f"{page_path}parsedResult.json"
+                write_content(
+                    parsed_result,
+                    output_bucket,
+                    parsed_result_path,
+                    content_type="application/json",
+                )
+                parsed_result_uri = build_s3_uri(output_bucket, parsed_result_path)
+                
+                page_obj = Page(
+                    page_id=page_id,
+                    image_uri=image_uri,
+                    parsed_text_uri=parsed_result_uri,
+                    classification=doc_class,
+                )
+                document.pages[page_id] = page_obj
+                logger.info(f"Created fallback page {page_id} with image_uri={image_uri}")
+            
+            logger.info(f"Created {len(document.pages)} fallback pages from section page_ids")
 
         # Update document page count
         document.num_pages = len(document.pages)
@@ -1254,7 +1391,7 @@ def handler(event, context):
                             confidence_threshold,
                             execution_id,
                             document,
-                            config_version,
+                            input_config_version,
                         )
                         logger.info(f"process_segments returned hitl_result: {hitl_result}")
                         if hitl_result or hitl_triggered:
@@ -1269,7 +1406,7 @@ def handler(event, context):
                             confidence_threshold,
                             execution_id,
                             document,
-                            config_version,
+                            input_config_version,
                         )
                         logger.info(f"process_segments returned hitl_result: {hitl_result}")
                         if hitl_result or hitl_triggered:

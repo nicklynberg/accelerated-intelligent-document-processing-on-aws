@@ -459,7 +459,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
   const [activateVersionTarget, setActivateVersionTarget] = useState<string | null>(null); // Track which version to activate
 
   // BDA project selection modal state
-  const [bdaSyncMode, setBdaSyncMode] = useState<string>('create'); // 'create' or 'existing'
+  const [bdaSyncMode, setBdaSyncMode] = useState<string>('create'); // 'linked', 'create', or 'existing'
   const [bdaProjectArnInput, setBdaProjectArnInput] = useState('');
   const [showSyncFromBdaModal, setShowSyncFromBdaModal] = useState(false);
   const [syncFromBdaArnInput, setSyncFromBdaArnInput] = useState('');
@@ -2151,7 +2151,14 @@ const ConfigurationLayout = (): React.JSX.Element => {
                     >
                       Sync from BDA
                     </Button>
-                    <Button variant="normal" onClick={() => setShowSyncToBdaConfirmModal(true)} loading={syncingDirection === 'idp_to_bda'}>
+                    <Button
+                      variant="normal"
+                      onClick={() => {
+                        setBdaSyncMode(currentVersion?.bdaProjectArn ? 'linked' : 'create');
+                        setShowSyncToBdaConfirmModal(true);
+                      }}
+                      loading={syncingDirection === 'idp_to_bda'}
+                    >
                       Sync to BDA
                     </Button>
                   </>
@@ -2540,7 +2547,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
         visible={showSyncToBdaConfirmModal}
         onDismiss={() => {
           setShowSyncToBdaConfirmModal(false);
-          setBdaSyncMode('create');
+          setBdaSyncMode(currentVersion?.bdaProjectArn ? 'linked' : 'create');
           setBdaProjectArnInput('');
         }}
         header="Sync to BDA"
@@ -2551,7 +2558,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 variant="link"
                 onClick={() => {
                   setShowSyncToBdaConfirmModal(false);
-                  setBdaSyncMode('create');
+                  setBdaSyncMode(currentVersion?.bdaProjectArn ? 'linked' : 'create');
                   setBdaProjectArnInput('');
                 }}
               >
@@ -2561,9 +2568,16 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 variant="primary"
                 onClick={() => {
                   setShowSyncToBdaConfirmModal(false);
-                  const arnToUse = bdaSyncMode === 'existing' ? bdaProjectArnInput.trim() : 'CREATE_NEW';
+                  let arnToUse: string;
+                  if (bdaSyncMode === 'linked') {
+                    arnToUse = currentVersion?.bdaProjectArn as string;
+                  } else if (bdaSyncMode === 'existing') {
+                    arnToUse = bdaProjectArnInput.trim();
+                  } else {
+                    arnToUse = 'CREATE_NEW';
+                  }
                   handleSyncBdaIdp('idp_to_bda', arnToUse);
-                  setBdaSyncMode('create');
+                  setBdaSyncMode(currentVersion?.bdaProjectArn ? 'linked' : 'create');
                   setBdaProjectArnInput('');
                 }}
                 loading={syncingDirection === 'idp_to_bda'}
@@ -2580,15 +2594,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
             This will sync your IDP document classes to BDA blueprints and set <strong>{currentVersionName}</strong> as the active
             configuration version.
           </Alert>
-          {currentVersion?.bdaProjectArn && (
-            <Alert type="info">
-              This version is already linked to BDA project: <br />
-              <Box variant="code" fontSize="body-s">
-                {currentVersion.bdaProjectArn as string}
-              </Box>
-            </Alert>
-          )}
-          <FormField label="BDA Project" description="Choose whether to create a new BDA project or use an existing one.">
+          <FormField label="BDA Project" description="Choose how to sync your configuration to BDA.">
             <RadioGroup
               value={bdaSyncMode}
               onChange={({ detail }) => {
@@ -2600,13 +2606,21 @@ const ConfigurationLayout = (): React.JSX.Element => {
               }}
               items={[
                 {
+                  value: 'linked',
+                  label: 'Sync to linked project',
+                  description: currentVersion?.bdaProjectArn
+                    ? `Update blueprints in the linked project: ${currentVersion.bdaProjectArn}`
+                    : 'No BDA project is linked to this version.',
+                  disabled: !currentVersion?.bdaProjectArn,
+                },
+                {
                   value: 'create',
                   label: 'Create a new BDA project',
                   description: 'A new BDA project will be automatically created for this config version.',
                 },
                 {
                   value: 'existing',
-                  label: 'Use an existing BDA project',
+                  label: 'Use a different BDA project',
                   description: 'Enter the ARN of an existing BDA project to sync to.',
                 },
               ]}

@@ -1026,6 +1026,12 @@ IDP_CONFIG_DEPRECATED_FIELDS = {
     "textract_page_tracker",
     "summary",
     "processing_mode",  # Renamed to use_bda (bool) in Phase 1
+    # DynamoDB storage metadata fields (not part of IDPConfig model)
+    "BdaProjectArn",
+    "BdaSyncStatus",
+    "BdaLastSyncedAt",
+    "_config_format",
+    "_config_storage",
 }
 
 
@@ -1336,8 +1342,14 @@ class ConfigurationRecord(BaseModel):
             version = ""
 
         # Remove DynamoDB keys and metadata
-        config_data = {k: v for k, v in item.items() 
-                      if k not in ("Configuration", "IsActive", "CreatedAt", "UpdatedAt", "Description")}
+        # Remove DynamoDB partition key, record metadata, and storage metadata fields
+        # These are not part of the config data model
+        _DYNAMODB_NON_CONFIG_FIELDS = {
+            "Configuration", "IsActive", "CreatedAt", "UpdatedAt", "Description",
+            "BdaProjectArn", "BdaSyncStatus", "BdaLastSyncedAt",
+            "_config_format", "_config_storage",
+        }
+        config_data = {k: v for k, v in item.items() if k not in _DYNAMODB_NON_CONFIG_FIELDS}
 
         # Set config_type discriminator directly from DynamoDB Configuration key
         # DynamoDB keys match Pydantic discriminators exactly:
