@@ -9,7 +9,6 @@ VPC-secured mode enables the GenAI IDP solution to run within your private netwo
 - Network isolation for Lambda functions
 - Private communication between AWS services through VPC endpoints
 - Enhanced security through security group controls
-- Compliance with organizational network security requirements
 
 ## Prerequisites
 
@@ -18,27 +17,34 @@ VPC-secured mode enables the GenAI IDP solution to run within your private netwo
 You need an existing VPC with:
 - Private subnets (minimum 2 for high availability)
 - Public subnets with route to Internet Gateway (minimum 2 for high availability)
-- NAT Gateway in each public subnet, with `0.0.0.0/0` routes in all private subnet route tables pointing to it. (Note while a single public subnet/NAT gateway can be used, this is not recommended for systems requiring high availability) 
+- NAT Gateway in each public subnet, with a 0.0.0.0/0 route in each private subnet route table pointing to the respective AZ's NAT Gateway.
 - VPC endpoints for required AWS services (see below)
 - Security groups for lambda and VPC endpoints (see below)
 
-> **Why a NAT Gateway?** CodeBuild runs inside the VPC to build Docker images and needs internet access to pull base images and Python dependencies. The NAT Gateway provides outbound internet access from private subnets without exposing inbound access. A single NAT Gateway in one public subnet is sufficient — all private subnets can route through it.
+> **Why a NAT Gateway?** When configured in `VPC Secured Mode`, AWS CodeBuild runs in the configured private subnets of your VPC to build Docker images and needs internet access to pull base images and Python dependencies. The NAT Gateway provides outbound internet access from private subnets without exposing inbound access. A single NAT Gateway in one public subnet is sufficient — all private subnets can route through it.
 
 #### Environments Without Internet Access
 
-This solution assumes a NAT Gateway with an Internet Gateway is available. If your environment does not permit outbound internet access (e.g. air-gapped or fully isolated VPCs), the following external dependencies must be available from a private registry:
+The solution above assumes a NAT Gateway with an Internet Gateway is available. If your environment does not permit outbound internet access (e.g. air-gapped or fully isolated VPCs), you must make the following external dependencies available internally:
 
-**Container images** — referenced in `Dockerfile.optimized` (project root):
-- `ghcr.io/astral-sh/uv:0.9.6` — uv package manager
-- `public.ecr.aws/lambda/python:3.12-arm64` — AWS Lambda Python base image
+Dependencies to mirror:
 
-**BuildKit image** — pulled implicitly by `docker buildx create` in `patterns/pattern-2/buildspec.yml`:
-- `moby/buildkit:buildx-stable-1`
+| Dependency Type | Source | Used By |
+|-----------------|--------|---------|
+| Container image | ghcr.io/astral-sh/uv:0.9.6 | Dockerfile.optimized (build stage) |
+| Container image | public.ecr.aws/lambda/python:3.12-arm64 | Dockerfile.optimized (runtime base) |
+| Container image | moby/buildkit:buildx-stable-1 | docker buildx (pulled implicitly) |
+| Python packages | pypi.org | uv pip install during Docker build |
 
-**Python packages** — installed via `uv pip install` during the Docker build:
-- All packages listed in each function's `requirements.txt`
+Options for providing these dependencies:
 
-To use a private registry, update the `FROM` lines in `Dockerfile.optimized` to point to your internal mirror and configure `patterns/pattern-2/buildspec.yml` to reference your private BuildKit image and Python package index.
+1. Private registry + code changes — Mirror images to your internal container registry (e.g., private ECR, Artifactory, Nexus) and update 
+Dockerfile.optimized and patterns/pattern-2/buildspec.yml to reference your internal URLs. For Python packages, configure uv to use your internal PyPI 
+mirror (e.g., AWS CodeArtifact) by setting UV_INDEX_URL in the Dockerfile.
+
+2. Private DNS overrides — Configure your VPC's private hosted zone to resolve public registry domains (ghcr.io, public.ecr.aws, pypi.org) to internal 
+endpoints that serve mirrored content. This approach requires no code changes but requires DNS infrastructure and internal mirrors that respond at those 
+domains.
 
 ### Required VPC Endpoints
 
@@ -76,8 +82,21 @@ Create a security group for Lambda functions with the following rules:
 - Type: HTTPS
 - Protocol: TCP
 - Port: 443
-- Destination: VPC Endpoint SG (or VPC CIDR)
-- Description: Allow HTTPS traffic to AWS services via VPC endpoints
+- Destination: VPC Interface Endpoint SG
+- Description: Allow HTTPS traffic from lambda functions to AWS resources via VPC Interface endpoint
+
+- Type: HTTPS
+- Protocol: TCP
+- Port: 443
+- Destination: S3 Gateway Endpoint 
+- Description: Allow HTTPS traffic from lambda functions to S3 Gateway Endpoint
+
+- Type: HTTPS
+- Protocol: TCP
+- Port: 443
+- Destination: DynamoDB Gateway Endpoint 
+- Description: Allow HTTPS traffic from lambda functions to  DynamoDB Gateway Endpoint
+***Note:*** To re-use this security group for Bastion, use the default outbound rule instead
 
 Create a security group for your VPCEs with the following rules:
 
@@ -86,7 +105,10 @@ Create a security group for your VPCEs with the following rules:
 - Protocol: TCP
 - Port: 443
 - Source: Lambda SG
-- Description: Allow HTTPS traffic from Lambda functions
+- Description: Allow traffic to resources associated with the SG
+
+**Outbound Rules:**
+- Default Outbound rule allowing for all ports on destination 0.0.0.0/0
 
 
 ### Automated Endpoint Creation
