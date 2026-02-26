@@ -464,7 +464,6 @@ const ConfigurationLayout = (): React.JSX.Element => {
   const [showSyncFromBdaModal, setShowSyncFromBdaModal] = useState(false);
   const [syncFromBdaArnInput, setSyncFromBdaArnInput] = useState('');
   const [syncFromBdaMode, setSyncFromBdaMode] = useState<string>('replace'); // 'replace' or 'merge'
-  const [syncToBdaMode, setSyncToBdaMode] = useState<string>('replace'); // 'replace' or 'merge'
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editorRef = useRef<any>(null);
@@ -2284,19 +2283,34 @@ const ConfigurationLayout = (): React.JSX.Element => {
           {(isPattern1 || mergedConfig?.use_bda) && currentVersion && (
             <>
               {currentVersion.bdaProjectArn ? (
-                <Alert type="info" header="BDA Project Linked">
+                <Alert
+                  type={currentVersion.bdaSyncStatus === 'needs-sync' ? 'warning' : 'info'}
+                  header={currentVersion.bdaSyncStatus === 'needs-sync' ? 'BDA Project Linked — Sync Required' : 'BDA Project Linked'}
+                >
                   BDA project:{' '}
                   <Box variant="code" display="inline" fontSize="body-s">
                     {currentVersion.bdaProjectArn as string}
                   </Box>
-                  {currentVersion.bdaSyncStatus && (
+                  {currentVersion.bdaSyncStatus === 'needs-sync' ? (
                     <>
-                      {' '}
-                      &mdash; Status: <strong>{currentVersion.bdaSyncStatus as string}</strong>
+                      <br />
+                      <br />
+                      Configuration and BDA project blueprints may be out of sync. Use <strong>Sync to BDA</strong> to push your
+                      configuration classes as BDA blueprints, or <strong>Sync from BDA</strong> to import existing project blueprints as
+                      configuration classes.
                     </>
-                  )}
-                  {currentVersion.bdaLastSyncedAt && (
-                    <> &mdash; Last synced: {new Date(currentVersion.bdaLastSyncedAt as string).toLocaleString()}</>
+                  ) : (
+                    <>
+                      {currentVersion.bdaSyncStatus && (
+                        <>
+                          {' '}
+                          &mdash; Status: <strong>{currentVersion.bdaSyncStatus as string}</strong>
+                        </>
+                      )}
+                      {currentVersion.bdaLastSyncedAt && (
+                        <> &mdash; Last synced: {new Date(currentVersion.bdaLastSyncedAt as string).toLocaleString()}</>
+                      )}
+                    </>
                   )}
                 </Alert>
               ) : (

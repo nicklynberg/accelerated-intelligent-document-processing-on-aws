@@ -5,6 +5,19 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Unified Pattern** — Merged Pattern-1 (BDA) and Pattern-2 (Pipeline) into a single deployment. Switch between BDA and Pipeline processing modes at runtime using the `use_bda` configuration toggle — no redeployment needed. Use [Test Studio](./docs/test-studio.md) to compare accuracy and cost across both modes to find the optimal approach for your documents. See the [Migration Guide](./docs/migration-v04-to-v05.md) for upgrade instructions.
+
+- **Rule Validation for BDA mode** — Rule validation (business rule checking) is now available in both BDA and Pipeline modes. Previously it was Pipeline-only.
+
+
+### Deprecated
+
+- **Pattern-1 (BDA) and Pattern-2 (Pipeline) separate deployments** — Replaced by the Unified Pattern. Existing stacks are automatically upgraded. See the [Migration Guide](./docs/migration-v04-to-v05.md) for details.
+
+- **Pattern-3 (UDOP + Bedrock)** — Pattern-3 is no longer available as a deployment option. If you are currently using Pattern-3 with a SageMaker UDOP endpoint, do not upgrade to v0.5.x without first testing in a non-production environment. You can use the [Lambda Inference Hooks](./docs/lambda-hook-inference.md) feature (introduced in v0.4.15) to call your existing SageMaker UDOP endpoint from the unified pattern's classification step via a custom Lambda function.
+
 ### Changed
 
 - **Replaced PyMuPDF (AGPL-3.0) with pypdfium2 (Apache-2.0/BSD-3-Clause) for PDF rendering** — Resolves license incompatibility with the project's MIT-0 license. pypdfium2 provides equivalent PDF-to-image rendering using PDFium engine. Page rendering is now performed sequentially before parallel OCR processing to ensure thread-safety.

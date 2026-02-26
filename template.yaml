@@ -357,8 +357,6 @@ Parameters:
     ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
 
 Conditions:
-  ShouldCreateBDASampleProject:
-    !Equals [ !Ref Pattern1BDAProjectArn, "" ]
   HasPattern1BDAProjectArn:
     !Not [ !Equals [ !Ref Pattern1BDAProjectArn, "" ] ]
   HasGuardrailConfig:
@@ -707,19 +705,6 @@ Resources:
   ##########################################################################
   # Nested stack for selected options
   ##########################################################################
-
-  BDASAMPLEPROJECT:
-    DependsOn:
-      - IsStacknameLengthOK
-    Type: AWS::CloudFormation::Stack
-    Condition: ShouldCreateBDASampleProject
-    Properties:
-      TemplateURL: ./nested/bda-lending-project/.aws-sam/packaged.yaml
-      Parameters:
-        ProjectName: !Sub "${AWS::StackName}-Project"
-        ProjectDescription: !Sub "${AWS::StackName}-Project"
-        LogLevel: !Ref LogLevel
-        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
 
   DOCUMENTKB:
     DependsOn:
@@ -1129,10 +1114,7 @@ Resources:
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
-        BDAProjectArn: !If
-          - ShouldCreateBDASampleProject
-          - !GetAtt BDASAMPLEPROJECT.Outputs.ProjectArn
-          - !Ref Pattern1BDAProjectArn
+        BDAProjectArn: !Ref Pattern1BDAProjectArn
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
@@ -1257,10 +1239,7 @@ Resources:
         KnowledgeBaseModelId: !Ref KnowledgeBaseModelId
         ShouldCreateEvaluationBaselineBucket: !If [ShouldCreateEvaluationBaselineBucket, "true", "false"]
         ShouldCreateReportingBucket: !If [ShouldCreateReportingBucket, "true", "false"]
-        Pattern1BDAProjectArn: !If
-          - ShouldCreateBDASampleProject
-          - !GetAtt BDASAMPLEPROJECT.Outputs.ProjectArn
-          - !Ref Pattern1BDAProjectArn
+        Pattern1BDAProjectArn: !Ref Pattern1BDAProjectArn
         HasPattern1BDAProjectArn: !If [HasPattern1BDAProjectArn, "true", "false"]
                 
         # Lambda Layers

@@ -537,6 +537,13 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                                 f"Updated extraction model to: {properties['CustomExtractionModelARN']}"
                             )
 
+                    # Auto-enable BDA mode when a BDA project ARN is provided
+                    # This handles Pattern-1 → Unified upgrades and new BDA deployments
+                    bda_project_arn = properties.get("BDAProjectArn", "").strip()
+                    if bda_project_arn:
+                        resolved_default["use_bda"] = True
+                        logger.info(f"Auto-enabled BDA mode (use_bda: true) — BDA project ARN detected: {bda_project_arn}")
+
                 configurations["Config#default#System Default"] = resolved_default
 
             # Process Custom configuration -> save with slugified name
@@ -573,7 +580,8 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                 "DefaultPricing", 
                 "ConfigLibraryHash",
                 "CustomClassificationModelARN",
-                "CustomExtractionModelARN"
+                "CustomExtractionModelARN",
+                "BDAProjectArn",
             }
             
             for prop_name, prop_value in properties.items():
@@ -664,6 +672,21 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                 except Exception as e:
                     logger.error(f"Error activating version during create, error: {e}")
                     
+            # Auto-link BDA project ARN to default config version when provided
+            bda_project_arn = properties.get("BDAProjectArn", "").strip()
+            if bda_project_arn:
+                try:
+                    if request_type == "Create":
+                        # New install: link project and mark as synced (will be synced by Sync to BDA)
+                        manager.set_bda_project_arn("default", bda_project_arn, sync_status="needs-sync")
+                        logger.info(f"Linked BDA project to default version (new install, needs-sync): {bda_project_arn}")
+                    else:
+                        # Upgrade: link project but mark as needs-sync so user is prompted
+                        manager.set_bda_project_arn("default", bda_project_arn, sync_status="needs-sync")
+                        logger.info(f"Linked BDA project to default version (upgrade, needs-sync): {bda_project_arn}")
+                except Exception as e:
+                    logger.warning(f"Failed to link BDA project ARN to default version: {e}")
+
             cfnresponse.send(
                 event,
                 context,

@@ -1696,6 +1696,7 @@ Resources:
       ConfigLibraryHash: !Ref ConfigLibraryHash
       CustomClassificationModelARN: !Ref CustomClassificationModelARN
       CustomExtractionModelARN: !Ref CustomExtractionModelARN
+      BDAProjectArn: !Ref BDAProjectArn
 
 
   ##########################################################################
