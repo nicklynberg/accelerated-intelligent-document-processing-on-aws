@@ -463,6 +463,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
   const [bdaProjectArnInput, setBdaProjectArnInput] = useState('');
   const [showSyncFromBdaModal, setShowSyncFromBdaModal] = useState(false);
   const [syncFromBdaArnInput, setSyncFromBdaArnInput] = useState('');
+  const [syncFromBdaMode, setSyncFromBdaMode] = useState<string>('replace'); // 'replace' or 'merge'
+  const [syncToBdaMode, setSyncToBdaMode] = useState<string>('replace'); // 'replace' or 'merge'
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editorRef = useRef<any>(null);
@@ -1478,19 +1480,20 @@ const ConfigurationLayout = (): React.JSX.Element => {
   };
 
   // Handler for BDA/IDP sync with direction support and optional BDA project ARN
-  const handleSyncBdaIdp = async (direction = 'bidirectional', bdaProjectArn?: string): Promise<void> => {
+  const handleSyncBdaIdp = async (direction = 'bidirectional', bdaProjectArn?: string, syncMode = 'replace'): Promise<void> => {
     setSyncingDirection(direction);
     setSyncSuccess(false);
     setSyncSuccessMessage('');
     setSyncError(null);
 
     try {
-      logger.debug(`Starting BDA/IDP sync with direction: ${direction}, bdaProjectArn: ${bdaProjectArn || 'auto'}...`);
+      logger.debug(`Starting BDA/IDP sync with direction: ${direction}, mode: ${syncMode}, bdaProjectArn: ${bdaProjectArn || 'auto'}...`);
 
       // Build variables - always pass saveArn: true to persist the project ARN
       const variables: Record<string, unknown> = {
         versionName: currentVersionName,
         direction,
+        syncMode,
         saveArn: true,
       };
       if (bdaProjectArn) {
@@ -2146,12 +2149,9 @@ const ConfigurationLayout = (): React.JSX.Element => {
                     <Button
                       variant="normal"
                       onClick={() => {
-                        if (currentVersion?.bdaProjectArn) {
-                          handleSyncBdaIdp('bda_to_idp');
-                        } else {
-                          setSyncFromBdaArnInput('');
-                          setShowSyncFromBdaModal(true);
-                        }
+                        setSyncFromBdaArnInput('');
+                        setSyncFromBdaMode('replace');
+                        setShowSyncFromBdaModal(true);
                       }}
                       loading={syncingDirection === 'bda_to_idp'}
                     >
@@ -2654,12 +2654,13 @@ const ConfigurationLayout = (): React.JSX.Element => {
         </SpaceBetween>
       </Modal>
 
-      {/* Sync from BDA — Prompt for BDA Project ARN (when no project linked) */}
+      {/* Sync from BDA — Choose mode and optionally provide ARN */}
       <Modal
         visible={showSyncFromBdaModal}
         onDismiss={() => {
           setShowSyncFromBdaModal(false);
           setSyncFromBdaArnInput('');
+          setSyncFromBdaMode('replace');
         }}
         header="Sync from BDA"
         footer={
@@ -2670,6 +2671,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 onClick={() => {
                   setShowSyncFromBdaModal(false);
                   setSyncFromBdaArnInput('');
+                  setSyncFromBdaMode('replace');
                 }}
               >
                 Cancel
@@ -2678,11 +2680,13 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 variant="primary"
                 onClick={() => {
                   setShowSyncFromBdaModal(false);
-                  handleSyncBdaIdp('bda_to_idp', syncFromBdaArnInput.trim());
+                  const arnToUse = syncFromBdaArnInput.trim() || (currentVersion?.bdaProjectArn as string) || '';
+                  handleSyncBdaIdp('bda_to_idp', arnToUse, syncFromBdaMode);
                   setSyncFromBdaArnInput('');
+                  setSyncFromBdaMode('replace');
                 }}
                 loading={syncingDirection === 'bda_to_idp'}
-                disabled={!syncFromBdaArnInput.trim() || !syncFromBdaArnInput.startsWith('arn:aws')}
+                disabled={!currentVersion?.bdaProjectArn && (!syncFromBdaArnInput.trim() || !syncFromBdaArnInput.startsWith('arn:aws'))}
               >
                 Sync from BDA
               </Button>
@@ -2691,13 +2695,51 @@ const ConfigurationLayout = (): React.JSX.Element => {
         }
       >
         <SpaceBetween size="m">
-          <Box>
-            No BDA project is currently linked to this config version. Enter the ARN of the BDA project to import blueprints from. The
-            project will be linked to this version for future syncs.
-          </Box>
+          {syncFromBdaMode === 'replace' && (
+            <Alert type="warning">
+              <strong>Replace</strong> mode will remove all document classes in this config version that are not in the BDA project.
+            </Alert>
+          )}
+          <FormField label="Sync Mode" description="Choose how BDA blueprints are applied to your config version.">
+            <RadioGroup
+              value={syncFromBdaMode}
+              onChange={({ detail }) => setSyncFromBdaMode(detail.value)}
+              items={[
+                {
+                  value: 'replace',
+                  label: 'Replace',
+                  description: 'Align config version with BDA project. Classes not in BDA will be removed.',
+                },
+                {
+                  value: 'merge',
+                  label: 'Merge',
+                  description: 'Import BDA blueprints into config version. Existing classes will be kept.',
+                },
+              ]}
+            />
+          </FormField>
+          {!currentVersion?.bdaProjectArn && (
+            <Box>
+              No BDA project is currently linked to this config version. Enter the ARN of the BDA project to import blueprints from. The
+              project will be linked to this version for future syncs.
+            </Box>
+          )}
+          {currentVersion?.bdaProjectArn && (
+            <Box>
+              Syncing from linked project:{' '}
+              <Box variant="code" display="inline" fontSize="body-s">
+                {currentVersion.bdaProjectArn as string}
+              </Box>
+              . You can enter a different ARN below to override.
+            </Box>
+          )}
           <FormField
             label="BDA Project ARN"
-            description="Enter the ARN of the BDA Data Automation project to sync from."
+            description={
+              currentVersion?.bdaProjectArn
+                ? 'Optional — leave empty to use the linked project.'
+                : 'Enter the ARN of the BDA Data Automation project to sync from.'
+            }
             errorText={syncFromBdaArnInput && !syncFromBdaArnInput.startsWith('arn:aws') ? 'ARN must start with arn:aws' : ''}
           >
             <Input

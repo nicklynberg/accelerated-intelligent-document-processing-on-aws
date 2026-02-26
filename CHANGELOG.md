@@ -9,8 +9,11 @@ SPDX-License-Identifier: MIT-0
 
 - **Replaced PyMuPDF (AGPL-3.0) with pypdfium2 (Apache-2.0/BSD-3-Clause) for PDF rendering** — Resolves license incompatibility with the project's MIT-0 license. pypdfium2 provides equivalent PDF-to-image rendering using PDFium engine. Page rendering is now performed sequentially before parallel OCR processing to ensure thread-safety.
 
+- **Added Replace/Merge sync modes for BDA synchronization** — Both "Sync from BDA" and "Sync to BDA" now support two modes: **Replace** (default) aligns the target to match the source exactly, removing items not in the source; **Merge** adds source items to the target without removing existing items. The UI modal now always shows a mode selection and ARN input (pre-filled for linked projects).
 
 ### Fixed
+
+- **Fixed "Sync from BDA" not removing IDP classes absent from BDA project** — Previously, "Sync from BDA" only added new classes from the BDA project without removing classes that weren't in BDA. Now defaults to "Replace" mode which fully aligns the config version's classes with the BDA project, removing classes not present in BDA. A new "Merge" mode is also available to preserve the legacy additive behavior.
 
 - **Fixed insufficient Lambda memory for Extraction, Assessment, and Evaluation functions in unified pattern template** — Increased MemorySize from 512 MB (Extraction, Assessment) and 1024 MB (Evaluation) to 4096 MB to match all other document processing Lambda functions, preventing potential out-of-memory errors during document processing. ([#205](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/205))
 

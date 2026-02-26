@@ -1846,7 +1846,10 @@ class BdaBlueprintService:
             raise Exception(f"Failed to convert AWS standard blueprints: {str(e)}")
 
     def create_blueprints_from_custom_configuration(
-        self, version: str, sync_direction: str = "bidirectional"
+        self,
+        version: str,
+        sync_direction: str = "bidirectional",
+        sync_mode: str = "replace",
     ):
         """
         Synchronize blueprints between BDA and IDP based on the specified direction.
@@ -1858,20 +1861,32 @@ class BdaBlueprintService:
                 - "bda_to_idp": Sync from BDA blueprints to IDP classes (read BDA, update IDP)
                 - "idp_to_bda": Sync from IDP classes to BDA blueprints (read IDP, update BDA)
                 - "bidirectional": Sync both directions (default, backward compatible)
+            sync_mode: Mode of synchronization
+                - "replace": Full replacement — target is aligned to match source exactly.
+                  For bda_to_idp: IDP classes not in BDA are removed.
+                  For idp_to_bda: BDA blueprints not in IDP are removed (current default behavior).
+                - "merge": Additive merge — source items are added to target without removing existing items.
+                  For bda_to_idp: BDA blueprints are added to IDP classes (existing classes kept).
+                  For idp_to_bda: IDP classes are pushed to BDA (existing BDA-only blueprints kept).
 
         Raises:
             Exception: If blueprint creation fails
         """
         logger.info(
-            f"Starting blueprint synchronization with direction: {sync_direction}"
+            f"Starting blueprint synchronization with direction: {sync_direction}, mode: {sync_mode}"
         )
 
         try:
-            # Validate sync direction
+            # Validate sync direction and mode
             valid_directions = ["bda_to_idp", "idp_to_bda", "bidirectional"]
             if sync_direction not in valid_directions:
                 raise ValueError(
                     f"Invalid sync_direction: {sync_direction}. Must be one of {valid_directions}"
+                )
+            valid_modes = ["replace", "merge"]
+            if sync_mode not in valid_modes:
+                raise ValueError(
+                    f"Invalid sync_mode: {sync_mode}. Must be one of {valid_modes}"
                 )
 
             config_item = self.config_manager.get_configuration(
@@ -1887,31 +1902,143 @@ class BdaBlueprintService:
             # Convert BDA blueprints (including AWS standard) to IDP classes
             # ========================================================================
             if sync_direction in ["bda_to_idp", "bidirectional"]:
-                logger.info("Phase 1: Synchronizing BDA blueprints to IDP classes")
+                # For explicit bda_to_idp direction, use the requested sync_mode.
+                # For bidirectional, always use merge (legacy additive behavior) to preserve backward compatibility.
+                effective_phase1_mode = (
+                    sync_mode if sync_direction == "bda_to_idp" else "merge"
+                )
+                logger.info(
+                    f"Phase 1: Synchronizing BDA blueprints to IDP classes (mode: {effective_phase1_mode})"
+                )
 
-                # Convert AWS standard blueprints to custom blueprints (in parallel)
-                try:
-                    conversion_result = self._convert_aws_standard_blueprints_to_custom(
-                        version=version
-                    )
-
-                    if (
-                        conversion_result
-                        and conversion_result.get("converted_count", 0) > 0
-                    ):
-                        logger.info(
-                            f"Converted {conversion_result.get('converted_count', 0)} AWS standard blueprints"
-                        )
-                        # Refresh classes list as new classes were added
-                        config_item = self.config_manager.get_configuration(
-                            config_type="Config", version=version
-                        )
-                        classess_status.extend(
-                            conversion_result.get("conversion_details", [])
+                if effective_phase1_mode == "replace":
+                    # REPLACE mode: BDA project is the source of truth for IDP classes.
+                    # All BDA blueprints become IDP classes, IDP classes not in BDA are removed.
+                    try:
+                        # Retrieve ALL blueprints from the BDA project (including AWS standard)
+                        all_project_blueprints = self._retrieve_all_blueprints(
+                            self.dataAutomationProjectArn, include_aws_standard=True
                         )
 
-                except Exception as e:
-                    logger.error(f"Error converting AWS standard blueprints: {e}")
+                        if all_project_blueprints:
+                            # Convert all BDA blueprints to IDP class schemas
+                            new_classes = []
+                            for blueprint in all_project_blueprints:
+                                try:
+                                    blueprint_schema = blueprint.get("schema")
+                                    if isinstance(blueprint_schema, str):
+                                        blueprint_schema = json.loads(blueprint_schema)
+
+                                    # Normalize and transform to IDP format
+                                    blueprint_schema = (
+                                        self._normalize_aws_blueprint_schema(
+                                            blueprint_schema
+                                        )
+                                    )
+                                    idp_class_schema = self.transform_bda_blueprint_to_idp_class_schema(
+                                        blueprint_schema
+                                    )
+                                    docu_class = idp_class_schema.get(
+                                        ID_FIELD,
+                                        idp_class_schema.get(
+                                            X_AWS_IDP_DOCUMENT_TYPE, "Document"
+                                        ),
+                                    )
+                                    new_classes.append(idp_class_schema)
+                                    classess_status.append(
+                                        {"status": "success", "class": docu_class}
+                                    )
+                                    logger.info(
+                                        f"Converted BDA blueprint to IDP class: {docu_class}"
+                                    )
+                                except Exception as e:
+                                    blueprint_name = blueprint.get(
+                                        "blueprintName", "unknown"
+                                    )
+                                    logger.error(
+                                        f"Error converting blueprint {blueprint_name}: {e}"
+                                    )
+                                    classess_status.append(
+                                        {"status": "failed", "class": blueprint_name}
+                                    )
+
+                            # Replace IDP classes entirely with the BDA-derived classes
+                            if new_classes or not all_project_blueprints:
+                                removed_classes = []
+                                new_class_ids = {
+                                    cls.get(
+                                        ID_FIELD, cls.get(X_AWS_IDP_DOCUMENT_TYPE, "")
+                                    )
+                                    for cls in new_classes
+                                }
+                                for old_cls in classess:
+                                    old_id = old_cls.get(
+                                        ID_FIELD,
+                                        old_cls.get(X_AWS_IDP_DOCUMENT_TYPE, ""),
+                                    )
+                                    if old_id not in new_class_ids:
+                                        removed_classes.append(old_id)
+
+                                if removed_classes:
+                                    logger.info(
+                                        f"Replace mode: Removing {len(removed_classes)} IDP classes not in BDA: {removed_classes}"
+                                    )
+
+                                classess = new_classes
+                                self.config_manager.handle_update_custom_configuration(
+                                    custom_config={"classes": classess}, version=version
+                                )
+                                logger.info(
+                                    f"Replaced IDP classes with {len(new_classes)} classes from BDA"
+                                )
+
+                                # Refresh config_item for Phase 2
+                                config_item = self.config_manager.get_configuration(
+                                    config_type="Config", version=version
+                                )
+                        else:
+                            # No blueprints in BDA project — clear all IDP classes
+                            logger.info(
+                                "Replace mode: No blueprints in BDA project, clearing IDP classes"
+                            )
+                            classess = []
+                            self.config_manager.handle_update_custom_configuration(
+                                custom_config={"classes": classess}, version=version
+                            )
+                            config_item = self.config_manager.get_configuration(
+                                config_type="Config", version=version
+                            )
+
+                    except Exception as e:
+                        logger.error(f"Error during replace-mode BDA→IDP sync: {e}")
+
+                else:
+                    # MERGE mode: Add BDA blueprints to IDP classes without removing existing ones.
+                    # This is the original/legacy behavior.
+                    try:
+                        conversion_result = (
+                            self._convert_aws_standard_blueprints_to_custom(
+                                version=version
+                            )
+                        )
+
+                        if (
+                            conversion_result
+                            and conversion_result.get("converted_count", 0) > 0
+                        ):
+                            logger.info(
+                                f"Converted {conversion_result.get('converted_count', 0)} AWS standard blueprints"
+                            )
+                            # Refresh classes list as new classes were added
+                            config_item = self.config_manager.get_configuration(
+                                config_type="Config", version=version
+                            )
+                            classess_status.extend(
+                                conversion_result.get("conversion_details", [])
+                            )
+
+                    except Exception as e:
+                        logger.error(f"Error converting AWS standard blueprints: {e}")
 
             # ========================================================================
             # PHASE 2: IDP → BDA Synchronization
@@ -1921,7 +2048,9 @@ class BdaBlueprintService:
             classes_modified = False
 
             if sync_direction in ["idp_to_bda", "bidirectional"]:
-                logger.info("Phase 2: Synchronizing IDP classes to BDA blueprints")
+                logger.info(
+                    f"Phase 2: Synchronizing IDP classes to BDA blueprints (mode: {sync_mode})"
+                )
 
                 # Retrieve all blueprints for this project
                 existing_blueprints = self._retrieve_all_blueprints(
@@ -1944,11 +2073,17 @@ class BdaBlueprintService:
                 blueprints_updated.extend(updated)
                 classes_modified = classes_modified or modified
 
-                # Synchronize deletes only when syncing IDP to BDA
-                self._synchronize_deletes(
-                    existing_blueprints=existing_blueprints,
-                    blueprints_updated=blueprints_updated,
-                )
+                # Synchronize deletes only in replace mode (remove BDA blueprints not in IDP)
+                # In merge mode, keep existing BDA-only blueprints alive
+                if sync_mode == "replace":
+                    self._synchronize_deletes(
+                        existing_blueprints=existing_blueprints,
+                        blueprints_updated=blueprints_updated,
+                    )
+                else:
+                    logger.info(
+                        "Merge mode: Skipping blueprint deletion — existing BDA-only blueprints will be kept"
+                    )
 
                 # Remove any remaining AWS standard blueprints from the project
                 # so the project only contains custom blueprints matching the IDP config
