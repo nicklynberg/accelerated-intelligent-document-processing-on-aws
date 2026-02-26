@@ -7,7 +7,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
-- **Replaced PyMuPDF (AGPL-3.0) with pypdfium2 (Apache-2.0/BSD-3-Clause) for PDF rendering** — Resolves license incompatibility with the project's MIT-0 license. pypdfium2 provides equivalent PDF-to-image rendering using Google's PDFium engine. Page rendering is now performed sequentially before parallel OCR processing to ensure thread-safety.
+- **Replaced PyMuPDF (AGPL-3.0) with pypdfium2 (Apache-2.0/BSD-3-Clause) for PDF rendering** — Resolves license incompatibility with the project's MIT-0 license. pypdfium2 provides equivalent PDF-to-image rendering using PDFium engine. Page rendering is now performed sequentially before parallel OCR processing to ensure thread-safety.
 
 
 ### Fixed
