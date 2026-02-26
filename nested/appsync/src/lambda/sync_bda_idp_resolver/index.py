@@ -40,11 +40,12 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         # Get arguments
         arguments = event.get('arguments', {})
         sync_direction = arguments.get('direction', 'bidirectional')
+        sync_mode = arguments.get('syncMode', 'replace')  # 'replace' or 'merge'
         versionName = arguments.get('versionName', 'default')
         explicit_bda_arn = arguments.get('bdaProjectArn')  # Optional: user-provided ARN
         save_arn = arguments.get('saveArn', True)  # Whether to save the ARN to version tracking
         
-        logger.info(f"Sync direction: {sync_direction}, version: {versionName}, explicit ARN: {explicit_bda_arn}")
+        logger.info(f"Sync direction: {sync_direction}, mode: {sync_mode}, version: {versionName}, explicit ARN: {explicit_bda_arn}")
         
         # Initialize ConfigurationManager for BDA project tracking
         config_table = os.environ.get('CONFIGURATION_TABLE_NAME')
@@ -154,9 +155,9 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 }
             }
         
-        # Execute the sync operation with direction parameter
+        # Execute the sync operation with direction and mode parameters
         result = bda_service.create_blueprints_from_custom_configuration(
-            sync_direction=sync_direction, version=versionName
+            sync_direction=sync_direction, version=versionName, sync_mode=sync_mode
         )
 
         logger.info(f"BDA Service results: {result}")

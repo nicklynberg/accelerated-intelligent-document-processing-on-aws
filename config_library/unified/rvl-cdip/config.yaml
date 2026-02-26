@@ -5,7 +5,7 @@
 
 use_bda: false
 
-notes: RVL-CDIP document classification benchmark - 16 document classes - for pipeline mode (Bedrock LLM). Set use_bda: true for BDA mode. Assessment and summarization disabled by default.
+notes: "RVL-CDIP document classification benchmark - 16 document classes - for pipeline mode (Bedrock LLM). Set use_bda: true for BDA mode. Assessment and summarization disabled by default."
 
 assessment:
   enabled: false

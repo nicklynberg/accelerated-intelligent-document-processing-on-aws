@@ -5,7 +5,7 @@
 
 use_bda: false
 
-notes: Bank statement sample settings. Set use_bda: true for BDA mode.
+notes: "Bank statement sample settings. Set use_bda: true for BDA mode."
 
 classes:
   - $schema: https://json-schema.org/draft/2020-12/schema
