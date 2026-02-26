@@ -87,7 +87,7 @@ run_cmd() {
 # Create gateway endpoints
 for svc in "${GATEWAY_ENDPOINTS[@]}"; do
   SVC_NAME="com.amazonaws.${REGION}.${svc}"
-  if echo "$EXISTING" | grep -q "$SVC_NAME"; then
+  if echo "$EXISTING" | grep "$SVC_NAME"; then
     echo "SKIP  (exists) $SVC_NAME"
     ((skipped++))
     continue
@@ -110,7 +110,7 @@ done
 # Create interface endpoints
 for svc in "${ALL_INTERFACE[@]}"; do
   SVC_NAME="com.amazonaws.${REGION}.${svc}"
-  if echo "$EXISTING" | grep -q "$SVC_NAME"; then
+  if echo "$EXISTING" | grep "$SVC_NAME"; then
     echo "SKIP  (exists) $SVC_NAME"
     ((skipped++))
     continue

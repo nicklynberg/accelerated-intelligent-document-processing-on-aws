@@ -21,7 +21,7 @@ You need an existing VPC with:
 - VPC endpoints for required AWS services (see below)
 - Security groups for lambda and VPC endpoints (see below)
 
-> **Why a NAT Gateway?** When configured in `VPC Secured Mode`, AWS CodeBuild runs in the configured private subnets of your VPC to build Docker images and needs internet access to pull base images and Python dependencies. The NAT Gateway provides outbound internet access from private subnets without exposing inbound access. A single NAT Gateway in one public subnet is sufficient — all private subnets can route through it.
+> **Why a NAT Gateway?** When configured in `VPC Secured Mode`, AWS CodeBuild runs in the configured private subnets of your VPC to build Docker images and needs internet access to pull base images and Python dependencies. The NAT Gateway provides outbound internet access from private subnets without exposing inbound access.
 
 #### Environments Without Internet Access
 
