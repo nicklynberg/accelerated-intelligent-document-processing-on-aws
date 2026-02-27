@@ -7,6 +7,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **AWS Profile Support for CLI** — Added optional `--profile` parameter to specify AWS credentials profile. Can be placed anywhere in the command. Automatically applies to all AWS SDK calls.
 - **Enhanced `status` CLI/MCP Command with Advanced Search, Filtering, and Analytics** — Added PK substring search (`--batch-id` now matches partial batch identifiers across multiple batches), `--object-status` filter for searching by processing status (COMPLETED, FAILED, etc.), `--get-time` flag for timing statistics (processing, queue, total time with min/max outlier tracking), `--include-metering` flag for Lambda GB-seconds usage and cost estimates, and `--show-details` flag for detailed document information. Introduces `TrackingTableSearcher` class for flexible DynamoDB tracking table queries. Fully backward compatible with existing usage.
 
 ### Changed
