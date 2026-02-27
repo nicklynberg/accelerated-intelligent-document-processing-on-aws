@@ -89,7 +89,7 @@ The following essential services remain available in all [deployment packages](.
 
 ### Document Processing
 
-- ✅ All 3 processing patterns (BDA, Textract+Bedrock, Textract+SageMaker+Bedrock)
+- ✅ Pattern 2 only (Textract + Bedrock) — Pattern 1 (BDA) and Pattern 3 (Textract + SageMaker + Bedrock) require services not available in GovCloud
 - ✅ Complete 6-step pipeline (OCR, Classification, Extraction, Assessment, Summarization, Evaluation)
 - ✅ Step Functions workflows
 - ✅ Lambda function processing

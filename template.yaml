@@ -423,6 +423,24 @@ Parameters:
     AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}(,\s*([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2})*$'
     ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
 
+  # Headless API Configuration
+  EnableHeadless:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      Enable headless mode which deploys the Jobs REST API Gateway and supporting Lambda functions.
+      Requires VpcId, PrivateSubnetIds, ApiGatewayVpcEndpointId, and LambdaSecurityGroupId.
+
+  # VPC Configuration
+  DeployInVPC:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      When enabled, deploys all core document processing Lambda functions into the VPC.
+      Requires VpcId, PrivateSubnetIds, and LambdaSecurityGroupId.
+
   # Jobs API VPC Configuration
   VpcId:
     Type: String
@@ -479,7 +497,8 @@ Rules:
         AssertDescription: UDOP Model Artifact Path is required when IDPPattern is 'Pattern1'
 
 Conditions:
-  DeployApiGateway: !Not [!Equals [!Ref VpcId, ""]]
+  DeployInVPC: !Equals [!Ref DeployInVPC, 'true']
+  DeployApiGateway: !Equals [!Ref EnableHeadless, 'true']
   ShouldDeployBastionHost: !Equals [!Ref DeployBastionHost, 'true']
   
   IsPattern1:
@@ -600,6 +619,19 @@ Metadata:
         Parameters:
           - EnableMCP
       - Label:
+          default: "Headless API Configuration"
+        Parameters:
+          - EnableHeadless
+          - DeployInVPC
+          - VpcId
+          - PrivateSubnetIds
+          - ApiGatewayVpcEndpointId
+          - LambdaSecurityGroupId
+          - ApiStageName
+          - DeployBastionHost
+          - BastionHostSubnetId
+          - BastionHostSecurityGroupId
+      - Label:
           default: "General Configuration"
         Parameters:
           - MaxConcurrentWorkflows
@@ -670,6 +702,10 @@ Metadata:
         default: "WAF Allowed IPv4 Ranges"
       EnableMCP:
         default: "Enable MCP Integration"
+      EnableHeadless:
+        default: "Enable Headless API"
+      DeployInVPC:
+        default: "Deploy All Compute in VPC"
 
 Resources:
   # Custom resource to enforce max length of StackName - prevent downstream failures
@@ -792,6 +828,7 @@ Resources:
   ##########################################################################
   # Private API Gateway with Cognito Authorization
   ##########################################################################
+
 
   ApiGateway:
     Type: AWS::Serverless::Api
@@ -1054,11 +1091,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: Function does not require VPC access as it only interacts with S3
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: Reserved concurrency not required
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -1071,6 +1108,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 300
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       InlineCode: |
         import boto3
         import cfnresponse
@@ -1665,6 +1709,9 @@ Resources:
         ConfigLibraryHash: "<CONFIG_LIBRARY_HASH_TOKEN>"
         EnableXRayTracing: !Ref EnableXRayTracing
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        VpcId: !Ref VpcId
+        LambdaSecurityGroupId: !Ref LambdaSecurityGroupId
+        PrivateSubnetIds: !Join [",", !Ref PrivateSubnetIds]
         ImageVersion: "<PATTERN2_IMAGE_VERSION>"
         ArtifactBucket: "<ARTIFACT_BUCKET_TOKEN>"
         ArtifactPrefix: "<ARTIFACT_PREFIX_TOKEN>"
@@ -2306,11 +2353,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       PermissionsBoundary:
@@ -2323,6 +2370,13 @@ Resources:
       Runtime: python3.12
       Timeout: 900
       MemorySize: 512
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       InlineCode: |
         import boto3
         import cfnresponse
@@ -2406,11 +2460,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -2426,6 +2480,13 @@ Resources:
       Runtime: python3.12
       Timeout: 900
       MemorySize: 2048
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref FccDatasetDeployerLogGroup
       Environment:
@@ -2476,11 +2537,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -2496,6 +2557,13 @@ Resources:
       Runtime: python3.12
       Timeout: 900
       MemorySize: 2048
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref OcrBenchmarkDeployerLogGroup
       Environment:
@@ -2546,11 +2614,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -2568,6 +2636,13 @@ Resources:
       MemorySize: 3008
       EphemeralStorage:
         Size: 10240
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref RvlCdipNmpDeployerLogGroup
       Environment:
@@ -3405,11 +3480,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -3422,6 +3497,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       CodeUri: src/lambda/initialize_counter
       Environment:
         Variables:
@@ -3522,10 +3604,10 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Custom Resource function"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
@@ -3539,7 +3621,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
-
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Layers:
         - !Ref IDPCommonBaseLayer
       CodeUri: src/lambda/update_configuration
@@ -3631,10 +3719,10 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Custom Resource function"
     Properties:
@@ -3647,6 +3735,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       CodeUri: src/lambda/update_settings
       LoggingConfig:
         LogGroup: !Ref UpdateSettingsFunctionLogGroup
@@ -3817,10 +3912,10 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -3834,7 +3929,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
-
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Layers:
         - !Ref IDPCommonBaseLayer
       Tracing: Active
@@ -3898,12 +3999,12 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for these functions as they are either idempotent or have error handling"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
       PermissionsBoundary:
@@ -3916,7 +4017,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
-
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Layers:
         - !Ref IDPCommonBaseLayer
       Tracing: Active
@@ -4024,10 +4131,10 @@ Resources:
           - id: W11
             reason: "Role requires * resource access for CloudWatch Metrics and Logs"
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -4041,7 +4148,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
-
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Layers:
         - !Ref IDPCommonBaseLayer
       Tracing: Active
@@ -4249,10 +4362,10 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -4266,7 +4379,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 300
-
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Layers:
         - !Ref IDPCommonBaseLayer
       MemorySize: 512
@@ -4353,10 +4472,10 @@ Resources:
           - id: W11
             reason: "Role requires * resource access for CloudWatch Metrics and Logs"
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     # checkov:skip=CKV_AWS_116: "DLQ not required for this functions as it is called sychronously"
@@ -4371,7 +4490,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 300
-
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Layers:
         - !Ref IDPCommonReportingLayer
       MemorySize: 1024
@@ -4868,11 +4993,11 @@ Resources:
           - id: W11
             reason: "Role requires * resource access for CloudWatch Dashboards"
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -4887,6 +5012,13 @@ Resources:
       Runtime: python3.12
       Timeout: 60
       MemorySize: 128
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
@@ -4927,11 +5059,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: ""DLQ not required for Lookup function as it is called only from CLI"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -4945,6 +5077,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 30
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       LoggingConfig:
         LogGroup: !Ref LookupFunctionLogGroup
       Environment:
@@ -6230,13 +6369,13 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
           - id: W12
             reason: "Lambda requires CloudWatch logs permissions"
     # checkov:skip=CKV_AWS_116: "DLQ not required for SQS triggered function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -6247,6 +6386,13 @@ Resources:
       Description: Lambda function to copy test set files from SQS queue
       MemorySize: 1024
       Timeout: 900
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
 
       Layers:
         - !Ref IDPCommonBaseLayer
@@ -6309,7 +6455,7 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Lambda function does not need to be in VPC"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Lambda function does not need reserved concurrency"
     Properties:
@@ -6324,6 +6470,13 @@ Resources:
       Runtime: python3.12
       Timeout: 300
       MemorySize: 1024
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
@@ -6386,11 +6539,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       PermissionsBoundary:
@@ -6402,6 +6555,13 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       Timeout: 60
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
       InlineCode: |
         import boto3
         import cfnresponse
@@ -6493,13 +6653,13 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
           - id: W12
             reason: "Lambda requires CloudWatch logs permissions"
     # checkov:skip=CKV_AWS_116: "DLQ configured for SQS triggered function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
@@ -6509,6 +6669,13 @@ Resources:
       Description: Lambda function to copy test files from SQS queue
       MemorySize: 1024
       Timeout: 900
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
 
       DeadLetterQueue:
         Type: SQS
@@ -6573,7 +6740,7 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: W89
-            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+            reason: "VPC access is conditionally enabled via DeployInVPC"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
           - id: W12
@@ -6581,7 +6748,7 @@ Resources:
           - id: W11
             reason: "Role requires * resource access for CloudWatch Metrics and Logs"
     # checkov:skip=CKV_AWS_116: "DLQ not required for SQS triggered function"
-    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_117: "VPC access is conditionally enabled via DeployInVPC"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     Properties:
@@ -6597,6 +6764,13 @@ Resources:
       Description: Lambda function to process discovery jobs from SQS queue
       MemorySize: 1024
       Timeout: 900
+      VpcConfig:
+        !If
+          - DeployInVPC
+          - SecurityGroupIds:
+              - !Ref LambdaSecurityGroupId
+            SubnetIds: !Ref PrivateSubnetIds
+          - !Ref AWS::NoValue
 
       Layers:
         - !Ref IDPCommonBaseLayer

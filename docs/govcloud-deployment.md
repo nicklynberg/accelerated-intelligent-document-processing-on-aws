@@ -2,7 +2,7 @@
 
 ## Overview
 
-The GenAI IDP Accelerator supports "headless" deployment to AWS GovCloud regions through a specialized template generation script. This solution addresses two key GovCloud requirements:
+The GenAI IDP Accelerator supports GovCloud deployment to AWS GovCloud regions through a specialized template generation script. This solution addresses two key GovCloud requirements:
 
 1. **ARN Partition Compatibility**: All ARN references use `arn:${AWS::Partition}:` instead of `arn:aws:` to work in both commercial and GovCloud regions
 2. **Service Compatibility**: Removes services not available in GovCloud (AppSync, CloudFront, WAF, Cognito UI components)
@@ -11,32 +11,35 @@ For details on what services are removed vs. retained, see [GovCloud Architectur
 
 ## Deployment Packages
 
-The GovCloud template supports three deployment configurations. Choose the one that matches your use case:
+The GovCloud template supports four deployment configurations. Choose the one that matches your use case:
 
-| | Vanilla | API + Private Networking | API + Private Networking + Bastion |
-|---|---|---|---|
-| **Use Case** | Simplest deployment; manual document processing via S3 upload or IDP CLI | Production workloads with programmatic API access from within your VPC | Development/testing environments needing local API access |
-| **Access Methods** | S3 direct upload, IDP CLI, SDK | All vanilla methods + REST API (`/jobs` endpoints) | All API methods + local access via SSM tunnel |
-| **Networking** | No VPC required | Deploys API Gateway (private) + Lambda functions into your VPC | Same as API, plus an EC2 bastion host for tunneling |
-| **Authentication** | IAM only | Cognito client credentials (OAuth2 bearer tokens) | Same as API |
-| **VPC Parameters** | None | `VpcId`, `PrivateSubnetIds`, `ApiGatewayVpcEndpointId`, `LambdaSecurityGroupId` | Same as API |
-| **Bastion Parameters** | None | None | `DeployBastionHost=true`, `BastionHostSubnetId`, `BastionHostSecurityGroupId` |
-| **When to Choose** | You have your own integration layer, or are evaluating the solution | You need API-based access from applications running in AWS | You need to call the API from your laptop during development |
+| | Vanilla | Headless API | Headless API + VPC Secured Mode | Headless API + VPC Secured Mode + Bastion |
+|---|---|---|---|---|
+| **Use Case** | Simplest deployment; manual document processing via S3 upload or IDP CLI | Programmatic API access; only headless resources in VPC | Production workloads with all compute in VPC for full network isolation | Development/testing with private API access from local machine via bastion tunnel |
+| **Access Methods** | S3 direct upload, IDP CLI, SDK | All vanilla methods + REST API (`/jobs` endpoints) | Same as Headless API | All API methods + local access via SSM tunnel |
+| **Networking** | No VPC required | Private API Gateway + headless Lambdas in VPC; core Lambdas outside VPC | All Lambda functions + Private API Gateway in VPC | Same as VPC Secured Mode, plus an EC2 bastion host for tunneling |
+| **Authentication** | IAM only | Cognito client credentials (OAuth2 bearer tokens) | Same as Headless API | Same as Headless API |
+| **Key Parameters** | None | `EnableHeadless=true` | Same as Headless API + `DeployInVPC=true` | Same as VPC Secured Mode + `DeployBastionHost=true` |
+| **VPC Parameters** | None | `VpcId`, `PrivateSubnetIds`, `ApiGatewayVpcEndpointId`, `LambdaSecurityGroupId` | Same as Headless API | Same as Headless API |
+| **Bastion Parameters** | None | None | None | `BastionHostSubnetId`, `BastionHostSecurityGroupId` |
+| **When to Choose** | You have your own integration layer, or are evaluating the solution | You need API access but don't require full network isolation for core processing | You need API access with all compute isolated in your VPC | You need to call the API from your laptop during development |
 
 ### What Gets Deployed in Each Package
 
 **Vanilla (all packages include this):**
-- Core document processing engine (all 3 patterns)
+- Core document processing engine (Pattern 2 only in GovCloud)
 - Step Functions workflows
 - S3 buckets, DynamoDB tables, SQS queues, EventBridge rules
 - CloudWatch dashboards, alarms, SNS notifications
 - KMS encryption keys
 
-**API + Private Networking adds:**
+**Headless API adds:**
 - Private API Gateway with `/jobs` endpoints (POST, GET)
 - Cognito User Pool with machine-to-machine client credentials
-- VPC-enabled Lambda functions for API handling
-- VPC endpoint integration for private API access
+- VPC-enabled Lambda functions for API handling and batch pre-processing
+
+**VPC Secured Mode adds:**
+- Deploys all core document processing Lambda functions into the VPC
 
 **Bastion adds:**
 - EC2 instance in a public subnet for SSM Session Manager tunneling
@@ -74,17 +77,19 @@ python scripts/generate_govcloud_template.py my-bucket my-prefix us-east-1
 
 ## Step 2: Deploy
 
-Deploy the generated template using the AWS CloudFormation console (recommended) or the AWS CLI. Choose the command that matches your desired [deployment package](#deployment-packages).
+Deploy the generated template using the AWS CloudFormation console or the AWS CLI. Choose the CLI command that matches your desired [deployment package](#deployment-packages).
+
+> **Note:** The `--s3-bucket` value must be the full bucket name created in Step 1 (`{bucket-basename}-{region}`, e.g. `my-bucket-govcloud-us-gov-west-1`).
 
 ### Option A: Vanilla (no API, no VPC)
 
 ```bash
 aws cloudformation deploy \
   --template-file .aws-sam/idp-govcloud.yaml \
-  --stack-name my-idp-govcloud-stack \
+  --stack-name {your-stack-name} \
   --region us-gov-west-1 \
   --s3-bucket {s3-bucket-govcloud} \
-  --s3-prefix idp-headless \
+  --s3-prefix {your-s3-prefix} \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameter-overrides \
     IDPPattern="Pattern2 - Packet processing with Textract and Bedrock"
@@ -95,18 +100,20 @@ With this deployment, interact with the system via:
 - IDP CLI (`idp-cli`)
 - SDK integration
 
-### Option B: API + Private Networking (production)
+### Option B: Headless API
+
 
 ```bash
 aws cloudformation deploy \
   --template-file .aws-sam/idp-govcloud.yaml \
-  --stack-name my-idp-govcloud-stack \
+  --stack-name {your-stack-name} \
   --region us-gov-west-1 \
   --s3-bucket {s3-bucket-govcloud} \
-  --s3-prefix idp-headless \
+  --s3-prefix {your-s3-prefix} \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameter-overrides \
     IDPPattern="Pattern2 - Packet processing with Textract and Bedrock" \
+    EnableHeadless=true \
     VpcId=vpc-xxxxxxxxx \
     PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,subnet-xxxxx \
     ApiGatewayVpcEndpointId=vpce-xxxxxxxxx \
@@ -114,20 +121,47 @@ aws cloudformation deploy \
     ApiStageName=beta
 ```
 
-This enables the `/jobs` REST API accessible from within your VPC. See [Batch Jobs REST API](./govcloud-batch-api.md) for usage.
+This enables the `/jobs` REST API as a Private API Gateway accessible only from within your VPC. Core document processing Lambdas remain outside the VPC. See [Batch Jobs REST API](./govcloud-batch-api.md) for usage.
 
-### Option C: API + Private Networking + Bastion (development)
+### Option C: Headless API + VPC Secured Mode (full isolation)
+Make sure that all prerequisites defined [here](./vpc-secured-mode.md) are met before deploying into a managed VPC.  
 
 ```bash
 aws cloudformation deploy \
   --template-file .aws-sam/idp-govcloud.yaml \
-  --stack-name my-idp-govcloud-stack \
+  --stack-name {your-stack-name} \
   --region us-gov-west-1 \
   --s3-bucket {s3-bucket-govcloud} \
-  --s3-prefix idp-headless \
+  --s3-prefix {your-s3-prefix} \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameter-overrides \
     IDPPattern="Pattern2 - Packet processing with Textract and Bedrock" \
+    EnableHeadless=true \
+    DeployInVPC=true \
+    VpcId=vpc-xxxxxxxxx \
+    PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,subnet-xxxxx \
+    ApiGatewayVpcEndpointId=vpce-xxxxxxxxx \
+    LambdaSecurityGroupId=sg-xxxxxxxxx \
+    ApiStageName=beta
+```
+
+This deploys all Lambda functions (headless and core processing) into the VPC for full network isolation. See [Batch Jobs REST API](./govcloud-batch-api.md) for usage.
+
+### Option D: Headless API + VPC Secured Mode + Bastion (development)
+Make sure that all prerequisites defined [here](./vpc-secured-mode.md) are met before deploying into a managed VPC.
+
+```bash
+aws cloudformation deploy \
+  --template-file .aws-sam/idp-govcloud.yaml \
+  --stack-name {your-stack-name} \
+  --region us-gov-west-1 \
+  --s3-bucket {s3-bucket-govcloud} \
+  --s3-prefix {your-s3-prefix} \
+  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --parameter-overrides \
+    IDPPattern="Pattern2 - Packet processing with Textract and Bedrock" \
+    EnableHeadless=true \
+    DeployInVPC=true \
     VpcId=vpc-xxxxxxxxx \
     PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,subnet-xxxxx \
     ApiGatewayVpcEndpointId=vpce-xxxxxxxxx \
@@ -138,11 +172,79 @@ aws cloudformation deploy \
     BastionHostSecurityGroupId=sg-xxxxxxxxx
 ```
 
-This adds a bastion host for local API access via SSM tunnel. See [Batch Jobs REST API — Local Access via Bastion Tunnel](./govcloud-batch-api.md#local-api-access-via-bastion-tunnel) for setup.
+This adds a bastion host for local API access via SSM tunnel. See [Private API Access via Bastion Tunnel](./govcloud-batch-api.md#private-api-access-via-bastion-tunnel) for setup.
+
+## Step 3: Verify Your Deployment
+
+After the stack reaches `CREATE_COMPLETE`, verify it's working.
+
+### All Deployments
+
+```bash
+# Confirm stack status
+aws cloudformation describe-stacks \
+  --stack-name {your-stack-name} \
+  --region us-gov-west-1 \
+  --query 'Stacks[0].StackStatus'
+
+# Get key outputs
+aws cloudformation describe-stacks \
+  --stack-name {your-stack-name} \
+  --region us-gov-west-1 \
+  --query 'Stacks[0].Outputs'
+```
+
+### Test Document Processing (Vanilla / All Options)
+
+Upload a sample document and monitor progress:
+
+```bash
+# Upload to input bucket (get bucket name from stack outputs: S3InputBucketName)
+aws s3 cp my-document.pdf s3://{input-bucket}/my-document.pdf
+
+# Monitor processing status
+./scripts/lookup_file_status.sh my-document.pdf {your-stack-name}
+```
+
+Or navigate to the Step Functions console using the `StateMachineConsoleURL` from stack outputs to visually monitor workflow progress.
+
+### Test API (Options B, C, and D)
+
+For Option D (Bastion), start the SSM tunnel first — see [Private API Access via Bastion Tunnel](./govcloud-batch-api.md#private-api-access-via-bastion-tunnel).
+
+```bash
+# Generate a bearer token
+TOKEN=$(./scripts/get_api_token.sh {your-stack-name})
+
+# Create a job (get endpoint URL from stack outputs: ApiGatewayEndpoint)
+curl -X POST {api-endpoint}/jobs \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"fileName": "my-documents.zip"}'
+
+# Check job status (use jobId from the POST response)
+curl {api-endpoint}/jobs/{job-id} \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+See [Batch Jobs REST API](./govcloud-batch-api.md) for the full API reference including file upload and response formats.
 
 ## Parameter Reference
 
-### VPC Parameters (required for Options B and C)
+### Headless API Parameters (required for Options B, C, and D)
+
+| Parameter | Description |
+|---|---|
+| `EnableHeadless` | Set to `true` to deploy the Jobs REST API Gateway and supporting Lambda functions |
+| `ApiStageName` | API Gateway deployment stage name (default: `beta`) |
+
+### VPC Secured Mode Parameter (required for Options C and D)
+
+| Parameter | Description |
+|---|---|
+| `DeployInVPC` | Set to `true` to deploy all core document processing Lambda functions into the VPC |
+
+### VPC Parameters (required for Options B, C, and D)
 
 | Parameter | Description |
 |---|---|
@@ -150,9 +252,8 @@ This adds a bastion host for local API access via SSM tunnel. See [Batch Jobs RE
 | `PrivateSubnetIds` | Comma-separated private subnet IDs (minimum 2 for HA) |
 | `ApiGatewayVpcEndpointId` | VPC endpoint for private API Gateway access |
 | `LambdaSecurityGroupId` | Security group for VPC-enabled Lambda functions |
-| `ApiStageName` | API Gateway deployment stage name (default: `beta`) |
 
-### Bastion Parameters (Option C only)
+### Bastion Parameters (Option D only)
 
 | Parameter | Description |
 |---|---|

@@ -1,11 +1,10 @@
 # GovCloud Batch Jobs REST API
 
-This document covers the Batch Jobs REST API available in GovCloud deployments that include the [API + Private Networking](./govcloud-deployment.md#deployment-packages) deployment package.
+This document covers the Batch Jobs REST API available in GovCloud deployments that include the [Headless API](./govcloud-deployment.md#deployment-packages) deployment package.
 
 ## Overview
 
-The REST API provides programmatic access to document processing via `/jobs` endpoints on a private API Gateway. It requires:
-- VPC deployment parameters (see [Deployment Guide — Option B](./govcloud-deployment.md#option-b-api--private-networking-production))
+The REST API provides programmatic access to document processing via `/jobs` endpoints on a Private API Gateway accessible only from within your VPC. It requires:
 - OAuth2 bearer token authentication via Cognito client credentials
 
 ## Authentication
@@ -155,30 +154,12 @@ curl ${API_GATEWAY_ENDPOINT}/jobs/{job_id} \
 | `SUCCEEDED` | All files completed |
 | `PARTIALLY_SUCCEEDED` | Some files completed, some failed/aborted. The results.zip will not include output data from documents that did not complete processing |
 | `ABORTED` | All files aborted |
-| `FAILED` | All files failed |
+| `FAILED` | All files failed or in failed/aborted states |
 
-## Access Methods Without the API
-
-If you deployed the [Vanilla package](./govcloud-deployment.md#option-a-vanilla-no-api-no-vpc) (no VPC parameters), you can still interact with the system:
-
-### Direct S3 Upload
-
-```bash
-# Upload documents directly to input bucket
-aws s3 cp my-document.pdf s3://InputBucket/my-document.pdf
-```
-
-Monitor progress using the lookup script:
-
-```bash
-./scripts/lookup_file_status.sh documents/my-document.pdf MyStack
-```
-
-Or navigate to the AWS Step Functions workflow using the link in the stack Outputs tab in CloudFormation to visually monitor workflow progress.
 
 ## Private API Access via Bastion Tunnel
 
-If you deployed with the [Bastion package](./govcloud-deployment.md#option-c-api--private-networking--bastion-development), you can access the private API Gateway from your local machine.
+If you deployed with the [Bastion package](./govcloud-deployment.md#option-d-headless-api--vpc-secured-mode--bastion-development), you can access the private API Gateway from your local machine.
 
 ### Prerequisites
 
@@ -207,8 +188,11 @@ In a separate terminal:
 ### Step 3: Invoke the API
 
 ```bash
-curl ${API_GATEWAY_ENDPOINT}/jobs \
-  -H "Authorization: Bearer $(./scripts/get_api_token.sh <STACK_NAME>)"
+# Create a job (get endpoint URL from stack outputs: ApiGatewayEndpoint)
+curl -X POST {api-endpoint}/jobs \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"fileName": "my-documents.zip"}'
 ```
 
 ## Related Documentation
