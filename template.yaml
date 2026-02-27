@@ -1089,6 +1089,81 @@ Resources:
       SourceCodeHash: <LAMBDA_HASH_TOKEN>
 
   ##########################################################################
+  # Read previous IDPPattern from SSM before PATTERNSTACK overwrites it
+  # This detects Pattern-1 → Unified upgrades so BDA can be auto-enabled
+  ##########################################################################
+
+  ReadPreviousIDPPatternFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access
+          - id: W92
+            reason: Reserved concurrency not required
+    # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Handler: index.handler
+      Runtime: python3.12
+      Timeout: 10
+      InlineCode: |
+        import boto3, json, cfnresponse
+        def handler(event, context):
+            print(json.dumps(event))
+            response_data = {'IDPPattern': ''}
+            try:
+                if event['RequestType'] in ('Create', 'Update'):
+                    ssm_name = event['ResourceProperties'].get('SettingsParameterName', '')
+                    if ssm_name:
+                        ssm = boto3.client('ssm')
+                        try:
+                            param = ssm.get_parameter(Name=ssm_name)
+                            settings = json.loads(param['Parameter']['Value'])
+                            response_data['IDPPattern'] = settings.get('IDPPattern', '')
+                            print(f"Previous IDPPattern: {response_data['IDPPattern']}")
+                        except ssm.exceptions.ParameterNotFound:
+                            print("Settings parameter not found (new stack)")
+                        except Exception as e:
+                            print(f"Error reading settings: {e}")
+            except Exception as e:
+                print(f"Error: {e}")
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+      Environment:
+        Variables:
+          LOG_LEVEL: INFO
+      LoggingConfig:
+        LogGroup: !Ref ReadPreviousIDPPatternFunctionLogGroup
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${SettingsParameter}"
+
+  ReadPreviousIDPPatternFunctionLogGroup:
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: "LogGroup does not require KMS Key Id"
+    # checkov:skip=CKV_AWS_158: "LogGroup does not require KMS Key Id"
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: !Ref LogRetentionDays
+
+  PreviousIDPPatternValue:
+    Type: Custom::ReadPreviousIDPPattern
+    DependsOn: SettingsParameter
+    Properties:
+      ServiceToken: !GetAtt ReadPreviousIDPPatternFunction.Arn
+      SettingsParameterName: !Ref SettingsParameter
+
+  ##########################################################################
   # Nested stack for selected pattern
   ##########################################################################
 
@@ -1096,6 +1171,7 @@ Resources:
     DependsOn:
       - IsStacknameLengthOK
       - CopyConfigurationFiles
+      - PreviousIDPPatternValue
     Type: AWS::CloudFormation::Stack
     Properties:
       TemplateURL: ./patterns/unified/.aws-sam/packaged.yaml
@@ -1149,6 +1225,7 @@ Resources:
         CustomClassificationModelARN: !Ref Pattern2CustomClassificationModelARN
         CustomExtractionModelARN: !Ref Pattern2CustomExtractionModelARN
         EnableECRImageScanning: !Ref EnableECRImageScanning
+        PreviousIDPPattern: !GetAtt PreviousIDPPatternValue.IDPPattern
 
   ##########################################################################
   # Encryption key

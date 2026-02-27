@@ -62,6 +62,11 @@ Parameters:
     Default: ''
     Description: Bedrock Data Automation (BDA) project ARN
 
+  PreviousIDPPattern:
+    Type: String
+    Default: ''
+    Description: Previous IDPPattern from SSM (used to detect Pattern-1 → Unified upgrades)
+
   UpdateConfigurationFunctionArn:
     Type: String
 
@@ -1697,6 +1702,7 @@ Resources:
       CustomClassificationModelARN: !Ref CustomClassificationModelARN
       CustomExtractionModelARN: !Ref CustomExtractionModelARN
       BDAProjectArn: !Ref BDAProjectArn
+      PreviousIDPPattern: !Ref PreviousIDPPattern
 
 
   ##########################################################################

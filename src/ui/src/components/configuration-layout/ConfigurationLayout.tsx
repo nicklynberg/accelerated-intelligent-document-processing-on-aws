@@ -2143,7 +2143,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 <Button variant="normal" onClick={() => fetchConfiguration(currentVersionName)} loading={refreshing} iconName="refresh">
                   Refresh
                 </Button>
-                {(isPattern1 || mergedConfig?.use_bda) && (
+                {(isPattern1 || mergedConfig?.use_bda || formValues?.use_bda) && (
                   <>
                     <Button
                       variant="normal"
@@ -2153,6 +2153,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
                         setShowSyncFromBdaModal(true);
                       }}
                       loading={syncingDirection === 'bda_to_idp'}
+                      disabled={hasUnsavedChanges}
+                      title={hasUnsavedChanges ? 'Save your changes first' : undefined}
                     >
                       Sync from BDA
                     </Button>
@@ -2163,6 +2165,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
                         setShowSyncToBdaConfirmModal(true);
                       }}
                       loading={syncingDirection === 'idp_to_bda'}
+                      disabled={hasUnsavedChanges}
+                      title={hasUnsavedChanges ? 'Save your changes first' : undefined}
                     >
                       Sync to BDA
                     </Button>
@@ -2280,7 +2284,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
           )}
 
           {/* BDA Project Status Banner */}
-          {(isPattern1 || mergedConfig?.use_bda) && currentVersion && (
+          {(isPattern1 || mergedConfig?.use_bda || formValues?.use_bda) && currentVersion && (
             <>
               {currentVersion.bdaProjectArn ? (
                 <Alert

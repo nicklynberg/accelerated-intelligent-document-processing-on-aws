@@ -582,6 +582,7 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                 "CustomClassificationModelARN",
                 "CustomExtractionModelARN",
                 "BDAProjectArn",
+                "PreviousIDPPattern",
             }
             
             for prop_name, prop_value in properties.items():
@@ -686,6 +687,30 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                         logger.info(f"Linked BDA project to default version (upgrade, needs-sync): {bda_project_arn}")
                 except Exception as e:
                     logger.warning(f"Failed to link BDA project ARN to default version: {e}")
+
+            # Auto-enable BDA on ALL config versions when upgrading from a Pattern-1 stack
+            # This handles the case where Pattern1BDAProjectArn was empty (auto-created sample project)
+            previous_idp_pattern = properties.get("PreviousIDPPattern", "").strip()
+            if previous_idp_pattern and "pattern" in previous_idp_pattern.lower() and "1" in previous_idp_pattern:
+                logger.info(f"Detected former Pattern-1 stack (PreviousIDPPattern={previous_idp_pattern}) — auto-enabling BDA on all config versions")
+                try:
+                    all_versions = manager.list_versions()
+                    for ver in all_versions:
+                        ver_name = ver.get("version", "")
+                        try:
+                            ver_config = manager.get_configuration("Config", ver_name)
+                            if ver_config and isinstance(ver_config, dict):
+                                if not ver_config.get("use_bda"):
+                                    ver_config["use_bda"] = True
+                                    manager.save_configuration("Config", ver_config, version=ver_name)
+                                    logger.info(f"Set use_bda=true on config version '{ver_name}'")
+                                # Also set bdaSyncStatus to needs-sync
+                                manager.set_bda_project_arn(ver_name, sync_status="needs-sync")
+                                logger.info(f"Set bdaSyncStatus=needs-sync on config version '{ver_name}'")
+                        except Exception as ve:
+                            logger.warning(f"Failed to auto-enable BDA on version '{ver_name}': {ve}")
+                except Exception as e:
+                    logger.warning(f"Failed to enumerate config versions for BDA auto-enable: {e}")
 
             cfnresponse.send(
                 event,
