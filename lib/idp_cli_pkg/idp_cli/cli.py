@@ -142,7 +142,7 @@ TEMPLATE_URLS = {
 
 
 @click.group()
-@click.version_option(version="0.4.16")
+@click.version_option(version="0.5.0")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -164,11 +164,6 @@ def cli():
 
 @cli.command()
 @click.option("--stack-name", required=True, help="CloudFormation stack name")
-@click.option(
-    "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
-    help="IDP pattern to deploy (required for new stacks)",
-)
 @click.option(
     "--admin-email", help="Admin user email address (required for new stacks)"
 )
@@ -199,7 +194,6 @@ def cli():
     type=click.Choice(["true", "false"]),
     help="Enable Human-in-the-Loop (default: false)",
 )
-@click.option("--pattern-config", help="Pattern configuration preset")
 @click.option(
     "--custom-config",
     help="Path to local config file or S3 URI (e.g., ./config.yaml or s3://bucket/config.yaml)",
@@ -213,14 +207,12 @@ def cli():
 @click.option("--role-arn", help="CloudFormation service role ARN")
 def deploy(
     stack_name: str,
-    pattern: str,
     admin_email: str,
     from_code: Optional[str],
     template_url: str,
     max_concurrent: int,
     log_level: str,
     enable_hitl: str,
-    pattern_config: Optional[str],
     custom_config: Optional[str],
     parameters: Optional[str],
     wait: bool,
@@ -231,16 +223,16 @@ def deploy(
     """
     Deploy or update IDP stack from command line
     
-    For new stacks, --pattern and --admin-email are required.
+    For new stacks, --admin-email is required.
     For existing stacks, only specify parameters you want to update.
     
     Examples:
     
-      # Create new stack with Pattern 2
-      idp-cli deploy --stack-name my-idp --pattern pattern-2 --admin-email user@example.com
+      # Create new stack
+      idp-cli deploy --stack-name my-idp --admin-email user@example.com
       
-      # Deploy from local code (NEW!)
-      idp-cli deploy --stack-name my-idp --from-code . --pattern pattern-2 --admin-email user@example.com --wait
+      # Deploy from local code
+      idp-cli deploy --stack-name my-idp --from-code . --admin-email user@example.com --wait
       
       # Update existing stack with local config file
       idp-cli deploy --stack-name my-idp --custom-config ./my-config.yaml
@@ -252,7 +244,7 @@ def deploy(
       idp-cli deploy --stack-name my-idp --max-concurrent 200 --wait
       
       # Create with additional parameters
-      idp-cli deploy --stack-name my-idp --pattern pattern-2 \\
+      idp-cli deploy --stack-name my-idp \\
           --admin-email user@example.com \\
           --parameters "DataRetentionInDays=90,ErrorThreshold=5"
     """
@@ -364,21 +356,13 @@ def deploy(
             console.print(
                 f"[bold blue]Updating existing IDP stack: {stack_name}[/bold blue]"
             )
-            if pattern:
-                console.print(f"Pattern: {pattern}")
             if admin_email:
                 console.print(f"Admin Email: {admin_email}")
         else:
-            # New stack - require pattern and admin_email
+            # New stack - require admin_email
             console.print(
                 f"[bold blue]Creating new IDP stack: {stack_name}[/bold blue]"
             )
-
-            if not pattern:
-                console.print(
-                    "[red]✗ Error: --pattern is required when creating a new stack[/red]"
-                )
-                sys.exit(1)
 
             if not admin_email:
                 console.print(
@@ -386,7 +370,6 @@ def deploy(
                 )
                 sys.exit(1)
 
-            console.print(f"Pattern: {pattern}")
             console.print(f"Admin Email: {admin_email}")
 
         console.print()
@@ -402,12 +385,10 @@ def deploy(
         # Build parameters - only pass explicitly provided values
         # Convert Click defaults to None when not explicitly provided by user
         cfn_parameters = build_parameters(
-            pattern=pattern,
             admin_email=admin_email,
             max_concurrent=max_concurrent if max_concurrent != 100 else None,
             log_level=log_level if log_level != "INFO" else None,
             enable_hitl=enable_hitl if enable_hitl != "false" else None,
-            pattern_config=pattern_config,
             custom_config=custom_config,
             additional_params=additional_params,
             region=region,
@@ -3279,7 +3260,7 @@ def remove_residual_resources_from_deleted_stacks(
 )
 @click.option(
     "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
+    type=click.Choice(["pattern-1", "pattern-2"]),
     default="pattern-2",
     help="Pattern to use for defaults (default: pattern-2)",
 )
@@ -3396,7 +3377,7 @@ def config_create(
 )
 @click.option(
     "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
+    type=click.Choice(["pattern-1", "pattern-2"]),
     default="pattern-2",
     help="Pattern to validate against (default: pattern-2)",
 )
@@ -3563,7 +3544,7 @@ def config_validate(
 )
 @click.option(
     "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
+    type=click.Choice(["pattern-1", "pattern-2"]),
     help="Pattern for validation (auto-detected if not specified)",
 )
 @click.option(
@@ -3655,8 +3636,6 @@ def config_upload(
                         detected_pattern = "pattern-1"
                     elif "Pattern2" in logical_id:
                         detected_pattern = "pattern-2"
-                    elif "Pattern3" in logical_id:
-                        detected_pattern = "pattern-3"
 
             if not config_table:
                 console.print("[red]✗ ConfigurationTable not found in stack[/red]")
@@ -3791,7 +3770,7 @@ def config_upload(
 )
 @click.option(
     "--pattern",
-    type=click.Choice(["pattern-1", "pattern-2", "pattern-3"]),
+    type=click.Choice(["pattern-1", "pattern-2"]),
     help="Pattern for minimal diff (auto-detected if not specified)",
 )
 @click.option(
@@ -3889,8 +3868,6 @@ def config_download(
                 )
                 if classification_method == "bda":
                     pattern = "pattern-1"
-                elif classification_method == "udop":
-                    pattern = "pattern-3"
                 else:
                     pattern = "pattern-2"
                 console.print(f"[dim]Auto-detected pattern: {pattern}[/dim]")
