@@ -1732,6 +1732,58 @@ class OcrService:
             # Default to PDF for unknown binary files
             return "pdf"
 
+    def _ocr_image_bytes(self, img_bytes: bytes) -> str:
+        """OCR raw image bytes and return extracted text.
+
+        Used as a callback for DOCX image extraction so that images embedded
+        in Word documents are processed through the configured OCR backend
+        (Textract or Bedrock).
+
+        Args:
+            img_bytes: Raw image bytes (PNG, JPEG, etc.)
+
+        Returns:
+            Extracted text from the image.
+        """
+        if self.backend == "none":
+            return "[Image]"
+
+        try:
+            if self.backend == "bedrock":
+                # Prepare image for Bedrock
+                image_content = image.prepare_bedrock_image_attachment(img_bytes)
+                content = [
+                    {"text": self.bedrock_config["task_prompt"]},
+                    image_content,
+                ]
+                response_with_metering = bedrock.invoke_model(
+                    model_id=self.bedrock_config["model_id"],
+                    system_prompt=self.bedrock_config["system_prompt"],
+                    content=content,
+                    temperature=0.0,
+                    top_p=0.1,
+                    top_k=5,
+                    max_tokens=4096,
+                    context="OCR",
+                )
+                return bedrock.extract_text_from_response(response_with_metering)
+
+            else:
+                # Textract backend (default)
+                textract_result = self.textract_client.detect_document_text(
+                    Document={"Bytes": img_bytes}
+                )
+                # Extract text from LINE blocks
+                lines = []
+                for block in textract_result.get("Blocks", []):
+                    if block.get("BlockType") == "LINE" and "Text" in block:
+                        lines.append(block["Text"])
+                return "\n".join(lines)
+
+        except Exception as e:
+            logger.warning(f"Failed to OCR embedded image: {e}")
+            return "[Image - OCR failed]"
+
     def _process_non_pdf_document(
         self, file_type: str, content: bytes
     ) -> List[Tuple[bytes, str]]:
@@ -1758,7 +1810,9 @@ class OcrService:
                 return self.document_converter.convert_excel_to_pages(content)
 
             elif file_type == "docx":
-                return self.document_converter.convert_word_to_pages(content)
+                return self.document_converter.convert_word_to_pages(
+                    content, ocr_image_callback=self._ocr_image_bytes
+                )
 
             else:
                 # Fallback to text

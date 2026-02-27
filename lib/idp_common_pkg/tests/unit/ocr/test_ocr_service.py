@@ -902,3 +902,88 @@ class TestOcrService:
 
                 mock_none.assert_called_once_with(0, ANY, "bucket", "prefix")
                 assert result == ("result", "metering")
+
+    # ------------------------------------------------------------------
+    # _ocr_image_bytes tests
+    # ------------------------------------------------------------------
+
+    def test_ocr_image_bytes_none_backend(self):
+        """Test _ocr_image_bytes returns placeholder for none backend."""
+        with patch("boto3.client"):
+            service = OcrService(backend="none")
+            result = service._ocr_image_bytes(b"fake-image")
+            assert result == "[Image]"
+
+    def test_ocr_image_bytes_textract_backend(self, mock_textract_response):
+        """Test _ocr_image_bytes extracts text via Textract."""
+        with patch("boto3.client"):
+            service = OcrService(region="us-east-1", backend="textract")
+            service.textract_client = MagicMock()
+            service.textract_client.detect_document_text.return_value = (
+                mock_textract_response
+            )
+
+            result = service._ocr_image_bytes(b"fake-image")
+
+            service.textract_client.detect_document_text.assert_called_once_with(
+                Document={"Bytes": b"fake-image"}
+            )
+            assert "Sample text line 1" in result
+            assert "Sample text line 2" in result
+
+    def test_ocr_image_bytes_bedrock_backend(
+        self, mock_bedrock_config, mock_bedrock_response
+    ):
+        """Test _ocr_image_bytes extracts text via Bedrock."""
+        with patch("boto3.client"):
+            service = OcrService(
+                region="us-east-1",
+                backend="bedrock",
+                bedrock_config=mock_bedrock_config,
+            )
+
+            with (
+                patch("idp_common.ocr.service.image") as mock_image,
+                patch("idp_common.ocr.service.bedrock") as mock_bedrock,
+            ):
+                mock_image.prepare_bedrock_image_attachment.return_value = {
+                    "image": {"format": "png", "source": {"bytes": b"fake"}}
+                }
+                mock_bedrock.invoke_model.return_value = mock_bedrock_response
+                mock_bedrock.extract_text_from_response.return_value = (
+                    "Extracted text from document"
+                )
+
+                result = service._ocr_image_bytes(b"fake-image")
+
+            assert result == "Extracted text from document"
+            mock_bedrock.invoke_model.assert_called_once()
+
+    def test_ocr_image_bytes_handles_errors(self):
+        """Test _ocr_image_bytes returns fallback on error."""
+        with patch("boto3.client"):
+            service = OcrService(region="us-east-1", backend="textract")
+            service.textract_client = MagicMock()
+            service.textract_client.detect_document_text.side_effect = Exception(
+                "API error"
+            )
+
+            result = service._ocr_image_bytes(b"fake-image")
+            assert "OCR failed" in result
+
+    def test_process_non_pdf_docx_passes_callback(self):
+        """Test _process_non_pdf_document passes OCR callback for DOCX."""
+        with patch("boto3.client"):
+            service = OcrService(region="us-east-1")
+
+            with patch.object(
+                service.document_converter, "convert_word_to_pages"
+            ) as mock_convert:
+                mock_convert.return_value = [(b"page-img", "page-text")]
+
+                result = service._process_non_pdf_document("docx", b"fake-docx")
+
+                mock_convert.assert_called_once_with(
+                    b"fake-docx", ocr_image_callback=service._ocr_image_bytes
+                )
+                assert result == [(b"page-img", "page-text")]
