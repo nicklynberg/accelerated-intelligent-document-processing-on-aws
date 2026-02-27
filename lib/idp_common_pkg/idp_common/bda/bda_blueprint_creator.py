@@ -141,12 +141,12 @@ class BDABlueprintCreator:
                                     "ELEMENT",
                                 ]
                             },
-                            "boundingBox": {"state": "ENABLED"},
+                            "boundingBox": {"state": "DISABLED"},
                         },
-                        "generativeField": {"state": "ENABLED"},
+                        "generativeField": {"state": "DISABLED"},
                         "outputFormat": {
-                            "textFormat": {"types": ["PLAIN_TEXT"]},
-                            "additionalFileFormat": {"state": "ENABLED"},
+                            "textFormat": {"types": ["MARKDOWN"]},
+                            "additionalFileFormat": {"state": "DISABLED"},
                         },
                     },
                     "image": {
@@ -167,7 +167,6 @@ class BDABlueprintCreator:
                             "category": {
                                 "state": "ENABLED",
                                 "types": [
-                                    "CONTENT_MODERATION",
                                     "TEXT_DETECTION",
                                 ],
                             },
@@ -175,19 +174,17 @@ class BDABlueprintCreator:
                         },
                         "generativeField": {
                             "state": "ENABLED",
-                            "types": ["VIDEO_SUMMARY"],
+                            "types": [
+                                "VIDEO_SUMMARY",
+                                "CHAPTER_SUMMARY",
+                            ],
                         },
                     },
                     "audio": {
                         "extraction": {
                             "category": {"state": "ENABLED", "types": ["TRANSCRIPT"]}
                         },
-                        "generativeField": {
-                            "state": "ENABLED",
-                            "types": [
-                                "AUDIO_SUMMARY",
-                            ],
-                        },
+                        "generativeField": {"state": "DISABLED"},
                     },
                 },
                 customOutputConfiguration={

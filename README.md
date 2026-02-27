@@ -66,7 +66,7 @@ Concierge support for customization, deployment, and integration of production u
 
 ## Architecture Overview
 
-![Architecture Diagram](./images/IDP.drawio.png)
+![Architecture Diagram](./images/IDP.UnifiedPatterns.drawio.png)
 
 The solution uses a modular architecture with nested CloudFormation stacks to support multiple document processing patterns while maintaining common infrastructure for queueing, tracking, and monitoring.
 

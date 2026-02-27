@@ -14,7 +14,7 @@ SPDX-License-Identifier: MIT-0
 4. Step Functions workflow runs the steps defined in the selected pattern to process the document and generate output in the Output S3 bucket
 5. Workflow completion events update tracking and metrics
 
-![Architecture Diagram](../images/IDP.drawio.png)
+![Architecture Diagram](../images/IDP.UnifiedPatterns.drawio.png)
 
 ## Components
 
@@ -91,24 +91,10 @@ For detailed information about configuration capabilities, see [configuration.md
 
 The solution uses a **Unified Pattern** that combines both BDA and pipeline processing modes into a single deployment. The `use_bda` configuration flag (set via the UI) controls which processing path is used at runtime:
 
+![Unified Architecture](../images/IDP.UnifiedPatterns.drawio.png)
+
 - **Pipeline mode** (`use_bda: false`, default) — OCR → Classification → Extraction → Assessment → Rule Validation → Summarization → Evaluation
 - **BDA mode** (`use_bda: true`) — BDA Invoke → BDA Process Results → Rule Validation → Summarization → Evaluation
-
-### Pipeline Mode (default)
-
-![Pipeline Architecture](../images/IDP-Pattern2-Bedrock.drawio.png)
-*Pipeline mode uses Amazon Textract for OCR, then Bedrock LLM (Nova or Claude) for classification, extraction, assessment, and summarization.*
-
-For detailed reference on pipeline-specific concepts, see [pattern-2.md](./pattern-2.md).
-
-This mode also supports few-shot examples for classification and extraction. See [few-shot-examples.md](./few-shot-examples.md).
-
-### BDA Mode
-
-![BDA Architecture](../images/IDP-Pattern1-BDA.drawio.png)
-*BDA mode uses AWS Bedrock Data Automation for end-to-end document processing, including OCR, classification, and extraction.*
-
-For detailed reference on BDA-specific concepts, see [pattern-1.md](./pattern-1.md).
 
 ### Shared Processing Steps
 
@@ -145,18 +131,6 @@ The solution creates an integrated CloudWatch dashboard that combines metrics fr
 3. The `DashboardMerger` Lambda function combines these dashboards
 
 For detailed information about monitoring capabilities, see [monitoring.md](./monitoring.md).
-
-## Adding New Patterns
-
-To add a new processing pattern:
-
-1. Create a new directory under `patterns/`
-2. Implement the pattern-specific resources in a CloudFormation template
-3. Add the pattern to the `IDPPattern` parameter's allowed values
-4. Add pattern-specific parameters to the main template
-5. Create a new condition and nested stack resource for the pattern
-
-The new pattern will automatically inherit all the core infrastructure and monitoring capabilities while maintaining its own specific processing logic and metrics.
 
 ## Web UI Architecture
 
