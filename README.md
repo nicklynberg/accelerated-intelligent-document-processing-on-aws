@@ -31,9 +31,9 @@ SPDX-License-Identifier: MIT-0
 
 A scalable, serverless solution for automated document processing and information extraction using AWS services. This system combines OCR capabilities with generative AI to convert unstructured documents into structured data at scale.
 
-TODO Placeholder - replace asset with new short demo video
 
-https://github.com/user-attachments/assets/272b543b-e506-48ce-acc1-361422d22322
+https://github.com/user-attachments/assets/fc2652b5-a9cc-42d7-9975-887c8320a2f5
+
 
 Concierge support for customization, deployment, and integration of production use cases is available through [AWS Professional Services](https://aws.amazon.com/professional-services/).
 
