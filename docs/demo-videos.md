@@ -27,7 +27,7 @@ A scalable, serverless solution for automated document processing and informatio
 **Duration**: ~3 minutes
 
 
-https://github.com/user-attachments/assets/1ebf132a-c03f-4547-a47a-67b8ec8ce5af
+https://github.com/user-attachments/assets/fc2652b5-a9cc-42d7-9975-887c8320a2f5
 
 
 **Related Documentation**: [README.md](../README.md)
