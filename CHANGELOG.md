@@ -7,7 +7,17 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
-- **MCP Server** — Added additional tool to MCP Server for retrieving results of the processed document from the IDP system.
+- **Scalable Document List and Test Executions** — Comprehensive redesign to eliminate UI and backend bottlenecks when working with thousands of documents. ([#203](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/203))
+  - **TypeDateIndex GSI on TrackingTable**: New DynamoDB Global Secondary Index (`ItemType` + `InitialEventTime`) enables efficient queries by item type (document, testrun, testset) sorted by time, replacing full table scans. Includes 20 projected attributes for list-view rendering without base table fetches.
+  - **GSI Attribute Backfill Mechanism**: Robust Step Functions state machine with parallel scan workers that automatically backfills `ItemType` and `HITLPendingReview` attributes on existing items during stack upgrades. Features timeout-safe continuation, idempotent conditional updates, and automatic trigger via CloudFormation Custom Resource.
+  - **GSI-Based Document List Resolver**: New `listDocuments` Lambda resolver queries the TypeDateIndex GSI with server-side pagination (`limit`/`nextToken`).
+  - **`getDocumentCount` API**: New efficient count query using GSI `Select: 'COUNT'` for accurate document totals without fetching data.
+  - **UI Document List Rewrite**: Eliminated the N+1 query pattern (shard queries → individual `getDocument` per document). Now uses a single paginated `listDocuments` GSI query for all time periods. First page renders immediately with incremental background loading of remaining pages.
+  - **Subscription Optimization**: `onUpdateDocument` events now use subscription data directly instead of triggering individual `getDocument` API calls, eliminating thousands of redundant requests during active processing.
+  - **GSI-Based Test Runs Query**: Replaced full table scan in `get_test_runs()` and `get_test_runs_by_date_range()` with GSI query + BatchGetItem pattern for efficient test run listing with all fields (including Context, ConfigVersion).
+  - **GSI-Based Test Sets Query**: Replaced full table scan in `get_test_sets()` with GSI query + BatchGetItem pattern, avoiding scanning the entire TrackingTable (which includes all documents) just to find ~10 test sets.
+  - **`ItemType` Written on All Creation Paths**: All document, test run, and test set creation paths (DynamoDB service, AppSync resolvers, test runners, dataset deployers) now write `ItemType` and `InitialEventTime` for immediate GSI indexing.
+  - **Improved Error Messages**: Document list errors now show the actual failure reason (e.g., Lambda throttling, timeout details) instead of generic "please try again" messages.
 
 - **GraphQL Type Generation & Unit Testing** — Replaced 60+ hand-written GraphQL query/mutation/subscription files with auto-generated types via `@graphql-codegen`, added typed AWSJSON parsers with unit tests (vitest + jsdom), and integrated a CI codegen-check to prevent type drift.
 
@@ -16,6 +26,9 @@ SPDX-License-Identifier: MIT-0
 - **Load Test Config Version Support** — Added `--config-version` parameter to the `idp-cli load-test` command, enabling load tests to target a specific configuration version. Files uploaded during load tests now include `config-version` S3 metadata, consistent with the `process` command behavior.
 
 - **Deploy Failure Root Cause Analysis** — Enhanced `idp-cli deploy` failure reporting to recursively analyze nested stack events and identify actual root causes. Previously, failures in nested stacks showed only a generic "Embedded stack was not successfully created" message. Now displays a structured "Root Cause Analysis" section with the specific resource, type, and error message from the nested stack that caused the failure, along with cascade failure counts.
+
+- **MCP Server** — Added additional tool to MCP Server for retrieving results of the processed document from the IDP system.
+
 
 ### Changed
 

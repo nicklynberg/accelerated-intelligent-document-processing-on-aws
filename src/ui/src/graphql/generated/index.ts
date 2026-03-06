@@ -555,17 +555,36 @@ export const listDiscoveryJobs = /* GraphQL */ `
 ` as GeneratedQuery<ListDiscoveryJobsQueryVariables, ListDiscoveryJobsQuery>;
 
 export const listDocuments = /* GraphQL */ `
-  query ListDocuments($endDateTime: AWSDateTime, $startDateTime: AWSDateTime) {
-    listDocuments(endDateTime: $endDateTime, startDateTime: $startDateTime) {
+  query ListDocuments($startDateTime: AWSDateTime, $endDateTime: AWSDateTime, $limit: Int, $nextToken: String) {
+    listDocuments(startDateTime: $startDateTime, endDateTime: $endDateTime, limit: $limit, nextToken: $nextToken) {
       Documents {
-        ObjectKey
         PK
         SK
+        ObjectKey
+        ObjectStatus
+        InitialEventTime
+        CompletionTime
+        ConfigVersion
+        EvaluationStatus
+        HITLStatus
+        HITLTriggered
+        HITLCompleted
+        HITLReviewOwner
+        HITLReviewedBy
+        PageCount
       }
       nextToken
     }
   }
 ` as GeneratedQuery<ListDocumentsQueryVariables, ListDocumentsQuery>;
+
+export const getDocumentCount = /* GraphQL */ `
+  query GetDocumentCount($startDateTime: AWSDateTime, $endDateTime: AWSDateTime) {
+    getDocumentCount(startDateTime: $startDateTime, endDateTime: $endDateTime) {
+      count
+    }
+  }
+` as GeneratedQuery<Record<string, unknown>, { getDocumentCount: { count: number } | null }>;
 
 export const listDocumentsByDateRange = /* GraphQL */ `
   query ListDocumentsByDateRange($startDateTime: AWSDateTime!, $endDateTime: AWSDateTime!, $limit: Int, $nextToken: String) {
