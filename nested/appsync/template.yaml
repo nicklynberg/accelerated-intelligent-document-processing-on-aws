@@ -173,13 +173,6 @@ Parameters:
     Type: String
     AllowedValues: ["true", "false"]
   
-  Pattern1BDAProjectArn:
-    Type: String
-  
-  HasPattern1BDAProjectArn:
-    Type: String
-    AllowedValues: ["true", "false"]
-  
   # Lambda Layers from main template
   IDPCommonBaseLayerArn:
     Type: String
@@ -194,7 +187,6 @@ Conditions:
   HasGuardrail: !Equals [!Ref HasGuardrailConfig, "true"]
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
   ShouldCreateReportingBucket: !Equals [!Ref ShouldCreateReportingBucket, "true"]
-  HasBDAProjectArn: !Equals [!Ref HasPattern1BDAProjectArn, "true"]
 
 Resources:
 
@@ -2679,10 +2671,6 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           STACK_NAME: !Ref StackName
-          BDA_PROJECT_ARN: !If
-            - HasBDAProjectArn
-            - !Ref Pattern1BDAProjectArn
-            - !Ref Pattern1BDAProjectArn
       LoggingConfig:
         LogGroup: !Ref SyncBdaIdpResolverFunctionLogGroup
       Policies:

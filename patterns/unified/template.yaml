@@ -9,7 +9,7 @@ Metadata:
   cfn-lint:
     config:
       ignore_checks:
-        - W1030  # BDAProjectArn parameter can be empty string
+        - W1030  # ARN pattern matching when Ref resolves to empty string
 
 Parameters:
   StackName:
@@ -57,10 +57,6 @@ Parameters:
     Type: Number
     Default: 30000
 
-  BDAProjectArn:
-    Type: String
-    Default: ''
-    Description: Bedrock Data Automation (BDA) project ARN
 
   PreviousIDPPattern:
     Type: String
@@ -1745,7 +1741,6 @@ Resources:
       ConfigLibraryHash: !Ref ConfigLibraryHash
       CustomClassificationModelARN: !Ref CustomClassificationModelARN
       CustomExtractionModelARN: !Ref CustomExtractionModelARN
-      BDAProjectArn: !Ref BDAProjectArn
       PreviousIDPPattern: !Ref PreviousIDPPattern
 
 
@@ -2145,7 +2140,6 @@ Resources:
           TRACKING_TABLE: !Ref TrackingTable
           DOCUMENT_TRACKING_MODE: !If [HasAppSyncApi, 'appsync', 'dynamodb']
           DB_NAME: !Ref BDAMetadataTable
-          BDA_PROJECT_ARN: !Ref BDAProjectArn
           WORKING_BUCKET: !Ref WorkingBucket
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
       LoggingConfig:
@@ -3402,7 +3396,6 @@ Resources:
         # BDA branch functions
         InvokeBDALambdaArn: !GetAtt InvokeBDAFunction.Arn
         BDAProcessResultsLambdaArn: !GetAtt BDAProcessResultsFunction.Arn
-        BDAProjectArn: !Ref BDAProjectArn
         WorkingBucket: !Ref WorkingBucket
         # Pipeline branch functions
         OCRFunctionArn: !GetAtt OCRFunction.Arn

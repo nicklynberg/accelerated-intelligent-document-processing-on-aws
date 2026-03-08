@@ -80,14 +80,6 @@ Parameters:
     AllowedPattern: '^(|s3://.*)$'
     ConstraintDescription: Must be empty or a valid S3 URI (e.g., s3://my-bucket/custom-config/config.yaml)
 
-  # Pattern 1 Parameters
-
-  Pattern1BDAProjectArn:
-    Type: String
-    Default: ""
-    AllowedPattern: "^(|^arn:aws[a-z-]*:bedrock:[a-z0-9-]+:.+:data-automation-project/.+)$"
-    Description: Provide a Bedrock Data Automation (BDA) project ARN, or leave blank to create a sample project for processing the sample lending package.
-
   ConfigurationPreset:
     Type: String
     Default: "lending-package-sample"
@@ -357,8 +349,6 @@ Parameters:
     ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
 
 Conditions:
-  HasPattern1BDAProjectArn:
-    !Not [ !Equals [ !Ref Pattern1BDAProjectArn, "" ] ]
   HasGuardrailConfig:
     !And [
       !Not [ !Equals [ !Ref BedrockGuardrailId, "" ] ],
@@ -404,7 +394,6 @@ Metadata:
         Parameters:
           - ConfigurationPreset
           - CustomConfigPath
-          - Pattern1BDAProjectArn
           - Pattern2CustomClassificationModelARN
           - Pattern2CustomExtractionModelARN
       - Label:
@@ -457,8 +446,6 @@ Metadata:
         default: "Admin Email Address"
       AllowedSignUpEmailDomain:
         default: "Allowed Sign Up Email Domain"
-      Pattern1BDAProjectArn:
-        default: "Bedrock Data Automation (BDA) Project ARN"
       Pattern2CustomClassificationModelARN:
         default: "Custom Classification Model ARN"
       Pattern2CustomExtractionModelARN:
@@ -1169,7 +1156,6 @@ Resources:
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
-        BDAProjectArn: !Ref Pattern1BDAProjectArn
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
@@ -1295,8 +1281,6 @@ Resources:
         KnowledgeBaseModelId: !Ref KnowledgeBaseModelId
         ShouldCreateEvaluationBaselineBucket: !If [ShouldCreateEvaluationBaselineBucket, "true", "false"]
         ShouldCreateReportingBucket: !If [ShouldCreateReportingBucket, "true", "false"]
-        Pattern1BDAProjectArn: !Ref Pattern1BDAProjectArn
-        HasPattern1BDAProjectArn: !If [HasPattern1BDAProjectArn, "true", "false"]
                 
         # Lambda Layers
         IDPCommonBaseLayerArn: !Ref IDPCommonBaseLayer
