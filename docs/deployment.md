@@ -427,8 +427,8 @@ cat ./eval-results/eval-test/invoice.pdf/evaluation/report.md
 
 ---
 
-### Method 2: Web UI Testing (Interactive)
-### Method 3: Direct S3 Upload Testing (Simple)
+
+### Method 2: Direct S3 Upload Testing (Simple)
 
 1. Open the `S3InputBucketConsoleURL` and `S3OutputBucketConsoleURL` from the stack Outputs tab
 2. Open the `StateMachineConsoleURL` from the stack Outputs tab
@@ -451,7 +451,7 @@ done
 
 ---
 
-### Method 4: Web UI Testing (Interactive)
+### Method 3: Web UI Testing (Interactive)
 
 1. Open the Web UI URL from the CloudFormation stack's Outputs tab
 2. Log in using your credentials (the temporary password from the email if this is your first login)
@@ -461,37 +461,5 @@ done
 6. Follow the upload process and observe the document processing in the UI
 7. View the extraction results once processing is complete
 
-
-### Testing Individual Lambda Functions Locally
-
-To test any lambda function locally:
-
-1. Change directory to the folder containing the function's `template.yaml`
-2. Create an input event file (some templates are in the `./testing` folder)
-3. Verify `./testing/env.json` and change the region if necessary
-4. Run `sam build` to package the function(s)
-5. Use `sam local` to run the function:
-
-   ```bash
-   sam local invoke OCRFunction -e testing/OCRFunction-event.json --env-vars testing/env.json
-   ```
-
-### Steady-State Volume Testing
-
-Use the load simulator script to test high document volumes:
-
-```bash
-python ./scripts/simulate_load.py -s source_bucket -k prefix/exampledoc.pdf -d idp-kmsxxxxxxxxx -r 500 -t 10
-```
-
-This simulates an incoming document rate of 500 docs per minute for 10 minutes.
-
-### Variable Volume Testing
-
-Use the dynamic load simulator script for variable document rates over time:
-
-```bash
-python ./scripts/simulate_dynamic_load.py -s source_bucket -k prefix/exampledoc.pdf -d idp-kmsxxxxxxxxx -f schedule.csv
-```
 
 This simulates incoming documents based on minute-by-minute rates in the schedule CSV file.
