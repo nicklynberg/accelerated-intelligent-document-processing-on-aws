@@ -6,6 +6,30 @@ GREEN := \033[0;32m
 YELLOW := \033[1;33m
 NC := \033[0m  # No Color
 
+# Update version across all packages
+# Usage: make version V=0.6.0
+.PHONY: version
+version:
+ifndef V
+	$(error VERSION is not set. Usage: make version V=x.y.z)
+endif
+	@echo "Updating version to $(V)..."
+	@echo "$(V)" > VERSION
+	@sed -i '' 's/^version = ".*"/version = "$(V)"/' lib/idp_cli_pkg/pyproject.toml
+	@sed -i '' 's/^version = ".*"/version = "$(V)"/' lib/idp_sdk/pyproject.toml
+	@sed -i '' 's/^version = ".*"/version = "$(V)"/' lib/idp_common_pkg/pyproject.toml
+	@sed -i '' 's/version=".*"/version="$(V)"/' lib/idp_common_pkg/setup.py
+	@sed -i '' 's/@click.version_option(version=".*")/@click.version_option(version="$(V)")/' lib/idp_cli_pkg/idp_cli/cli.py
+	@sed -i '' 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/idp_sdk/idp_sdk/__init__.py
+	@echo -e "$(GREEN)✅ Version updated to $(V) in:$(NC)"
+	@echo "  - VERSION"
+	@echo "  - lib/idp_cli_pkg/pyproject.toml"
+	@echo "  - lib/idp_cli_pkg/idp_cli/cli.py"
+	@echo "  - lib/idp_sdk/pyproject.toml"
+	@echo "  - lib/idp_sdk/idp_sdk/__init__.py"
+	@echo "  - lib/idp_common_pkg/pyproject.toml"
+	@echo "  - lib/idp_common_pkg/setup.py"
+
 # Default target - run both lint and test
 all: lint test
 
