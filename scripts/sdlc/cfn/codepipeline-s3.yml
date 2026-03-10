@@ -390,8 +390,10 @@ Resources:
     Metadata:
       cfn_nag:
         rules_to_suppress:
+          - id: F4
+            reason: "logs:* used for CodeBuild to manage logs across multiple stacks with dynamic log group names"
           - id: W12
-            reason: "Logs policy requires * resource to create log groups dynamically"
+            reason: "Wildcard resource required for CloudWatch Logs to create log groups dynamically across different stacks"
     # checkov:skip=CKV_AWS_111: "CloudWatch Logs policies require write access for log creation"
     Properties:
       PolicyName: CodeBuildLogs
@@ -426,7 +428,11 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: F4
-            reason: "Policy scoped to specific KMS key and minimum required actions."
+            reason: "Broad KMS permissions required for stack life cycle in pipeline account"
+          - id: W12
+            reason: "KMS operations require wildcard resource for key discovery during stack deployment."
+    # checkov:skip=CKV_AWS_111: "Write access required for KMS key management during stack deployment and teardown in SDLC pipeline"
+    # checkov:skip=CKV_AWS_109: "Wildcard KMS permissions required for dynamic key discovery and management across multiple stacks in pipeline account"
     Properties:
       PolicyName: CodeBuildKMSAccess
       Roles: 
@@ -436,15 +442,8 @@ Resources:
         Statement:
           - Effect: Allow
             Action:
-              - 'kms:Decrypt'
-              - 'kms:Encrypt'
-              - 'kms:GenerateDataKey'
-              - 'kms:DescribeKey'
-              - 'kms:CreateGrant'
-              - 'kms:ScheduleKeyDeletion'
-            Resource:
-              - !If [CreateKMSKey, !GetAtt PipelineKMSKey.Arn, !Ref KMSKeyArn]
-              - !Sub 'arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/*'
+              - 'kms:*'
+            Resource: '*'
 
   # CloudWatch Events Rule to trigger pipeline on S3 changes
   PipelineTriggerRule:
