@@ -29,6 +29,11 @@ SPDX-License-Identifier: MIT-0
 
 - **Inference Profile pricing ARN truncation in UI** — Fixed pricing display and cost breakdown truncation for Bedrock Application Inference Profile ARNs containing multiple `/` characters (e.g., `bedrock/arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/088k6ehrxpci`). The UI was splitting on all `/` separators instead of preserving the full ARN, causing the profile ID to be dropped in the Pricing page display, Test Studio cost breakdowns, and CSV exports. Backend pricing lookup was not affected. ([#237](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/237))
 
+### Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.2.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.2.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.2.yaml`
+
 ## [0.5.1]
 
 ### Added
