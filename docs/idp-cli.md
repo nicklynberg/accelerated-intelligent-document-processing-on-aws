@@ -1,3 +1,7 @@
+---
+title: "IDP CLI - Command Line Interface for Batch Document Processing"
+---
+
 # IDP CLI - Command Line Interface for Batch Document Processing
 
 A command-line tool for batch document processing with the GenAI IDP Accelerator.
@@ -113,7 +117,6 @@ idp-cli deploy --stack-name my-stack --profile production ...
 # 1. Deploy stack (10-15 minutes)
 idp-cli deploy \
     --stack-name my-idp-stack \
-    --pattern pattern-2 \
     --admin-email your.email@example.com \
     --wait
 
@@ -149,7 +152,6 @@ idp-cli deploy [OPTIONS]
 
 **Required for New Stacks:**
 - `--stack-name`: CloudFormation stack name
-- `--pattern`: IDP pattern architecture to deploy (`pattern-1` or `pattern-2`)
 - `--admin-email`: Admin user email
 
 **Optional Parameters:**
@@ -159,7 +161,6 @@ idp-cli deploy [OPTIONS]
 - `--max-concurrent`: Maximum concurrent workflows (default: 100)
 - `--log-level`: Logging level (`DEBUG`, `INFO`, `WARN`, `ERROR`) (default: INFO)
 - `--enable-hitl`: Enable Human-in-the-Loop (`true` or `false`)
-- `--pattern-config`: Pattern-specific configuration preset (optional, distinct from --pattern)
 - `--parameters`: Additional parameters as `key=value,key2=value2`
 - `--wait`: Wait for stack operation to complete
 - `--no-rollback`: Disable rollback on stack creation failure
@@ -174,7 +175,7 @@ If you run `deploy` on a stack that already has an operation in progress (CREATE
 
 ```bash
 # First run without --wait starts the deployment
-$ idp-cli deploy --stack-name my-stack --pattern pattern-2 --admin-email user@example.com
+$ idp-cli deploy --stack-name my-stack --admin-email user@example.com
 ✓ Stack CREATE initiated successfully!
 
 # Second run - automatically monitors the in-progress operation
@@ -197,7 +198,6 @@ Supported in-progress states: `CREATE_IN_PROGRESS`, `UPDATE_IN_PROGRESS`, `DELET
 # Create new stack
 idp-cli deploy \
     --stack-name my-idp \
-    --pattern pattern-2 \
     --admin-email user@example.com \
     --wait
 
@@ -217,7 +217,6 @@ idp-cli deploy \
 # Deploy with custom template URL (for regions not auto-supported)
 idp-cli deploy \
     --stack-name my-idp \
-    --pattern pattern-2 \
     --admin-email user@example.com \
     --template-url https://s3.eu-west-1.amazonaws.com/my-bucket/idp-main.yaml \
     --region eu-west-1 \
@@ -226,7 +225,6 @@ idp-cli deploy \
 # Deploy with CloudFormation service role and permissions boundary
 idp-cli deploy \
     --stack-name my-idp \
-    --pattern pattern-2 \
     --admin-email user@example.com \
     --role-arn arn:aws:iam::123456789012:role/IDP-Cloudformation-Service-Role \
     --parameters "PermissionsBoundaryArn=arn:aws:iam::123456789012:policy/MyPermissionsBoundary" \
@@ -236,7 +234,6 @@ idp-cli deploy \
 idp-cli deploy \
     --stack-name my-idp-dev \
     --from-code . \
-    --pattern pattern-2 \
     --admin-email user@example.com \
     --wait
 
@@ -249,7 +246,6 @@ idp-cli deploy \
 # Deploy with rollback disabled (useful for debugging failed deployments)
 idp-cli deploy \
     --stack-name my-idp \
-    --pattern pattern-2 \
     --admin-email user@example.com \
     --no-rollback \
     --wait
@@ -1116,7 +1112,6 @@ Deploy an IDP stack if you haven't already:
 ```bash
 idp-cli deploy \
     --stack-name eval-testing \
-    --pattern pattern-2 \
     --admin-email your.email@example.com \
     --max-concurrent 50 \
     --wait
@@ -1775,7 +1770,6 @@ idp-cli config-create [OPTIONS]
   - `core`: min + ocr, assessment
   - `all`: all sections with full defaults
   - Or comma-separated list: `"classification,extraction,summarization"`
-- `--pattern`: Pattern to use for defaults (default: `pattern-2`)
 - `--output`, `-o`: Output file path (default: stdout)
 - `--include-prompts`: Include full prompt templates (default: stripped for readability)
 - `--no-comments`: Omit explanatory header comments
@@ -1785,9 +1779,6 @@ idp-cli config-create [OPTIONS]
 ```bash
 # Generate minimal config to stdout
 idp-cli config-create
-
-# Generate minimal config for Pattern-1
-idp-cli config-create --pattern pattern-1 --output config.yaml
 
 # Generate full config with all sections
 idp-cli config-create --features all --output full-config.yaml
@@ -1809,7 +1800,6 @@ idp-cli config-validate [OPTIONS]
 
 **Options:**
 - `--custom-config` (required): Path to configuration file to validate
-- `--pattern`: Pattern to validate against (default: `pattern-2`)
 - `--show-merged`: Show the full merged configuration
 
 **Examples:**
@@ -1817,9 +1807,6 @@ idp-cli config-validate [OPTIONS]
 ```bash
 # Validate a config file
 idp-cli config-validate --custom-config ./my-config.yaml
-
-# Validate against Pattern-1 defaults
-idp-cli config-validate --custom-config ./config.yaml --pattern pattern-1
 
 # Show full merged config
 idp-cli config-validate --custom-config ./config.yaml --show-merged
@@ -1840,7 +1827,6 @@ idp-cli config-download [OPTIONS]
 - `--stack-name` (required): CloudFormation stack name
 - `--output`, `-o`: Output file path (default: stdout)
 - `--format`: Output format - `full` (default) or `minimal` (only differences from defaults)
-- `--pattern`: Pattern for minimal diff (auto-detected if not specified)
 - `--config-version`: Configuration version to download (e.g., v1, v2). If not specified, downloads active version
 - `--region`: AWS region (optional)
 
@@ -1875,7 +1861,6 @@ idp-cli config-upload [OPTIONS]
 - `--stack-name` (required): CloudFormation stack name
 - `--config-file`, `-f` (required): Path to configuration file (YAML or JSON)
 - `--validate/--no-validate`: Validate config before uploading (default: validate)
-- `--pattern`: Pattern for validation (auto-detected if not specified)
 - `--config-version`: Configuration version to update (e.g., v1, v2). If version doesn't exist, it will be created
 - `--version-description`: Description for the configuration version (used when creating new versions)
 - `--region`: AWS region (optional)
@@ -1894,9 +1879,6 @@ idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --config
 
 # Skip validation (use with caution)
 idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --no-validate
-
-# Explicit pattern for validation
-idp-cli config-upload --stack-name my-stack --config-file ./config.yaml --pattern pattern-2
 ```
 
 ---
@@ -2014,6 +1996,55 @@ idp-cli config-delete --stack-name my-stack --config-version old-version --force
 For full details on configuration versioning, see [configuration-versions.md](configuration-versions.md).
 
 This uses the same mechanism as the Web UI configuration management system.
+
+---
+
+### `discover`
+
+Discover document class schemas from sample documents using Amazon Bedrock.
+
+**Two modes:**
+- **Stack-connected** (`--stack-name`): Uses stack's discovery config and saves schema to DynamoDB configuration
+- **Local** (no `--stack-name`): Uses system default Bedrock settings, prints schema to stdout without saving
+
+**Ground truth matching:** Ground truth files (`-g`) are auto-matched to documents (`-d`) by filename stem. For example, `invoice.pdf` matches `invoice.json`. Unmatched documents run without ground truth.
+
+**Output behavior:**
+- Single document: `-o` writes the schema to the specified file
+- Batch + `-o` is a directory (or has no extension): writes one `{class_name}.json` per schema
+- Batch + `-o` is a file: writes all schemas as a JSON array
+
+```bash
+# Single document (local mode — no stack needed)
+idp-cli discover -d ./invoice.pdf
+
+# With ground truth (matched by filename stem)
+idp-cli discover -d ./invoice.pdf -g ./invoice.json
+
+# Save schema to file
+idp-cli discover -d ./form.pdf -o ./form-schema.json
+
+# Batch with auto-matched ground truth
+idp-cli discover -d ./invoice.pdf -d ./w2.pdf -g ./invoice.json -g ./w2.json
+
+# Batch output to directory (one file per schema)
+idp-cli discover -d ./invoice.pdf -d ./w2.pdf -o ./schemas/
+
+# Batch output to single file (JSON array)
+idp-cli discover -d ./invoice.pdf -d ./w2.pdf -o ./all-schemas.json
+
+# Stack mode (saves to config)
+idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
+```
+
+| Option | Description |
+|--------|-------------|
+| `--stack-name` | CloudFormation stack name (optional — omit for local mode) |
+| `-d, --document` | Path to document file (required, repeatable for batch) |
+| `-g, --ground-truth` | Path to JSON ground truth file(s) (repeatable, auto-matched by filename stem) |
+| `--config-version` | Config version to save to (stack mode only) |
+| `-o, --output` | Output path: file (single/JSON array) or directory (one file per schema) |
+| `--region` | AWS region |
 
 ---
 

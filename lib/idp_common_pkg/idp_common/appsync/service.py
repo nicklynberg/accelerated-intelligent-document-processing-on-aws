@@ -69,9 +69,8 @@ class DocumentAppSyncService:
             "ExpiresAfter": expires_after,
         }
 
-        # Add confidence alert count if available
-        if document.confidence_alert_count > 0:
-            input_data["ConfidenceAlertCount"] = document.confidence_alert_count
+        # Note: ConfidenceAlertCount is NOT in CreateDocumentInput schema —
+        # it gets persisted via the update path in processresults after assessment.
 
         # Add trace_id if available
         if document.trace_id:
@@ -238,6 +237,9 @@ class DocumentAppSyncService:
         if document.hitl_sections_completed:
             input_data["HITLSectionsCompleted"] = document.hitl_sections_completed
 
+        # Always include ConfidenceAlertCount so it persists to DynamoDB GSI
+        input_data["ConfidenceAlertCount"] = document.confidence_alert_count
+
         # Add trace_id if available
         if document.trace_id:
             input_data["TraceId"] = document.trace_id
@@ -282,8 +284,9 @@ class DocumentAppSyncService:
                 request_id=doc.id or "", output_uri=rule_validation_uri
             )
 
-        # Handle HITL fields - create HITL metadata if HITL fields are present
+        # Set Review Status fields from AppSync response
         hitl_status = appsync_data.get("HITLStatus")
+        doc.hitl_status = hitl_status
         hitl_review_url = appsync_data.get("HITLReviewURL")
         hitl_triggered = appsync_data.get("HITLTriggered")
         hitl_completed = appsync_data.get("HITLCompleted")

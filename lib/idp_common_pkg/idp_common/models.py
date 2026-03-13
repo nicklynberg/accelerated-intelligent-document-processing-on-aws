@@ -308,6 +308,7 @@ class Document:
             "metering": self.metering,
             "trace_id": self.trace_id,
             "config_version": self.config_version,
+            "confidence_alert_count": self.confidence_alert_count,
             # We don't include evaluation_result or summarization_result in the dict since they're objects
         }
 
@@ -444,6 +445,9 @@ class Document:
         document.hitl_triggered = data.get("hitl_triggered", False)
         document.hitl_sections_pending = data.get("hitl_sections_pending", [])
         document.hitl_sections_completed = data.get("hitl_sections_completed", [])
+
+        # Restore confidence alert count
+        document.confidence_alert_count = int(data.get("confidence_alert_count", 0))
 
         # Convert rule_validation_result if present (optional)
         if "rule_validation_result" in data:

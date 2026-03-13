@@ -106,8 +106,8 @@ def lambda_handler(event, context):
     scan_kwargs = {
         "Segment": segment,
         "TotalSegments": total_segments,
-        # Only fetch the attributes we need to determine ItemType and HITL status
-        "ProjectionExpression": "PK, SK, #it, HITLTriggered, HITLCompleted, HITLStatus, HITLPendingReview, InitialEventTime",
+        # Fetch attributes needed for ItemType, HITL status, and ConfidenceAlertCount backfill
+        "ProjectionExpression": "PK, SK, #it, HITLTriggered, HITLCompleted, HITLStatus, HITLPendingReview, InitialEventTime, ConfidenceAlertCount, Sections",
         "ExpressionAttributeNames": {"#it": "ItemType"},
     }
 
@@ -221,6 +221,19 @@ def _determine_updates(item, pk):
         # We need to fetch CreatedAt from the full item
         updates["_needs_created_at_copy"] = True
 
+    # 4. Compute ConfidenceAlertCount from Sections for documents that don't have it,
+    # or that have it incorrectly set to 0 while sections have alerts (repair from
+    # serialization bug where downstream steps overwrote the correct value with 0)
+    if pk.startswith("doc#"):
+        existing_count = item.get("ConfidenceAlertCount")
+        sections = item.get("Sections", []) or []
+        computed_count = sum(
+            len(section.get("ConfidenceThresholdAlerts", []) or [])
+            for section in sections
+        )
+        if existing_count is None or (existing_count == 0 and computed_count > 0):
+            updates["ConfidenceAlertCount"] = computed_count
+
     return updates
 
 
@@ -262,11 +275,19 @@ def _apply_update(table, pk, sk, updates):
 
     update_expression = "SET " + ", ".join(set_parts)
 
-    # Build condition: at least one of the attributes doesn't exist yet
-    # This ensures idempotency
+    # Build condition: at least one of the attributes doesn't exist yet OR
+    # ConfidenceAlertCount is 0 (repair case for serialization bug).
+    # This ensures idempotency while allowing repair of incorrect 0 values.
     condition_parts = []
     for i, attr_name in enumerate(updates.keys()):
-        condition_parts.append(f"attribute_not_exists(#attr{i})")
+        if attr_name == "ConfidenceAlertCount":
+            # Allow overwrite when attribute doesn't exist OR is incorrectly 0
+            condition_parts.append(
+                f"(attribute_not_exists(#attr{i}) OR #attr{i} = :zero)"
+            )
+            expr_values[":zero"] = 0
+        else:
+            condition_parts.append(f"attribute_not_exists(#attr{i})")
     condition_expression = " OR ".join(condition_parts)
 
     table.update_item(
@@ -330,12 +351,12 @@ def handler(event, context):
         dynamodb = boto3.resource("dynamodb")
         table = dynamodb.Table(table_name)
         
-        # Scan for one doc# item
+        # Scan for one doc# item to check which attributes need backfilling
         response = table.scan(
             FilterExpression="begins_with(PK, :prefix)",
             ExpressionAttributeValues={":prefix": "doc#"},
             Limit=1,
-            ProjectionExpression="PK, ItemType",
+            ProjectionExpression="PK, ItemType, ConfidenceAlertCount",
         )
         
         items = response.get("Items", [])
@@ -348,16 +369,20 @@ def handler(event, context):
             )
             return
 
-        # Check if the sampled item already has ItemType
+        # Check if the sampled item already has all required attributes
         sample_item = items[0]
-        if "ItemType" in sample_item:
-            logger.info(f"Sample item already has ItemType={sample_item['ItemType']} - backfill likely complete")
+        has_item_type = "ItemType" in sample_item
+        has_confidence_count = "ConfidenceAlertCount" in sample_item
+        if has_item_type and has_confidence_count:
+            logger.info(f"Sample item already has ItemType and ConfidenceAlertCount - backfill likely complete")
             _send_cfn_response(
                 event, context, "SUCCESS",
-                {"BackfillStatus": "ALREADY_DONE", "Reason": "ItemType already present"},
+                {"BackfillStatus": "ALREADY_DONE", "Reason": "All GSI attributes present"},
                 reason="Backfill already complete"
             )
             return
+        
+        logger.info(f"Backfill needed: ItemType={'present' if has_item_type else 'MISSING'}, ConfidenceAlertCount={'present' if has_confidence_count else 'MISSING'}")
 
         # Start the backfill state machine
         sfn_client = boto3.client("stepfunctions")

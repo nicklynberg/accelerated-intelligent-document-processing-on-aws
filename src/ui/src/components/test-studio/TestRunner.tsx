@@ -8,6 +8,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { startTestRun, getTestSets } from '../../graphql/generated';
 import handlePrint from './PrintUtils';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
+import { getErrorMessage } from '../../utils/errorUtils';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GqlResult = { data: Record<string, any> };
@@ -50,17 +51,21 @@ const TestRunner = ({
 
   const { versions, loading: _versionsLoading, getVersionOptions } = useConfigurationVersions();
 
-  // Set default to active version when versions are loaded
+  // Set default to active version (or first scoped version) when versions are loaded
   React.useEffect(() => {
     if (versions.length > 0 && !selectedVersion) {
+      const versionOptions = getVersionOptions();
       const activeVersion = versions.find((v) => v.isActive);
       if (activeVersion) {
-        // Use the same logic as getVersionOptions to ensure consistency
-        const versionOptions = getVersionOptions();
         const activeVersionOption = versionOptions.find((option) => option.value === activeVersion.versionName);
         if (activeVersionOption) {
           setSelectedVersion(activeVersionOption);
+          return;
         }
+      }
+      // Fallback: select first available (scoped) version
+      if (versionOptions.length > 0) {
+        setSelectedVersion(versionOptions[0]);
       }
     }
   }, [versions, selectedVersion, getVersionOptions]);
@@ -68,7 +73,7 @@ const TestRunner = ({
   // Set default context when test set, version, or numberOfFiles changes
   React.useEffect(() => {
     if (selectedTestSet && selectedVersion) {
-      const testSetName = selectedTestSet.label.split(' - ')[0]; // Extract name without file count
+      const testSetName = (selectedTestSet.label ?? '').split(' - ')[0]; // Extract name without file count
       const versionName = selectedVersion.value; // Use value instead of label to avoid "(Active)"
       const testSetData = testSets.find((ts) => ts.id === selectedTestSet.value);
       const totalFiles = testSetData?.fileCount || 0;
@@ -88,7 +93,7 @@ const TestRunner = ({
       setTestSets(testSetsData);
     } catch (err) {
       console.error('TestRunner: Failed to load test sets:', err);
-      setError(`Failed to load test sets: ${err.message}`);
+      setError(`Failed to load test sets: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -123,7 +128,7 @@ const TestRunner = ({
     setLoading(true);
     try {
       const input = {
-        testSetId: selectedTestSet.value,
+        testSetId: selectedTestSet.value ?? '',
         ...(context && { context }),
         ...(numberOfFiles.trim() && { numberOfFiles: parseInt(numberOfFiles.trim(), 10) }),
         ...(selectedVersion && { configVersion: selectedVersion.value }),
@@ -152,20 +157,15 @@ const TestRunner = ({
       setError('');
     } catch (err) {
       logger.error('Failed to start test run:', err);
+      const errObj = err as { message?: string; errors?: { message: string }[]; networkError?: unknown; graphQLErrors?: unknown };
       console.error('TestRunner: Error details:', {
-        message: err.message,
-        errors: err.errors,
-        networkError: err.networkError,
-        graphQLErrors: err.graphQLErrors,
+        message: errObj.message,
+        errors: errObj.errors,
+        networkError: errObj.networkError,
+        graphQLErrors: errObj.graphQLErrors,
       });
 
-      let errorMessage = 'Failed to start test run';
-      if (err.errors && err.errors.length > 0) {
-        errorMessage = err.errors.map((e) => e.message).join('; ');
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      setError(errorMessage);
+      setError(getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -287,7 +287,7 @@ const TestRunner = ({
             onChange={({ detail }) => setContext(detail.value)}
             placeholder="Enter context information..."
             rows={2}
-            invalid={context && context.length > 500}
+            invalid={!!context && context.length > 500}
           />
         </FormField>
       </SpaceBetween>

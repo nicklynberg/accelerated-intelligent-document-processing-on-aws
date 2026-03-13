@@ -26,7 +26,7 @@ interface MappedDocument {
 
 interface AbortableItem {
   objectKey: string;
-  [key: string]: unknown;
+  objectStatus?: string;
 }
 
 const logger = new ConsoleLogger('documentDetails');
@@ -37,7 +37,7 @@ const DocumentDetails = (): React.JSX.Element => {
 
   // Get the objectKey from the wildcard route parameter '*'
   // This captures the full path including any embedded slashes (e.g., folder/filename.pdf)
-  let objectKey = params['*'];
+  let objectKey = params['*'] ?? '';
 
   // Ensure we properly decode the objectKey from the URL parameter
   // It may be already decoded or still encoded depending on browser behavior with refreshes
@@ -48,16 +48,9 @@ const DocumentDetails = (): React.JSX.Element => {
     logger.debug('Error decoding objectKey, using as is', e);
   }
 
-  const documentsContext = useDocumentsContext() as Record<string, unknown>;
-  const documents = documentsContext.documents as Record<string, unknown>[];
-  const getDocumentDetailsFromIds = documentsContext.getDocumentDetailsFromIds as (ids: string[]) => Promise<Record<string, unknown>[]>;
-  const setToolsOpen = documentsContext.setToolsOpen as (open: boolean) => void;
-  const deleteDocuments = documentsContext.deleteDocuments as (ids: string[]) => Promise<unknown>;
-  const reprocessDocuments = documentsContext.reprocessDocuments as (ids: string[], version?: string) => Promise<unknown>;
-  const abortWorkflows = documentsContext.abortWorkflows as (ids: string[]) => Promise<unknown>;
-  const { settings: _settings } = useSettingsContext() as Record<string, unknown>;
-  const { isReviewer, isAdmin } = useUserRole();
-  const isReviewerOnly = isReviewer && !isAdmin;
+  const { documents, getDocumentDetailsFromIds, setToolsOpen, deleteDocuments, reprocessDocuments, abortWorkflows } = useDocumentsContext();
+  const { settings: _settings } = useSettingsContext();
+  const { canWrite } = useUserRole();
 
   const [document, setDocument] = useState<MappedDocument | null>(null);
   const [isDeleteModalVisible, setIsDeleteModalVisible] = useState(false);
@@ -87,17 +80,18 @@ const DocumentDetails = (): React.JSX.Element => {
   }, [objectKey]);
 
   // Handle updates from subscription or document list context.
-  // IMPORTANT: The `documents` context may contain lightweight data from listDocuments
-  // (which lacks Sections, Pages, Metering, etc.) OR rich data from onUpdateDocument
-  // subscriptions (which includes all fields). We must merge carefully to avoid
-  // overwriting full document data with lightweight list data.
+  // Rich data (from subscriptions — detected by having 'sections' key after mapping)
+  // does a full replacement so reprocessed documents properly clear stale fields.
+  // Lightweight list data (from listDocuments — no 'sections' key) preserves
+  // existing rich fields to avoid wiping detail data.
   useEffect(() => {
-    if (!objectKey || !(documents as unknown[])?.length) {
+    if (!objectKey || !documents?.length) {
       return;
     }
 
-    const documentsFiltered = (documents as Record<string, unknown>[]).filter((c: Record<string, unknown>) => c.ObjectKey === objectKey);
+    const documentsFiltered = documents.filter((c) => c.ObjectKey === objectKey);
     if (documentsFiltered && documentsFiltered?.length) {
+      const rawDoc = documentsFiltered[0] as unknown as Record<string, unknown>;
       const documentsMap = mapDocumentsAttributes([documentsFiltered[0]] as unknown as { ObjectKey: string }[]) as MappedDocument[];
       const incomingDoc = documentsMap[0];
 
@@ -107,9 +101,21 @@ const DocumentDetails = (): React.JSX.Element => {
         return;
       }
 
-      // Merge incoming data into existing document, preserving fields that
-      // the incoming data doesn't have (e.g., Sections/Pages from getDocument
-      // should not be wiped by lightweight listDocuments data).
+      // Detect rich data: subscription/getDocument responses include 'Sections'
+      // (even if empty/null). Lightweight listDocuments responses never include it.
+      const isRichData = 'Sections' in rawDoc;
+
+      if (isRichData) {
+        // Full replacement from subscription — allows clearing stale fields
+        // (e.g., after reprocess). This is the common path during active processing.
+        if (JSON.stringify(document) !== JSON.stringify(incomingDoc)) {
+          logger.debug('Full document replacement from subscription data');
+          setDocument(incomingDoc);
+        }
+        return;
+      }
+
+      // Lightweight list data — preserve existing rich fields
       const merged = { ...document } as Record<string, unknown>;
       let hasChanges = false;
 
@@ -146,7 +152,7 @@ const DocumentDetails = (): React.JSX.Element => {
       }
 
       if (hasChanges) {
-        logger.debug('Merging document update (preserving existing rich data)', merged);
+        logger.debug('Merging lightweight list update (preserving existing rich data)', merged);
         setDocument(merged as MappedDocument);
       }
     }
@@ -220,9 +226,9 @@ const DocumentDetails = (): React.JSX.Element => {
           item={document}
           setToolsOpen={setToolsOpen}
           getDocumentDetailsFromIds={getDocumentDetailsFromIds}
-          onDelete={isReviewerOnly ? null : handleDeleteClick}
-          onReprocess={isReviewerOnly ? null : handleReprocessClick}
-          onAbort={isReviewerOnly ? null : handleAbortClick}
+          onDelete={canWrite ? handleDeleteClick : null}
+          onReprocess={canWrite ? handleReprocessClick : null}
+          onAbort={canWrite ? handleAbortClick : null}
         />
       )}
 

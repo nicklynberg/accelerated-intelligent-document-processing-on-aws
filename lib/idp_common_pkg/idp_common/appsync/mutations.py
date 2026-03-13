@@ -57,6 +57,7 @@ mutation UpdateDocument($input: UpdateDocumentInput!) {
         HITLReviewURL
         ConfidenceAlertCount
         TraceId
+        ConfigVersion
     }
 }
 """

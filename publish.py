@@ -1764,10 +1764,6 @@ STDERR:
                 "nested/appsync/src",
                 "nested/appsync/template.yaml",
             ],
-            "nested/bda-lending-project": [
-                "nested/bda-lending-project/src",
-                "nested/bda-lending-project/template.yaml",
-            ],
             "nested/bedrockkb": [
                 "nested/bedrockkb/src",
                 "nested/bedrockkb/template.yaml",
@@ -2107,6 +2103,15 @@ STDERR:
             if os.path.exists(layer_build_dir):
                 shutil.rmtree(layer_build_dir)
             os.makedirs(layer_python_dir, exist_ok=True)
+
+            # Clean idp_common_pkg build artifacts to prevent stale .dist-info conflicts
+            # (setuptools fails with "File exists" if old build/ dir has stale .dist-info)
+            for clean_dir in [
+                os.path.join("lib", "idp_common_pkg", "build"),
+                os.path.join("lib", "idp_common_pkg", "dist"),
+            ]:
+                if os.path.exists(clean_dir):
+                    shutil.rmtree(clean_dir)
 
             # Build pip install command with extras
             if layer_extras:

@@ -23,7 +23,7 @@ import {
 
 export const documentsNavHeader = { text: 'Tools', href: `#${DEFAULT_PATH}` };
 
-// Full navigation items for Admin users
+// Full navigation items for Admin users (all features)
 export const adminNavItems = [
   { type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` },
   { type: 'link', text: 'Upload Document(s)', href: `#${UPLOAD_DOCUMENT_PATH}` },
@@ -37,7 +37,7 @@ export const adminNavItems = [
       { type: 'link', text: 'Discovery', href: `#${DISCOVERY_PATH}` },
       { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
       { type: 'link', text: 'User Management', href: `#${USER_MANAGEMENT_PATH}` },
-      { type: 'link', text: 'View/Edit Pricing', href: `#${PRICING_PATH}` },
+      { type: 'link', text: 'View / Edit Pricing', href: `#${PRICING_PATH}` },
     ],
   },
   {
@@ -68,7 +68,81 @@ export const adminNavItems = [
   },
 ];
 
-// Limited navigation items for Reviewer users
+// Author navigation: same as admin but without User Management, Document KB, or Agent Chat (not yet config-version scoped)
+export const authorNavItems = [
+  { type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` },
+  { type: 'link', text: 'Upload Document(s)', href: `#${UPLOAD_DOCUMENT_PATH}` },
+  {
+    type: 'section',
+    text: 'Configuration',
+    items: [
+      { type: 'link', text: 'View/Edit Configuration', href: `#${CONFIGURATION_PATH}` },
+      { type: 'link', text: 'Discovery', href: `#${DISCOVERY_PATH}` },
+      { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
+      { type: 'link', text: 'View Pricing', href: `#${PRICING_PATH}` },
+    ],
+  },
+  {
+    type: 'section',
+    text: 'Test Studio',
+    items: [
+      { type: 'link', text: 'Test Sets', href: `#${TEST_STUDIO_PATH}?tab=sets` },
+      { type: 'link', text: 'Test Executions', href: `#${TEST_STUDIO_PATH}?tab=executions` },
+    ],
+  },
+  {
+    type: 'section',
+    text: 'Resources',
+    items: [
+      {
+        type: 'link',
+        text: 'README',
+        href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/README.md',
+        external: true,
+      },
+      {
+        type: 'link',
+        text: 'Source Code',
+        href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws',
+        external: true,
+      },
+    ],
+  },
+];
+
+// Viewer navigation: read-only access to documents, config, capacity planning (no KB or Agent Chat — not yet config-version scoped)
+export const viewerNavItems = [
+  { type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` },
+  {
+    type: 'section',
+    text: 'Configuration',
+    items: [
+      { type: 'link', text: 'View Configuration', href: `#${CONFIGURATION_PATH}` },
+      { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
+      { type: 'link', text: 'View Pricing', href: `#${PRICING_PATH}` },
+    ],
+  },
+  {
+    type: 'section',
+    text: 'Resources',
+    items: [
+      {
+        type: 'link',
+        text: 'README',
+        href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/blob/main/README.md',
+        external: true,
+      },
+      {
+        type: 'link',
+        text: 'Source Code',
+        href: 'https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws',
+        external: true,
+      },
+    ],
+  },
+];
+
+// Limited navigation items for Reviewer-only users (HITL review only)
 export const reviewerNavItems = [{ type: 'link', text: 'Document List', href: `#${DOCUMENTS_PATH}` }];
 
 // Keep for backward compatibility
@@ -96,15 +170,19 @@ const Navigation = ({
   const location = useLocation();
   const path = location.pathname;
   let activeHref = `#${DEFAULT_PATH}`;
-  const { settings: rawSettings } = useSettingsContext() || {};
-  const settings = rawSettings as Record<string, unknown> | undefined;
-  const { isReviewer, isAdmin } = useUserRole();
+  const { settings } = useSettingsContext();
+  const { isAdmin, isAuthor, isReviewerOnly, isViewerOnly } = useUserRole();
 
-  // Select navigation items based on user role
+  // Select navigation items based on user role (highest privilege wins)
   const baseItems = useMemo(() => {
     if (items) return items;
-    return isReviewer && !isAdmin ? reviewerNavItems : adminNavItems;
-  }, [items, isReviewer, isAdmin]);
+    if (isAdmin) return adminNavItems;
+    if (isAuthor) return authorNavItems;
+    if (isViewerOnly) return viewerNavItems;
+    if (isReviewerOnly) return reviewerNavItems;
+    // Default: if user has Viewer + Reviewer, show viewer nav (union)
+    return viewerNavItems;
+  }, [items, isAdmin, isAuthor, isViewerOnly, isReviewerOnly]);
 
   // Filter out Capacity Planning link if pattern is not Pattern-2
   const filteredItems = useMemo(() => {
@@ -134,14 +212,15 @@ const Navigation = ({
     return baseItems
       .map((item) => {
         if (item.type === 'section' && item.text === 'Configuration') {
+          const section = item as SideNavigationProps.Section;
           return {
             ...item,
-            items: item.items.filter((subItem) => subItem.text !== 'Capacity Planning'),
+            items: section.items.filter((subItem) => (subItem as { text?: string }).text !== 'Capacity Planning'),
           };
         }
         return item;
       })
-      .filter((item) => item.text !== 'Capacity Planning'); // Also filter top-level if it exists
+      .filter((item) => (item as { text?: string }).text !== 'Capacity Planning'); // Also filter top-level if it exists
   }, [baseItems, settings?.IDPPattern]);
 
   // Determine active link based on current path

@@ -1,3 +1,7 @@
+---
+title: "Configuration and Customization"
+---
+
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 SPDX-License-Identifier: MIT-0
 
@@ -11,7 +15,7 @@ The GenAIIDP solution provides multiple configuration approaches to customize do
 
 The web interface allows real-time configuration updates without stack redeployment:
 
-- **Document Classes**: Define and modify document categories and their descriptions (using JSON Schema format)
+- **Document Classes**: Define and modify document categories and their descriptions (using JSON Schema format). Choose from **35+ pre-built standard classes** (Invoice, Receipt, W-2, Bank Statement, etc.) or create custom classes from scratch.
 - **Extraction Attributes**: Configure fields to extract for each document class (defined as JSON Schema properties)
 - **Few Shot Examples**: Upload and configure example documents to improve accuracy (supported in Pattern 2)
 - **Model Selection**: Choose between available Bedrock models for classification and extraction
@@ -281,7 +285,6 @@ Key parameters that can be configured during CloudFormation deployment:
 
 ### Pattern-Specific Parameters
 - **Configuration Preset**: `ConfigurationPreset` — Select from available presets (lending-package-sample, bank-statement-sample, etc.)
-- **BDA Project ARN**: Optional existing Bedrock Data Automation project ARN (for BDA mode)
 - **Custom Model ARNs**: Optional custom fine-tuned classification/extraction model ARNs
 
 > **Note**: The processing mode (BDA vs Pipeline) is controlled by the `use_bda` flag in the configuration, not by deployment parameters. See the [architecture docs](./architecture.md) for details.

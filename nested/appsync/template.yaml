@@ -46,6 +46,16 @@ Parameters:
   
   DiscoveryTrackingTableName:
     Type: String
+
+  UsersTableName:
+    Type: String
+    Default: ""
+    Description: DynamoDB table name for user management (config-version scoping)
+
+  UsersTableArn:
+    Type: String
+    Default: ""
+    Description: DynamoDB table ARN for user management (config-version scoping)
   
   # S3 Buckets
   InputBucketName:
@@ -173,13 +183,6 @@ Parameters:
     Type: String
     AllowedValues: ["true", "false"]
   
-  Pattern1BDAProjectArn:
-    Type: String
-  
-  HasPattern1BDAProjectArn:
-    Type: String
-    AllowedValues: ["true", "false"]
-  
   # Lambda Layers from main template
   IDPCommonBaseLayerArn:
     Type: String
@@ -194,7 +197,6 @@ Conditions:
   HasGuardrail: !Equals [!Ref HasGuardrailConfig, "true"]
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
   ShouldCreateReportingBucket: !Equals [!Ref ShouldCreateReportingBucket, "true"]
-  HasBDAProjectArn: !Equals [!Ref HasPattern1BDAProjectArn, "true"]
 
 Resources:
 
@@ -946,6 +948,7 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           STACK_NAME: !Ref StackName
           CONFIGURATION_BUCKET: !Ref ConfigurationBucketName
+          USERS_TABLE_NAME: !Ref UsersTableName
       LoggingConfig:
         LogGroup: !Ref ConfigurationResolverFunctionLogGroup
       Policies:
@@ -2679,10 +2682,6 @@ Resources:
           LOG_LEVEL: !Ref LogLevel
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           STACK_NAME: !Ref StackName
-          BDA_PROJECT_ARN: !If
-            - HasBDAProjectArn
-            - !Ref Pattern1BDAProjectArn
-            - !Ref Pattern1BDAProjectArn
       LoggingConfig:
         LogGroup: !Ref SyncBdaIdpResolverFunctionLogGroup
       Policies:
@@ -3330,7 +3329,7 @@ Resources:
         ## Iterate through each argument with values and update expression variables **
         #foreach( $entry in $ctx.args.input.entrySet() )
             ## skip empty values **
-            #if( !$util.isNullOrBlank($entry.value)  )
+            #if( !$util.isNull($entry.value)  )
                 $util.qr( $expSet.put("#${entry.key}", ":${entry.key}") )
                 $util.qr( $expNames.put("#${entry.key}", "${entry.key}") )
                 $util.qr( $expValues.put(":${entry.key}", $util.dynamodb.toDynamoDB($entry.value)) )
@@ -3603,6 +3602,7 @@ Resources:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           TRACKING_TABLE_NAME: !Ref TrackingTableName
+          USERS_TABLE_NAME: !Ref UsersTableName
       Policies:
         - Statement:
             - Effect: Allow
@@ -3610,6 +3610,13 @@ Resources:
                 - dynamodb:Query
               Resource:
                 - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TrackingTableName}/index/TypeDateIndex"
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !Ref UsersTableArn
+                - !Sub "${UsersTableArn}/index/*"
             - Effect: Allow
               Action:
                 - kms:Decrypt

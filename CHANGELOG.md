@@ -5,6 +5,39 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.2]
+
+### Added
+
+- **Multi-tenancy with Role-Based Access Control (RBAC)** — 4-role model (Admin, Author, Reviewer, Viewer) with server-side AppSync auth directives, server-side Reviewer document filtering, and UI adaptation. Admin has full access; Author can edit config and process documents but cannot manage users or delete config versions; Viewer has read-only access (editors, save buttons, and edit mode all disabled); Reviewer sees only HITL-pending documents. Non-admin roles can be scoped to specific use cases via `allowedConfigVersions`. See `docs/rbac.md`.
+
+- **Standard Class Catalog** — When adding a new document class in the Schema Builder, users can now choose between **Custom Class** (define from scratch) and **Standard Class** (import from a catalog of 35 pre-built document types). Standard classes are derived from AWS BDA standard blueprints and include common document types like Invoice, Receipt, W-2, Bank Statement, Payslip, US Driver License, US Passport, various tax forms (1040, 941, 940, W-9, 1098, 1099), insurance cards, birth/death/marriage certificates, and more. Each standard class comes with a complete extraction schema including attributes, descriptions, and nested types. Imported classes are fully editable. Run `make classes-from-bda` to refresh the catalog from the BDA API.
+
+- **Documentation Site** — Added a hosted documentation site built with [Astro Starlight](https://starlight.astro.build/), auto-deployed to GitHub Pages. Provides full-text search (Pagefind), sidebar navigation organized by topic, dark/light mode, and a professional landing page — all sourced directly from the existing `docs/` markdown files with zero content duplication. Browse at [aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws](https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/).
+
+- **Discovery accessible from CLI and SDK** — Discovery can now be run programmatically via the IDP SDK (`client.discovery.run()`) and CLI (`idp-cli discover`), enabling users with many document classes to automate schema generation without the Web UI. Supports both modes: without ground truth (exploratory) and with ground truth (optimized). ([#228](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/228))
+
+### Changed
+
+- **Sync to BDA no longer auto-activates the config version** — Previously, performing "Sync to BDA" would automatically set the current config version as active. Since each config version now has its own BDA project, auto-activation is unnecessary. Users can manually choose which version to activate via the Versions table. The "Sync to BDA" confirmation modal text has been updated accordingly.
+
+- **Removed `Bedrock Data Automation (BDA) Project ARN` CloudFormation parameter** — The deploy-time `Pattern1BDAProjectArn` parameter has been removed as it was redundant with the per-config-version BDA project management already available in the Web UI, CLI, and GraphQL API. BDA projects are now managed entirely post-deployment: enable `use_bda: true` in your configuration, then use "Sync to BDA" to create or link a BDA project, or "Sync from BDA" to import from any existing BDA project. This simplifies the deployment experience (one fewer parameter) and better aligns the CloudFormation interface with the system's actual architecture. Existing deployed stacks are unaffected — runtime BDA project ARN resolution reads from DynamoDB per-version tracking, not from the CloudFormation parameter. Also removed the unused `nested/bda-lending-project/` directory (dead code not referenced by any template) and the legacy `BDA_PROJECT_ARN` environment variable fallback from the sync resolver.
+
+### Fixed
+
+- **CLI: Remove deprecated `--pattern` references** — Updated `idp-cli.md` and CLI code to reflect the unified pattern architecture. Removed `--pattern` from all deploy and config command examples/options.
+
+- **Discovery no longer injects default config classes into target version** — Previously, running Discovery on a configuration version would merge all classes from the `default` version into the target version alongside the newly discovered class. Now Discovery only adds/updates the discovered class within the target version's own class list, keeping the version's classes exactly as the user curated them.
+
+- **Documentation: Comprehensive review and cleanup** — Fixed outdated references, broken links, and missing content across documentation files.
+
+- **Inference Profile pricing ARN truncation in UI** — Fixed pricing display and cost breakdown truncation for Bedrock Application Inference Profile ARNs containing multiple `/` characters (e.g., `bedrock/arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/088k6ehrxpci`). The UI was splitting on all `/` separators instead of preserving the full ARN, causing the profile ID to be dropped in the Pricing page display, Test Studio cost breakdowns, and CSV exports. Backend pricing lookup was not affected. ([#237](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/237))
+
+### Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.2.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.2.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.2.yaml`
+
 ## [0.5.1]
 
 ### Added
@@ -33,6 +66,7 @@ SPDX-License-Identifier: MIT-0
 
 
 ### Changed
+
 
 - **OCR Benchmark Config Optimization** — Optimized `config_library/unified/ocr-benchmark` configuration with targeted field descriptions, explicit model/prompt/OCR settings, and corrected date format (YYYY-MM-DD to match ground truth). Improved overall extraction accuracy from 51.5% to 75.2% on the full 293-document benchmark at equivalent cost (~$2.62). Classification remains 100% across all 9 document classes. ([#220](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/220))
 
@@ -73,6 +107,7 @@ SPDX-License-Identifier: MIT-0
 - **Pattern-3 (UDOP + Bedrock)** — Pattern-3 is no longer available as a deployment option. If you are currently using Pattern-3 with a SageMaker UDOP endpoint, do not upgrade to v0.5.x without first testing in a non-production environment. You can use the [Lambda Inference Hooks](./docs/lambda-hook-inference.md) feature (introduced in v0.4.15) to call your existing SageMaker UDOP endpoint from the unified pattern's classification step via a custom Lambda function.
 
 ### Changed
+
 
 - **Switched `idp_sdk` pyproject.toml to auto-discovery** — Replaced explicit subpackage listing with `setuptools.packages.find` using `include = ["idp_sdk*"]` so new subpackages are automatically included without manual pyproject.toml updates.
 
@@ -209,6 +244,7 @@ SPDX-License-Identifier: MIT-0
   - **Use Cases**: Correct extraction errors, add baseline data for evaluation comparison, re-run evaluation after data corrections, update document summaries
 
 ### Changed
+
 
 - **HITL Decoupled from Step Functions**: HITL review operations now update document status directly in DynamoDB without triggering workflow reprocessing, improving reliability and reducing unintended side effects
 
@@ -354,6 +390,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Scripts Directory Reorganization**
   - Consolidated development environment setup scripts into `scripts/setup/` subdirectory
   - Moved CI/CD scripts (`codebuild_deployment.py`, `integration_test_deployment.py`, `validate_buildspec.py`, `typecheck_pr_changes.py`, `validate_service_role_permissions.py`) into `scripts/sdlc/` subdirectory
@@ -451,6 +488,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **HITL Configuration**
   - HITL is now disabled by default in the configuration
   - Users must explicitly enable HITL in the Configuration page (Assessment & HITL Configuration section) to trigger human review workflows
@@ -465,6 +503,7 @@ SPDX-License-Identifier: MIT-0
 
 
 ### Changed
+
 
 - **Lambda Layers Architecture for Improved Build Efficiency**
   - Replaced bundled `idp_common` package dependencies in individual Lambda functions with three shared Lambda Layers
@@ -623,6 +662,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Test Studio UI Enhancements for Improved Table Layouts and User Experience**
   - Added resizable columns and CollectionPreferences with wrap lines for all tables in TestComparison and TestResults
   - Combined accuracy and split classification metrics into collapsible "Average Accuracy and Split Metrics" section with expandable "Additional Metrics" for comprehensive review
@@ -775,6 +815,7 @@ SPDX-License-Identifier: MIT-0
   - Resolves #146
 
 ### Changed
+
 
 - **Improved Temperature and Top_P Parameter Logic for Deterministic Output**
   - Changed inference parameter selection logic to allow `temperature=0.0` for deterministic output (recommended by Anthropic and other model providers)
@@ -935,6 +976,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Containerized Pattern-1 and Pattern-3 Deployment Pipelines**
   - Migrated Pattern-1 and Pattern-3 Lambda functions to Docker image deployments (following Pattern-2 approach from v0.3.20)
   - Builds and pushes all Lambda images via CodeBuild with automated ECR cleanup
@@ -967,6 +1009,7 @@ SPDX-License-Identifier: MIT-0
 ## [0.4.1]
 
 ### Changed
+
 
 - **Configuration Library Updates with JSON Schema Support**
   - Updated configuration library with JSON schema format for lending package, bank statement, and RVL-CDIP package samples
@@ -1100,6 +1143,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Migrated Evaluation from EventBridge Trigger to Step Functions Workflow**
   - Moved evaluation processing from external EventBridge-triggered Lambda to integrated Step Functions workflow step
   - **Race Condition Eliminated**: Evaluation now runs inside state machine before WorkflowTracker marks documents COMPLETE, preventing premature completion status when evaluation is still running
@@ -1154,6 +1198,7 @@ SPDX-License-Identifier: MIT-0
   - **Benefits**: Context-aware summaries referencing extracted values, improved accuracy and quality, better extraction-summary alignment
 
 ### Changed
+
 
 - **Containerized Pattern-2 deployment pipeline** that builds and pushes all Lambda images via CodeBuild using the new Dockerfile, plus automated ECR cleanup and tests.
   - Lambda docker image deployments have a 10 GB image size limit compared to the 250 MB zip limit of regular deployment. This however doesn't allow for viewing the code in the AWS console.
@@ -1250,6 +1295,7 @@ SPDX-License-Identifier: MIT-0
   - **Faster Time-to-Query**: Agent has immediate access to table overview and can proceed directly to detailed schema loading for relevant tables
 
 ### Changed
+
 
 - Add UI code lint/validation to publish.py script
 
@@ -1427,6 +1473,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Reverted to python3.12 runtime to resolve build package dependency problems**
 
 ### Fixed
@@ -1502,6 +1549,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Updated Python Lambda Runtime to 3.13**
 
 ### Fixed
@@ -1571,6 +1619,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - Updated lending_package.pdf sample with more realistic driver's license image
 
 ### Fixed
@@ -1599,6 +1648,7 @@ SPDX-License-Identifier: MIT-0
   - Configurable through Web UI without requiring code changes or redeployment
 
 ### Changed
+
 
 - **Converted text confidence data format from JSON to markdown table for improved readability and reduced token usage**
   - Removed unnecessary "page_count" field
@@ -1696,6 +1746,7 @@ SPDX-License-Identifier: MIT-0
   - Resolves "size exceeding the maximum number of bytes service limit" errors for documents with 500+ pages
 
 ### Changed
+
 
 - **Default behavior for image attachment in Pattern-2 and Pattern3**
   - If the prompt contains a `{DOCUMENT_IMAGE}` placeholder, keep the current behavior (insert image at placeholder)
@@ -1865,6 +1916,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - Pin packages to tested versions to avoid vulnerability from incompatible new package versions.
 - Updated reporting data to use document's queued_time for consistent timestamps
 - Create new extensible SaveReportingData class in idp_common package for saving evaluation results to Parquet format
@@ -2027,6 +2079,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+
 - **Simplified Model Configuration Architecture**
   - Removed individual model parameters from main template: `Pattern1SummarizationModel`, `Pattern2ClassificationModel`, `Pattern2ExtractionModel`, `Pattern2SummarizationModel`, `Pattern3ExtractionModel`, `Pattern3SummarizationModel`, `EvaluationLLMModelId`
   - Model selection now handled through enum constraints in UpdateSchemaConfig sections within each pattern template
@@ -2071,6 +2124,7 @@ SPDX-License-Identifier: MIT-0
 - Added document reprocessing capability to the UI - New "Reprocess" button with confirmation dialog
 
 ### Changed
+
 
 - Refactored code for better maintainability
 - Updated UI components to support markdown table viewing

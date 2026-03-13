@@ -318,11 +318,10 @@ class DocumentDynamoDBService:
                 document.hitl_sections_completed
             )
 
-        # Add confidence alert count if available
-        if document.confidence_alert_count > 0:
-            set_expressions.append("#ConfidenceAlertCount = :ConfidenceAlertCount")
-            expression_names["#ConfidenceAlertCount"] = "ConfidenceAlertCount"
-            expression_values[":ConfidenceAlertCount"] = document.confidence_alert_count
+        # Always persist confidence alert count (even 0) so GSI has it for listDocuments
+        set_expressions.append("#ConfidenceAlertCount = :ConfidenceAlertCount")
+        expression_names["#ConfidenceAlertCount"] = "ConfidenceAlertCount"
+        expression_values[":ConfidenceAlertCount"] = document.confidence_alert_count
 
         # Build update expression with optional REMOVE clause
         update_expression = "SET " + ", ".join(set_expressions)

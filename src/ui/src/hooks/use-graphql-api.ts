@@ -7,6 +7,7 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import useAppContext from '../contexts/app';
 import {
   listDocuments,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   getDocumentCount,
   getDocument,
   deleteDocument,
@@ -50,6 +51,7 @@ interface GraphQLSubscriptionRef {
   unsubscribe: () => void;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface DocumentListItem {
   ObjectKey: string;
   PK?: string;
@@ -77,7 +79,7 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
   const [isDocumentsListLoading, setIsDocumentsListLoading] = useState<boolean>(false);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [customDateRange, setCustomDateRange] = useState<DateRange | null>(null);
-  const { setErrorMessage } = useAppContext()!;
+  const { setErrorMessage } = useAppContext();
 
   const subscriptionsRef = useRef<{
     onCreate: GraphQLSubscriptionRef | null;
@@ -105,25 +107,46 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
 
   const setDocumentsDeduped = useCallback((documentValues: Document[]): void => {
     setDocuments((currentDocuments) => {
-      const documentValuesdocumentIds = documentValues.map((c) => c.ObjectKey);
-      const filteredCurrentDocuments = currentDocuments.filter((c) => !documentValuesdocumentIds.includes(c.ObjectKey));
-      const allDocuments = [...filteredCurrentDocuments, ...documentValues];
-      const deduplicatedByObjectKey = Object.values(
-        allDocuments.reduce((acc: Record<string, Document>, doc) => {
-          const existing = acc[doc.ObjectKey];
-          if (!existing) {
-            acc[doc.ObjectKey] = doc;
-          } else {
-            const existingTime = existing.CompletionTime || existing.InitialEventTime || '0';
-            const newTime = doc.CompletionTime || doc.InitialEventTime || '0';
-            if (newTime > existingTime) {
-              acc[doc.ObjectKey] = doc;
-            }
+      // Build a lookup of existing documents for merging
+      const existingByKey: Record<string, Document> = {};
+      currentDocuments.forEach((doc) => {
+        existingByKey[doc.ObjectKey] = doc;
+      });
+
+      // Merge new values with existing documents.
+      // Rich data (from subscriptions/getDocument — detected by having 'Sections' key)
+      // does a full replacement so reprocessed documents properly clear stale fields.
+      // Lightweight list data (from listDocuments — no 'Sections' key) preserves
+      // existing non-null fields to avoid wiping rich detail data.
+      const mergedNewValues = documentValues.map((newDoc) => {
+        const existing = existingByKey[newDoc.ObjectKey];
+        if (!existing) return newDoc;
+
+        // Detect rich data: subscription and getDocument responses include 'Sections'
+        // (even if empty/null). Lightweight listDocuments responses never include it.
+        const isRichData = 'Sections' in newDoc;
+
+        if (isRichData) {
+          // Full replacement from subscription/getDocument — allows clearing stale fields
+          // (e.g., after reprocess). Only skip truly undefined keys.
+          const replaced = { ...newDoc };
+          return replaced as Document;
+        }
+
+        // Lightweight list data — preserve existing non-null fields
+        const merged = { ...existing };
+        Object.entries(newDoc).forEach(([key, value]) => {
+          if (value !== null && value !== undefined) {
+            (merged as Record<string, unknown>)[key] = value;
           }
-          return acc;
-        }, {}),
-      );
-      return deduplicatedByObjectKey;
+        });
+        return merged as Document;
+      });
+
+      // Replace existing docs with merged versions, keep untouched docs
+      const mergedIds = new Set(mergedNewValues.map((c) => c.ObjectKey));
+      const untouchedDocs = currentDocuments.filter((c) => !mergedIds.has(c.ObjectKey));
+      return [...untouchedDocs, ...mergedNewValues];
     });
   }, []);
 
@@ -354,9 +377,9 @@ const useGraphQlApi = ({ initialPeriodsToLoad = DOCUMENT_LIST_SHARDS_PER_DAY * 2
       const response = result.data.abortWorkflow;
       setIsDocumentsListLoading(true);
 
-      if (response.failedCount > 0 && response.abortedCount > 0) {
-        setErrorMessage(`Aborted ${response.abortedCount} document(s), but ${response.failedCount} failed`);
-      } else if (response.failedCount > 0 && response.abortedCount === 0) {
+      if ((response.failedCount ?? 0) > 0 && (response.abortedCount ?? 0) > 0) {
+        setErrorMessage(`Aborted ${response.abortedCount ?? 0} document(s), but ${response.failedCount ?? 0} failed`);
+      } else if ((response.failedCount ?? 0) > 0 && response.abortedCount === 0) {
         setErrorMessage(`Failed to abort document(s): ${response.errors?.join(', ') || 'Unknown error'}`);
       }
 

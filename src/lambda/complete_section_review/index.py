@@ -51,8 +51,9 @@ def handler(event, context):
         return release_review(object_key, username, user_email, is_admin)
 
     if field_name == "skipAllSectionsReview":
-        if not is_admin:
-            raise ValueError("Only administrators can skip all sections review")
+        is_reviewer = "Reviewer" in user_groups
+        if not is_admin and not is_reviewer:
+            raise ValueError("Only administrators and reviewers can skip sections review")
         if not object_key:
             raise ValueError("objectKey is required")
         return skip_all_sections_review(object_key, username, user_email)

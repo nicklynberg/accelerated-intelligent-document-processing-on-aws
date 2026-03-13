@@ -50,8 +50,7 @@ interface DiscoveryJob {
 }
 
 const DiscoveryPanel = (): React.JSX.Element => {
-  const { settings: rawSettings } = useSettingsContext() || {};
-  const settings = rawSettings as Record<string, unknown> | undefined;
+  const { settings } = useSettingsContext();
   const { versions, loading: versionsLoading, getVersionOptions } = useConfigurationVersions();
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [groundTruthFile, setGroundTruthFile] = useState<File | null>(null);
@@ -65,17 +64,21 @@ const DiscoveryPanel = (): React.JSX.Element => {
   const [selectedVersion, setSelectedVersion] = useState<SelectProps.Option | null>(null);
   // Remove unused activeSubscriptions state since we manage subscriptions locally in useEffect
 
-  // Set default active version when versions load
+  // Set default to active version (or first scoped version) when versions load
   useEffect(() => {
     if (versions.length > 0 && !selectedVersion) {
+      const versionOptions = getVersionOptions();
       const activeVersion = versions.find((version) => version.isActive);
       if (activeVersion) {
-        // Use the same logic as getVersionOptions to ensure consistency
-        const versionOptions = getVersionOptions();
         const activeVersionOption = versionOptions.find((option) => option.value === activeVersion.versionName);
         if (activeVersionOption) {
           setSelectedVersion(activeVersionOption);
+          return;
         }
+      }
+      // Fallback: select first available (scoped) version
+      if (versionOptions.length > 0) {
+        setSelectedVersion(versionOptions[0]);
       }
     }
   }, [versions, selectedVersion, getVersionOptions]);
@@ -195,7 +198,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
           variables: { jobId: job.jobId },
         }) as unknown as GqlSubscription;
         const subscription = observable.subscribe({
-            next: (data) => {
+            next: (data: { data?: { onDiscoveryJobStatusChange?: DiscoveryJob } }) => {
               console.log('Discovery job status changed:', data);
               const updatedJob = data?.data?.onDiscoveryJobStatusChange;
               if (updatedJob) {
@@ -206,7 +209,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
               console.warn('Received subscription update but no job data, falling back to refresh');
               loadDiscoveryJobs();
             },
-            error: (subscriptionError) => {
+            error: (subscriptionError: unknown) => {
               console.error('Discovery job subscription error:', subscriptionError);
             },
           });
@@ -284,7 +287,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
         setError(null);
         setIsValidatingJson(false);
       } catch (jsonError) {
-        const friendlyError = getJsonValidationError(jsonError);
+        const friendlyError = getJsonValidationError(jsonError as { message?: string; toString: () => string });
         setError(`Invalid JSON format in ground truth file: ${friendlyError}`);
         setGroundTruthFile(null);
         setIsValidatingJson(false);

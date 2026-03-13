@@ -80,14 +80,6 @@ Parameters:
     AllowedPattern: '^(|s3://.*)$'
     ConstraintDescription: Must be empty or a valid S3 URI (e.g., s3://my-bucket/custom-config/config.yaml)
 
-  # Pattern 1 Parameters
-
-  Pattern1BDAProjectArn:
-    Type: String
-    Default: ""
-    AllowedPattern: "^(|^arn:aws[a-z-]*:bedrock:[a-z0-9-]+:.+:data-automation-project/.+)$"
-    Description: Provide a Bedrock Data Automation (BDA) project ARN, or leave blank to create a sample project for processing the sample lending package.
-
   ConfigurationPreset:
     Type: String
     Default: "lending-package-sample"
@@ -357,8 +349,6 @@ Parameters:
     ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
 
 Conditions:
-  HasPattern1BDAProjectArn:
-    !Not [ !Equals [ !Ref Pattern1BDAProjectArn, "" ] ]
   HasGuardrailConfig:
     !And [
       !Not [ !Equals [ !Ref BedrockGuardrailId, "" ] ],
@@ -404,7 +394,6 @@ Metadata:
         Parameters:
           - ConfigurationPreset
           - CustomConfigPath
-          - Pattern1BDAProjectArn
           - Pattern2CustomClassificationModelARN
           - Pattern2CustomExtractionModelARN
       - Label:
@@ -457,8 +446,6 @@ Metadata:
         default: "Admin Email Address"
       AllowedSignUpEmailDomain:
         default: "Allowed Sign Up Email Domain"
-      Pattern1BDAProjectArn:
-        default: "Bedrock Data Automation (BDA) Project ARN"
       Pattern2CustomClassificationModelARN:
         default: "Custom Classification Model ARN"
       Pattern2CustomExtractionModelARN:
@@ -983,6 +970,12 @@ Resources:
             reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
           - id: W92
             reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: F38
+            reason: "PassRole permission is required to delegate the execution role to the Bedrock AgentCore Gateway service securely"
+          - id: F3
+            reason: "Wildcard actions required for AgentCore Gateway lifecycle management (create, update, delete) and CloudWatch Logs delivery configuration"
+          - id: W11
+            reason: "Wildcard resource required as AgentCore Gateway ARNs are dynamically generated and unknown at deployment time"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
@@ -1105,6 +1098,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (log level only)"
     Properties:
       PermissionsBoundary:
         !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
@@ -1169,7 +1163,6 @@ Resources:
         ExecutionTimeThresholdMs: !Ref ExecutionTimeThresholdMs
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
-        BDAProjectArn: !Ref Pattern1BDAProjectArn
         UpdateConfigurationFunctionArn: !GetAtt UpdateConfigurationFunction.Arn
         ConfigurationTable: !Ref ConfigurationTable
         AppSyncApiUrl: !GetAtt GraphQLApi.GraphQLUrl
@@ -1295,12 +1288,14 @@ Resources:
         KnowledgeBaseModelId: !Ref KnowledgeBaseModelId
         ShouldCreateEvaluationBaselineBucket: !If [ShouldCreateEvaluationBaselineBucket, "true", "false"]
         ShouldCreateReportingBucket: !If [ShouldCreateReportingBucket, "true", "false"]
-        Pattern1BDAProjectArn: !Ref Pattern1BDAProjectArn
-        HasPattern1BDAProjectArn: !If [HasPattern1BDAProjectArn, "true", "false"]
                 
         # Lambda Layers
         IDPCommonBaseLayerArn: !Ref IDPCommonBaseLayer
         IDPCommonAgentsLayerArn: !Ref IDPCommonAgentsLayer
+        
+        # User management (for config-version scoping)
+        UsersTableName: !Ref UsersTable
+        UsersTableArn: !GetAtt UsersTable.Arn
         
   CustomerManagedEncryptionKey:
     DependsOn:
@@ -3047,6 +3042,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required for Custom Resource function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (log level only)"
     Properties:
       PermissionsBoundary:
         !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
@@ -3083,8 +3079,8 @@ Resources:
       TrackingTableName: !Ref TrackingTable
       BackfillStateMachineArn: !Ref BackfillStateMachine
       TotalSegments: "10"
-      # Force re-evaluation on each stack update
-      BackfillVersion: "1.0"
+      # Force re-evaluation on each stack update (bumped for ConfidenceAlertCount=0 repair)
+      BackfillVersion: "3.0"
 
   ##############################################################################
   # DynamoDB table and initialization function for workflow concurrency counter
@@ -4936,6 +4932,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required for capacity planning function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (log level and feature flags)"
     Properties:
       PermissionsBoundary:
         !If [
@@ -5014,6 +5011,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required"
     # checkov:skip=CKV_AWS_117: "VPC not required"
     # checkov:skip=CKV_AWS_115: "Reserved concurrency not required"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (log level only)"
     Properties:
       PermissionsBoundary:
         !If [
@@ -5567,12 +5565,28 @@ Resources:
       Precedence: 0
       UserPoolId: !Ref UserPool
 
+  AuthorGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      Description: Authors - read/write access to documents and configuration
+      GroupName: Author
+      Precedence: 1
+      UserPoolId: !Ref UserPool
+
   ReviewerGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
       Description: Document Reviewers for HITL
       GroupName: Reviewer
-      Precedence: 1
+      Precedence: 2
+      UserPoolId: !Ref UserPool
+
+  ViewerGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      Description: Viewers - read-only access to documents and configuration
+      GroupName: Viewer
+      Precedence: 3
       UserPoolId: !Ref UserPool
 
   AdminUserToGroupAttachment:
@@ -6221,6 +6235,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ configured for SQS triggered function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (bucket names and log level)"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.handler
@@ -6765,6 +6780,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (Cognito pool and group IDs)"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.handler
@@ -6777,7 +6793,9 @@ Resources:
         Variables:
           USER_POOL_ID: !Ref UserPool
           ADMIN_GROUP: !Ref AdminGroup
+          AUTHOR_GROUP: !Ref AuthorGroup
           REVIEWER_GROUP: !Ref ReviewerGroup
+          VIEWER_GROUP: !Ref ViewerGroup
           USERS_TABLE_NAME: !Ref UsersTable
           ALLOWED_SIGNUP_EMAIL_DOMAINS: !Ref AllowedSignUpEmailDomain
       LoggingConfig:
@@ -6822,6 +6840,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required for DynamoDB stream processing"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (Cognito pool and group IDs)"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.handler
@@ -6873,6 +6892,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration values (DynamoDB table name)"
     Properties:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       Handler: index.handler
@@ -6968,6 +6988,24 @@ Resources:
       DataSourceName: !GetAtt UserManagementDataSource.Name
       TypeName: Query
       FieldName: listUsers
+
+  UpdateUserResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      TypeName: Mutation
+      FieldName: updateUser
+
+  GetMyProfileResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt UserManagementDataSource.Name
+      TypeName: Query
+      FieldName: getMyProfile
 
   CompleteSectionReviewDataSource:
     Type: AWS::AppSync::DataSource
