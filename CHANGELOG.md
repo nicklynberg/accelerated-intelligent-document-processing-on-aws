@@ -5,8 +5,9 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
-### Added
+## [0.5.2]
 
+### Added
 
 - **Multi-tenancy with Role-Based Access Control (RBAC)** — 4-role model (Admin, Author, Reviewer, Viewer) with server-side AppSync auth directives, server-side Reviewer document filtering, and UI adaptation. Admin has full access; Author can edit config and process documents but cannot manage users or delete config versions; Viewer has read-only access (editors, save buttons, and edit mode all disabled); Reviewer sees only HITL-pending documents. Non-admin roles can be scoped to specific use cases via `allowedConfigVersions`. See `docs/rbac.md`.
 
