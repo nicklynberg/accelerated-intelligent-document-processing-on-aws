@@ -202,13 +202,33 @@ class ConfigOperation:
         Returns:
             ConfigDownloadResult with downloaded configuration
         """
+        import os
+
         import yaml
 
         name = self._client._require_stack(stack_name)
         config_table = self._get_config_table(name)
 
-        # Enhancement 5: use get_configuration() (same as CLI) to return
-        # the raw user config without merging with system defaults.
+        # If no version specified, resolve the active version from DynamoDB
+        # (all configs are stored as Config#<version>, never as bare "Config")
+        if not config_version:
+            from idp_common.config.configuration_manager import ConfigurationManager
+
+            os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+            manager = ConfigurationManager()
+            for v in manager.list_config_versions():
+                if v.get("isActive"):
+                    config_version = v.get("versionName")
+                    logger.info(f"Resolved active config version: {config_version}")
+                    break
+            if not config_version:
+                from idp_common.config.constants import DEFAULT_VERSION
+
+                config_version = DEFAULT_VERSION
+                logger.info(
+                    f"No active version found, falling back to: {config_version}"
+                )
+
         from idp_common.config import ConfigurationReader
 
         reader = ConfigurationReader(table_name=config_table)
@@ -378,14 +398,18 @@ class ConfigOperation:
 
             versions = [
                 ConfigVersionInfo(
-                    version_name=v.get("version_name", v)
+                    version_name=v.get("versionName", v.get("version_name", str(v)))
                     if isinstance(v, dict)
                     else str(v),
-                    is_active=v.get("is_active", False)
+                    is_active=v.get("isActive", v.get("is_active", False))
                     if isinstance(v, dict)
                     else False,
-                    created_at=v.get("created_at") if isinstance(v, dict) else None,
-                    updated_at=v.get("updated_at") if isinstance(v, dict) else None,
+                    created_at=v.get("createdAt", v.get("created_at"))
+                    if isinstance(v, dict)
+                    else None,
+                    updated_at=v.get("updatedAt", v.get("updated_at"))
+                    if isinstance(v, dict)
+                    else None,
                     description=v.get("description") if isinstance(v, dict) else None,
                 )
                 for v in (versions_raw or [])

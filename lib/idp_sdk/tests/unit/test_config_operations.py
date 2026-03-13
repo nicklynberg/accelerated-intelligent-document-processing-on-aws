@@ -74,8 +74,8 @@ class TestConfigOperationsMocked:
 
         mock_manager = mock_manager_class.return_value
         mock_manager.list_config_versions.return_value = [
-            {"version_name": "default", "is_active": False},
-            {"version_name": "v1", "is_active": True},
+            {"versionName": "default", "isActive": False},
+            {"versionName": "v1", "isActive": True},
         ]
 
         # Test
