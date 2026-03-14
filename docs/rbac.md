@@ -1,3 +1,7 @@
+---
+title: "Role-Based Access Control (RBAC)"
+---
+
 # Role-Based Access Control (RBAC)
 
 ## Overview
