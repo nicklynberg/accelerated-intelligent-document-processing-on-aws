@@ -8,6 +8,8 @@ title: "Role-Based Access Control (RBAC)"
 
 The GenAI IDP Accelerator implements a comprehensive Role-Based Access Control system with **server-side enforcement** at the AppSync API layer, supplemented by UI-level navigation and action controls for a clean user experience. It also supports **config-version scoping** to restrict non-admin users to specific configuration versions (use cases).
 
+
+
 ## Roles
 
 Four roles are defined as Cognito User Pool groups:
