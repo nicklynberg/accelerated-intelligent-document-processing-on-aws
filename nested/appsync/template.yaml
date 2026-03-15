@@ -3588,6 +3588,7 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: Environment variables contain only non-sensitive configuration values (log levels, table names) - no secrets or PII
     Properties:
       PermissionsBoundary:
         !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]

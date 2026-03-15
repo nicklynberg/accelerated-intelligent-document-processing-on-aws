@@ -19,6 +19,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+- **Python 3.12+ now required** — Updated minimum Python version from 3.10 to 3.12 to address security vulnerabilities in transitive dependencies.
+
 - **Sync to BDA no longer auto-activates the config version** — Previously, performing "Sync to BDA" would automatically set the current config version as active. Since each config version now has its own BDA project, auto-activation is unnecessary. Users can manually choose which version to activate via the Versions table. The "Sync to BDA" confirmation modal text has been updated accordingly.
 
 - **Removed `Bedrock Data Automation (BDA) Project ARN` CloudFormation parameter** — The deploy-time `Pattern1BDAProjectArn` parameter has been removed as it was redundant with the per-config-version BDA project management already available in the Web UI, CLI, and GraphQL API. BDA projects are now managed entirely post-deployment: enable `use_bda: true` in your configuration, then use "Sync to BDA" to create or link a BDA project, or "Sync from BDA" to import from any existing BDA project. This simplifies the deployment experience (one fewer parameter) and better aligns the CloudFormation interface with the system's actual architecture. Existing deployed stacks are unaffected — runtime BDA project ARN resolution reads from DynamoDB per-version tracking, not from the CloudFormation parameter. Also removed the unused `nested/bda-lending-project/` directory (dead code not referenced by any template) and the legacy `BDA_PROJECT_ARN` environment variable fallback from the sync resolver.

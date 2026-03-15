@@ -310,6 +310,8 @@ Resources:
                 - export IDP_ADMIN_EMAIL=$(aws s3api head-object --bucket ${SOURCE_BUCKET} --key deploy/code.zip --query 'Metadata."gitlab-user-email"' --output text 2>/dev/null || echo "")
                 - make setup || { echo "IDP Common and IDP CLI installation failed"; exit 1; }
                 - pip install rich || echo "Rich installation failed, using fallback formatting"
+                - export PATH="$PWD/.venv/bin:$PATH"
+                - which idp-cli || { echo "idp-cli not found in PATH"; exit 1; }
             build:
               commands:
                 - python3 scripts/sdlc/codebuild_deployment.py
