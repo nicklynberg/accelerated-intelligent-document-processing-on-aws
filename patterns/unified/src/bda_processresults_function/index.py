@@ -1470,6 +1470,7 @@ def handler(event, context):
         if existing_status not in ("Review Completed", "Review Skipped", "Completed", "Skipped"):
             hitl_sections_pending = [section.section_id for section in document.sections]
             document.hitl_status = "PendingReview"
+            document.hitl_triggered = True
             document.hitl_sections_pending = hitl_sections_pending
             document.hitl_sections_completed = []
             logger.info(f"Document requires human review. Sections pending: {hitl_sections_pending}")

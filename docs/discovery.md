@@ -723,7 +723,7 @@ PatternXConfigurationHandler:
   Type: AWS::Lambda::Function
   Properties:
     Handler: index.pattern_x_configuration_handler
-    Runtime: python3.9
+    Runtime: python3.12
     Environment:
       Variables:
         PATTERN_NAME: "pattern-x"

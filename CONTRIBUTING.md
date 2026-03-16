@@ -37,7 +37,7 @@ opensource-codeofconduct@amazon.com with any additional questions or comments.
    - Bash shell (Linux, MacOS)
    - AWS CLI
    - AWS SAM CLI
-   - Python 3.11 or later
+   - Python 3.12 or later
    - Docker
 
 2. **Fork and Clone the Repository**:

@@ -312,7 +312,7 @@ docs-build: docs-setup
 docs-deploy: docs-build
 	@echo "Deploying documentation site to GitHub Pages..."
 	touch docs-site/dist/.nojekyll
-	cd docs-site && npx gh-pages -d dist --dotfiles
+	cd docs-site && npx gh-pages -d dist --dotfiles --repo https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws.git
 	@echo -e "$(GREEN)✅ Docs deployed to GitHub Pages!$(NC)"
 
 # Generate standard class catalog from BDA standard blueprints

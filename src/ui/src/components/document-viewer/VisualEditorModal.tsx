@@ -510,11 +510,13 @@ const FormFieldRenderer = memo<Record<string, any>>(
               if (Array.isArray(pathFieldInfo) && !Number.isNaN(parseInt(String(pathPart), 10))) {
                 const arrayIndex = parseInt(String(pathPart), 10);
                 if (arrayIndex >= 0 && arrayIndex < pathFieldInfo.length) {
+                  // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop
                   pathFieldInfo = pathFieldInfo[arrayIndex];
                 } else {
                   pathFieldInfo = null;
                 }
               } else if (pathFieldInfo[pathPart]) {
+                // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop
                 pathFieldInfo = pathFieldInfo[pathPart];
               } else {
                 pathFieldInfo = null;
@@ -1311,6 +1313,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
                       let pathFieldInfo = fieldInfo;
                       currentPath.forEach((pathPart: string | number) => {
                         if (pathFieldInfo && typeof pathFieldInfo === 'object' && (pathFieldInfo as Record<string, unknown>)[pathPart as string]) {
+                          // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop
                           pathFieldInfo = pathFieldInfo[pathPart];
                         } else {
                           pathFieldInfo = null;
@@ -1686,6 +1689,7 @@ const FormFieldRenderer = memo<Record<string, any>>(
                       let arrayFieldInfo = firstExplainabilityItem;
                       path.forEach((pathPart: string | number) => {
                         if (arrayFieldInfo && typeof arrayFieldInfo === 'object' && (arrayFieldInfo as Record<string, unknown>)[pathPart as string]) {
+                          // nosemgrep: javascript.lang.security.audit.prototype-pollution.prototype-pollution-loop
                           arrayFieldInfo = arrayFieldInfo[pathPart];
                         } else {
                           arrayFieldInfo = null;

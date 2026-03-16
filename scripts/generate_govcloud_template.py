@@ -69,6 +69,8 @@ class GovCloudTemplateGenerator:
             'CognitoAuthorizedRole',
             'AdminUser',
             'AdminGroup',
+            'AuthorGroup',  # RBAC author group - depends on UserPool
+            'ViewerGroup',  # RBAC viewer group - depends on UserPool
             'ReviewerGroup',  # HITL reviewer group - depends on UserPool
             'AdminUserToGroupAttachment',
             'GetDomain',  # This depends on Cognito UserPoolDomain - remove it
@@ -136,7 +138,10 @@ class GovCloudTemplateGenerator:
             'CompleteSectionReviewResolver',
             'SkipAllSectionsReviewResolver',
             'ClaimReviewResolver',
-            'ReleaseReviewResolver'
+            'ReleaseReviewResolver',
+            # RBAC resolvers - depend on GraphQLApi, APPSYNCSTACK, and UserManagementDataSource
+            'GetMyProfileResolver',
+            'UpdateUserResolver'
         }
         
         # Knowledge Base resources (not supported in GovCloud due to S3 Vectors service unavailability)

@@ -23,7 +23,7 @@ name = "idp_common"
 version = "0.5.2"
 description = "Common utilities for GenAI IDP Accelerator patterns"
 authors = [{ name = "AWS", email = "noreply@amazon.com" }]
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.12,<3.14"
 dependencies = [
   "boto3==1.42.0",      # Core dependency for AWS services
   "jsonschema>=4.25.1",

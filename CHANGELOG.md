@@ -35,6 +35,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **GovCloud template: fix unresolved RBAC resource dependencies** — Added `AuthorGroup`, `ViewerGroup`, `GetMyProfileResolver`, and `UpdateUserResolver` to GovCloud removal lists so they are stripped alongside the `UserPool` they depend on.
+
 - **Test Fixes** — Updated CLI test mocks to align with the new `IDPClient`-based implementation, fixing broken test fixtures that referenced removed internal imports.
 
 
@@ -51,6 +53,8 @@ SPDX-License-Identifier: MIT-0
 - **Discovery accessible from CLI and SDK** — Discovery can now be run programmatically via the IDP SDK (`client.discovery.run()`) and CLI (`idp-cli discover`), enabling users with many document classes to automate schema generation without the Web UI. Supports both modes: without ground truth (exploratory) and with ground truth (optimized). ([#228](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/228))
 
 ### Changed
+
+- **Python 3.12+ now required** — Updated minimum Python version from 3.10 to 3.12 to address security vulnerabilities in transitive dependencies.
 
 - **Sync to BDA no longer auto-activates the config version** — Previously, performing "Sync to BDA" would automatically set the current config version as active. Since each config version now has its own BDA project, auto-activation is unnecessary. Users can manually choose which version to activate via the Versions table. The "Sync to BDA" confirmation modal text has been updated accordingly.
 
