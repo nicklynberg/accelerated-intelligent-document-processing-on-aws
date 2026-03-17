@@ -19,31 +19,22 @@ SPDX-License-Identifier: MIT-0
   - **S3 Upload Race Condition Fix** — Replaced hardcoded `time.sleep(30)` with smart S3 polling using exponential backoff (2s–10s, 60s timeout).
   - **New GraphQL APIs** — `autoDetectSections` mutation, `pageRanges`/`pageLabels` on `uploadDiscoveryDocument`, `pageRange`/`discoveredClassName`/`statusMessage` on job types, `deleteDiscoveryJob` mutation.
 
-- **SDK Client Interface** — Introduced `IDPClient` as the single public entry point for all IDP operations, with typed namespace access (`client.batch`, `client.stack`, `client.config`, `client.manifest`, `client.testing`).
-
-- **Typed Return Models** — SDK operations return Pydantic models instead of raw dictionaries, enabling IDE auto-complete, type checking, and consistent error handling.
-
-- **Configuration Validation Enhancements** — Manifest and config validation now reports deprecated and unknown fields, enabling stricter validation policies.
-
-- **Configuration Upload Version Detection** — Uploading a configuration now detects whether a version exists and correctly handles new version creation vs. updates.
-
-- **Private Internal Modules** — Internal SDK modules renamed from `core/` to `_core/` to clearly signal private API boundaries, with lint rules enforcing the boundary.
-
-- **CLI Refactored to Use SDK** — CLI commands now route through `IDPClient` instead of importing internal modules directly, improving maintainability and ensuring consistent behavior across CLI, Web UI, and programmatic access.
-
-- **Stack Deploy/Delete Enhanced** — Deploy and delete commands now use expanded SDK stack operations for in-progress detection, monitoring, cancel-update, and failure analysis.
+- **IDP SDK & CLI Overhaul** — Major refactoring of the SDK and CLI for a cleaner, more maintainable architecture:
+  - **`IDPClient` entry point** — Single public interface with typed namespace access (`client.batch`, `client.stack`, `client.config`, `client.manifest`, `client.testing`). CLI commands now route through `IDPClient` instead of importing internal modules, ensuring consistent behavior across CLI, Web UI, and programmatic access.
+  - **Typed return models** — SDK operations return Pydantic models instead of raw dictionaries, enabling IDE auto-complete and type checking.
+  - **Enhanced config validation** — Manifest and config validation reports deprecated/unknown fields; config upload detects whether a version exists and handles creation vs. update correctly.
+  - **Enhanced stack operations** — Deploy and delete commands support in-progress detection, live monitoring, cancel-update, and failure analysis.
+  - **Private API boundaries** — Internal modules renamed from `core/` to `_core/` with lint rules enforcing the boundary.
 
 ### Changed
 
-- **SDK: `batch.run()` renamed to `batch.process()`** — The `run()` method is now deprecated and emits a `DeprecationWarning`. Existing code using `client.batch.run(...)` will continue to work but should be migrated to `client.batch.process(...)`.
+- **SDK & CLI: Renamed processing commands for clarity** — Old names are deprecated (emit `DeprecationWarning`) but remain available for backward compatibility:
+  - `client.batch.run()` → `client.batch.process()`
+  - `client.batch.rerun()` → `client.batch.reprocess()` (same for `client.document.rerun()` → `.reprocess()`)
+  - `idp-cli run-inference` → `idp-cli process`
+  - `idp-cli rerun-inference` → `idp-cli reprocess`
 
-- **SDK: `batch.rerun()` renamed to `batch.reprocess()`** — The `rerun()` method is now deprecated and emits a `DeprecationWarning`. Existing code using `client.batch.rerun(...)` should be migrated to `client.batch.reprocess(...)`. Same applies to `client.document.rerun()` → `client.document.reprocess()`.
-
-- **SDK: `stack.delete()` now waits by default** — The `wait` parameter on `client.stack.delete()` now defaults to `True` (previously the delete operation returned immediately). Scripts relying on the old fire-and-forget behavior should explicitly pass `wait=False`.
-
-- **CLI: `run-inference` renamed to `process`** — The `idp-cli run-inference` command is now deprecated. Use `idp-cli process` instead. The old command remains available for backward compatibility with a deprecation notice.
-
-- **CLI: `rerun-inference` renamed to `reprocess`** — The `idp-cli rerun-inference` command is now deprecated. Use `idp-cli reprocess` instead. The old command remains available for backward compatibility with a deprecation notice.
+- **SDK: `stack.delete()` now waits by default** — The `wait` parameter defaults to `True` (previously fire-and-forget). Pass `wait=False` to restore the old behavior.
 
 ### Fixed
 
