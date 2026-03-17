@@ -104,11 +104,15 @@ This analysis produces structured configuration templates that can be used to co
 - **🤖 Automated Analysis**: Uses advanced LLMs to analyze document structure without manual intervention
 - **📋 Blueprint Generation**: Creates ready-to-use configuration templates for document processing
 - **🎯 Ground Truth Support**: Leverages existing labeled data to improve discovery accuracy
+- **📄 Multi-Section Discovery**: Discover multiple document classes from a single multi-page PDF package by defining page ranges
+- **✨ AI Auto-Detect Sections**: Automatically identify document section boundaries using LLM analysis
+- **🏷️ Class Name Hints**: Pre-label discovered classes from auto-detect or manual labels
 - **🔧 Configurable Models**: Supports multiple Bedrock models with customizable parameters
 - **📝 Custom Prompts**: Allows fine-tuning of analysis behavior through prompt engineering
 - **🔄 Iterative Refinement**: Enables progressive improvement of document understanding
 - **🌐 Multi-Format Support**: Handles PDF documents and various image formats
 - **⚡ Real-Time Processing**: Provides immediate feedback through the web interface
+- **📊 PDF Page Thumbnails**: Visual page preview with color-coded range highlighting in the browser
 
 ### Use Cases
 
@@ -392,6 +396,89 @@ discovery:
       </GROUND_TRUTH_REFERENCE>
 ```
 
+### Multi-Section Package Discovery
+
+For multi-page document packages (e.g., lending packages, insurance packets, healthcare bundles) that contain multiple different document types, the Discovery module supports discovering **multiple classes from a single PDF** by defining page ranges.
+
+#### Discovery Modes
+
+When a PDF file is selected, the UI presents two discovery modes:
+
+- **Single Section Document**: Discovers one class from the entire document (with optional ground truth). This is the original behavior.
+- **Multi-Section Package**: Define page ranges to discover multiple classes from different sections of the document. Each range creates a separate, independent discovery job.
+
+#### Page Range Selection
+
+In Multi-Section Package mode, the UI displays:
+
+1. **PDF Page Thumbnails** — rendered in the browser using `pdfjs-dist`, showing a visual grid of all pages with color-coded highlighting for each defined range
+2. **Page Range Inputs** — editable start/end page numbers for each range
+3. **Document Type Labels** — optional text field per range for labeling the document type (e.g., "W2 Form", "Invoice"). When provided, the label is used as a class name hint for the discovery LLM.
+
+#### AI Auto-Detect Sections
+
+The **"✨ Auto-detect sections"** button uses an LLM to automatically identify document section boundaries:
+
+1. The PDF is uploaded to S3
+2. The `autoDetectSections` GraphQL mutation calls a Lambda that sends the full PDF to Bedrock
+3. The LLM returns a JSON array of sections: `[{"start": 1, "end": 2, "type": "Letter"}, ...]`
+4. Page ranges are auto-populated with the LLM's boundary detection, including type labels
+5. User can review, adjust ranges, edit labels, then click "Start Discovery"
+
+The auto-detect prompt is fully configurable via the Discovery Configuration in View/Edit Configuration (`discovery.auto_split` section).
+
+#### Configuration
+
+```yaml
+discovery:
+  auto_split:
+    model_id: "us.amazon.nova-pro-v1:0"
+    temperature: 0.0    # Low temperature for consistent boundary detection
+    top_p: 0.1
+    max_tokens: 4096
+    system_prompt: >-
+      You are an expert document analyst. Your task is to identify
+      distinct document sections within a multi-page document package.
+      Return only valid JSON.
+    user_prompt: >-
+      Analyze this multi-page document package. Identify the page boundaries
+      where different document types or sections begin and end...
+```
+
+#### API Usage
+
+```python
+from idp_common.discovery.classes_discovery import ClassesDiscovery
+
+discovery = ClassesDiscovery(
+    input_bucket="my-bucket",
+    input_prefix="lending_package.pdf",
+    version="my-config-version"
+)
+
+# Auto-detect section boundaries
+sections = discovery.auto_detect_sections(
+    input_bucket="my-bucket",
+    input_prefix="lending_package.pdf"
+)
+# Returns: [{"start": 1, "end": 2, "type": "Letter"}, {"start": 3, "end": 5, "type": "W2 Form"}, ...]
+
+# Discover a specific page range with class name hint
+result = discovery.discovery_classes_with_document(
+    input_bucket="my-bucket",
+    input_prefix="lending_package.pdf",
+    page_range="3-5",
+    class_name_hint="W2 Form"
+)
+```
+
+#### How Page Extraction Works
+
+When a `page_range` is specified for a PDF, the system uses `pypdfium2` to extract only the specified pages into a new sub-PDF before sending to the Bedrock LLM. This means:
+- The LLM only sees the relevant pages, improving accuracy
+- Each page range job is independent and can run in parallel
+- The original document is never modified
+
 ### Choosing the Right Method
 
 | Factor | Without Ground Truth | With Ground Truth |
@@ -525,9 +612,13 @@ discovery:
 **Accessing Discovery:**
 1. Navigate to the main application dashboard
 2. Click on the "Discovery" tab or panel
-3. Upload document(s) for analysis
-4. Optionally upload ground truth file (JSON format)
-5. Click "Start Discovery" to begin analysis
+3. Select a **Configuration Version** to save discovered classes to
+4. Upload a document file (PDF, PNG, JPG, TIFF)
+5. For PDFs, choose a **Discovery Mode**:
+   - **Single Section Document** — discovers one class from the whole document; optionally upload a ground truth JSON file
+   - **Multi-Section Package** — define page ranges (manually or via ✨ Auto-detect) to discover multiple classes
+6. Click **"Start Discovery"** (or "Start Discovery (N sections)" for multi-section)
+7. Monitor progress in real-time in the Discovery Jobs table below
 
 **Monitoring Progress:**
 - Real-time progress messages via GraphQL subscriptions (e.g., "Analyzing document structure with AI...", "Saving to configuration...")

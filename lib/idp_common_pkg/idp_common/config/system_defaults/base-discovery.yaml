@@ -76,6 +76,24 @@ discovery:
       Do not extract the values.
       Format the extracted data using the below JSON format:
       Format the extracted groups and fields using the below JSON format:
+  auto_split:
+    model_id: us.amazon.nova-pro-v1:0
+    system_prompt: >-
+      You are an expert document analyst. Your task is to identify
+      distinct document sections within a multi-page document package.
+      Return only valid JSON.
+    max_tokens: "4096"
+    top_p: "0.1"
+    temperature: "0.0"
+    user_prompt: >-
+      Analyze this multi-page document package. Identify the page boundaries
+      where different document types or sections begin and end.
+      For each distinct document section, provide:
+      - "start": the first page number (1-based)
+      - "end": the last page number (1-based)
+      - "type": a short label for the document type (e.g., "W2 Form", "Letter", "Invoice")
+      Return ONLY a JSON array, no other text:
+      [{"start": 1, "end": 2, "type": "Letter"}, {"start": 3, "end": 3, "type": "Invoice"}]
   without_ground_truth:
     model_id: us.amazon.nova-pro-v1:0
     system_prompt: >-

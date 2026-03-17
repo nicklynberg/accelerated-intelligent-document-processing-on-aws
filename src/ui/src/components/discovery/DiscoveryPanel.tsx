@@ -23,18 +23,21 @@ import {
   ExpandableSection,
   Badge,
   TextFilter,
+  Tiles,
   Pagination,
   CollectionPreferences,
 } from '@cloudscape-design/components';
 import type { SelectProps } from '@cloudscape-design/components';
 import { generateClient } from 'aws-amplify/api';
 
-import { uploadDiscoveryDocument, listDiscoveryJobs, onDiscoveryJobStatusChange, deleteDiscoveryJob } from '../../graphql/generated';
+import { uploadDiscoveryDocument, listDiscoveryJobs, onDiscoveryJobStatusChange, deleteDiscoveryJob, autoDetectSections } from '../../graphql/generated';
 import useSettingsContext from '../../contexts/settings';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { getJsonValidationError } from '../common/utilities';
 import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
 import type { ConfigVersion } from '../test-studio/utils/configVersionUtils';
+import PdfPageSelector from './PdfPageSelector';
+import type { PageRange } from './PdfPageSelector';
 
 const client = generateClient();
 
@@ -57,6 +60,7 @@ interface DiscoveryJob {
   errorMessage?: string;
   discoveredClassName?: string;
   statusMessage?: string;
+  pageRange?: string;
 }
 
 /**
@@ -110,6 +114,12 @@ const DiscoveryPanel = (): React.JSX.Element => {
   const [selectedTimeRange, setSelectedTimeRange] = useState<SelectProps.Option>(TIME_RANGE_OPTIONS[2]); // Default: 2 days
   const [selectedJobs, setSelectedJobs] = useState<DiscoveryJob[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [pageRanges, setPageRanges] = useState<PageRange[]>([]);
+  const [uploadPhase, setUploadPhase] = useState<string>('');
+  const [discoveryMode, setDiscoveryMode] = useState<string>('single');
+  const [isAutoDetecting, setIsAutoDetecting] = useState(false);
+  const [autoDetectDocKey, setAutoDetectDocKey] = useState<string | null>(null);
+  const isPdf = documentFile?.name.toLowerCase().endsWith('.pdf') ?? false;
   const [tablePreferences, setTablePreferences] = useState({
     pageSize: PAGE_SIZE,
     visibleContent: ['documentKey', 'version', 'status', 'createdAt', 'elapsed', 'result'],
@@ -198,11 +208,19 @@ const DiscoveryPanel = (): React.JSX.Element => {
     loadDiscoveryJobs();
   }, []);
 
-  // Timer for elapsed time display — tick every 5s when there are active jobs
+  // Timer for elapsed time display + fallback poll every 10s when there are active jobs
+  // The poll catches subscription updates missed during rapid subscription teardown/recreation
   useEffect(() => {
     const hasActiveJobs = discoveryJobs.some((j) => j.status === 'PENDING' || j.status === 'IN_PROGRESS');
     if (hasActiveJobs && !tickRef.current) {
-      tickRef.current = setInterval(() => setTick((t) => t + 1), 5000);
+      tickRef.current = setInterval(() => {
+        setTick((t) => t + 1);
+        // Fallback poll every other tick (10s) to catch missed subscription updates
+        setTick((t) => {
+          if (t % 2 === 0) loadDiscoveryJobs();
+          return t + 1;
+        });
+      }, 5000);
     } else if (!hasActiveJobs && tickRef.current) {
       clearInterval(tickRef.current);
       tickRef.current = null;
@@ -290,6 +308,8 @@ const DiscoveryPanel = (): React.JSX.Element => {
   const handleDocumentFileChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const file = e.target.files?.[0] || null;
     setDocumentFile(file);
+    setPageRanges([]); // Reset page ranges when document changes
+    setAutoDetectDocKey(null); // Clear cached S3 key so auto-detect re-uploads the new document
     setUploadStatus([]);
     setError(null);
   };
@@ -404,6 +424,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
 
     setIsUploading(true);
     setUploadStatus([]);
+    setUploadPhase('');
     setError(null);
 
     const newUploadStatus: UploadStatusItem[] = [];
@@ -414,6 +435,20 @@ const DiscoveryPanel = (): React.JSX.Element => {
         groundTruthFileName = groundTruthFile.name;
       }
 
+      // Convert page ranges to string format for the GraphQL mutation (e.g., ["1-3", "4-6"])
+      const pageRangeStrings = pageRanges.length > 0
+        ? pageRanges.map((r) => `${r.start}-${r.end}`)
+        : undefined;
+
+      // Convert page labels (parallel array to pageRanges) — only non-empty labels
+      const pageLabelStrings = pageRanges.length > 0
+        ? pageRanges.map((r) => r.label || '')
+        : undefined;
+
+      // Phase 1: Create discovery jobs
+      const jobLabel = pageRangeStrings ? `${pageRangeStrings.length} discovery jobs` : 'discovery job';
+      setUploadPhase(`Creating ${jobLabel}...`);
+
       const documentResponse = await client.graphql({
         query: uploadDiscoveryDocument,
         variables: {
@@ -423,6 +458,8 @@ const DiscoveryPanel = (): React.JSX.Element => {
           bucket: settings.DiscoveryBucket as string,
           groundTruthFileName: groundTruthFileName || '',
           version: selectedVersion?.value,
+          pageRanges: pageRangeStrings,
+          pageLabels: pageLabelStrings,
         },
       });
 
@@ -437,9 +474,14 @@ const DiscoveryPanel = (): React.JSX.Element => {
         throw new Error('Server returned PUT method which is not supported. Please update your backend code.');
       }
 
+      // Phase 2: Upload document to S3
+      const fileSizeMB = (documentFile.size / (1024 * 1024)).toFixed(1);
+      setUploadPhase(`Uploading document to S3 (${fileSizeMB} MB)...`);
+
       await uploadFileToS3(documentFile, docPresignedUrl, docObjectKey, 'document', newUploadStatus);
 
       if (groundTruthFile) {
+        setUploadPhase('Uploading ground truth file...');
         await uploadFileToS3(
           groundTruthFile,
           docGroundTruthPresignedUrl ?? '',
@@ -449,10 +491,14 @@ const DiscoveryPanel = (): React.JSX.Element => {
         );
       }
 
+      // Phase 3: Refresh job list
+      setUploadPhase('Refreshing jobs list...');
       await loadDiscoveryJobs();
+      setUploadPhase('');
     } catch (err) {
       console.error('Error in overall upload process:', err);
       setError(`Upload process failed: ${(err as Error).message}`);
+      setUploadPhase('');
     } finally {
       setIsUploading(false);
     }
@@ -602,7 +648,17 @@ const DiscoveryPanel = (): React.JSX.Element => {
     {
       id: 'documentKey',
       header: 'Document',
-      cell: (item: DiscoveryJob) => getOriginalFileName(item.documentKey),
+      cell: (item: DiscoveryJob) => {
+        const name = getOriginalFileName(item.documentKey);
+        if (item.pageRange) {
+          return (
+            <Box>
+              {name} <Badge color="blue">pp {item.pageRange}</Badge>
+            </Box>
+          );
+        }
+        return name;
+      },
       sortingField: 'documentKey',
     },
     {
@@ -715,8 +771,43 @@ const DiscoveryPanel = (): React.JSX.Element => {
                 </Box>
               )}
             </FormField>
+            <div />
+          </ColumnLayout>
 
-            <FormField label="Ground Truth File (optional)" description="JSON file with expected field structure">
+          {/* Discovery Mode selector — only shown for PDFs */}
+          {isPdf && documentFile && (
+            <FormField label="Discovery Mode">
+              <Tiles
+                value={discoveryMode}
+                onChange={({ detail }) => {
+                  setDiscoveryMode(detail.value);
+                  // Clear mode-specific state when switching
+                  if (detail.value === 'single') {
+                    setPageRanges([]);
+                  } else {
+                    setGroundTruthFile(null);
+                  }
+                }}
+                columns={2}
+                items={[
+                  {
+                    value: 'single',
+                    label: 'Single Section Document',
+                    description: 'Discover one class from the entire document, with optional ground truth',
+                  },
+                  {
+                    value: 'multi',
+                    label: 'Multi-Section Package',
+                    description: 'Define page ranges to discover multiple classes from different sections',
+                  },
+                ]}
+              />
+            </FormField>
+          )}
+
+          {/* Single-class mode: Ground Truth file input — only shown after document is selected */}
+          {documentFile && (discoveryMode === 'single' || !isPdf) && (
+            <FormField label="Ground Truth File (optional)" description="JSON file with expected field structure to guide discovery">
               <input
                 type="file"
                 onChange={handleGroundTruthFileChange}
@@ -734,25 +825,104 @@ const DiscoveryPanel = (): React.JSX.Element => {
                 </Box>
               )}
             </FormField>
-          </ColumnLayout>
+          )}
 
-          <FormField label="Optional folder prefix (e.g., experiments/batch1)">
-            <Input
-              value={prefix}
-              onChange={handlePrefixChange}
-              placeholder="Leave empty for root folder"
+          {/* Multi-section mode: Page Range Selector */}
+          {discoveryMode === 'multi' && isPdf && documentFile && (
+            <PdfPageSelector
+              file={documentFile}
+              pageRanges={pageRanges}
+              onPageRangesChange={setPageRanges}
               disabled={isUploading}
-            />
-          </FormField>
+              isAutoDetecting={isAutoDetecting}
+              onAutoDetect={async () => {
+                if (!documentFile) return;
+                setIsAutoDetecting(true);
+                setError(null);
+                try {
+                  // Step 1: Upload file to S3 if not already uploaded
+                  let docKey = autoDetectDocKey;
+                  if (!docKey) {
+                    const uploadResp = await client.graphql({
+                      query: uploadDiscoveryDocument,
+                      variables: {
+                        fileName: documentFile.name,
+                        contentType: documentFile.type,
+                        prefix: prefix || '',
+                        bucket: settings.DiscoveryBucket as string,
+                        groundTruthFileName: '',
+                        version: selectedVersion?.value,
+                        // No pageRanges — just upload, don't create jobs
+                      },
+                    });
+                    const uploadResult = uploadResp.data.uploadDiscoveryDocument;
+                    docKey = uploadResult.objectKey;
+                    // Upload to S3
+                    const presignedPostData = JSON.parse(uploadResult.presignedUrl);
+                    const formData = new FormData();
+                    Object.entries(presignedPostData.fields).forEach(([k, v]) => formData.append(k, v as string));
+                    formData.append('file', documentFile);
+                    await fetch(presignedPostData.url, { method: 'POST', body: formData });
+                    setAutoDetectDocKey(docKey);
+                  }
 
-          <Button
-            variant="primary"
-            onClick={uploadFiles}
-            loading={isUploading}
-            disabled={!documentFile || !selectedVersion || isUploading || isValidatingJson}
-          >
-            Start Discovery
-          </Button>
+                  // Step 2: Call auto-detect sections
+                  const detectResp = await client.graphql({
+                    query: autoDetectSections,
+                    variables: {
+                      documentKey: docKey,
+                      bucket: settings.DiscoveryBucket as string,
+                      version: selectedVersion?.value,
+                    },
+                  });
+                  const sectionsJson = (detectResp as { data: { autoDetectSections: string } }).data.autoDetectSections;
+                  const sections = JSON.parse(sectionsJson) as Array<{ start: number; end: number; type?: string }>;
+
+                  // Step 3: Convert to page ranges with labels from LLM
+                  const detectedRanges: PageRange[] = sections.map((s) => ({
+                    start: s.start,
+                    end: s.end,
+                    label: s.type || '',
+                  }));
+                  setPageRanges(detectedRanges);
+                  console.log('Auto-detected sections:', sections);
+                } catch (err) {
+                  console.error('Auto-detect sections failed:', err);
+                  setError(`Auto-detect failed: ${(err as Error).message}`);
+                } finally {
+                  setIsAutoDetecting(false);
+                }
+              }}
+            />
+          )}
+
+          {/* Advanced options */}
+          <ExpandableSection headerText="Advanced options" variant="footer" defaultExpanded={false}>
+            <FormField label="Folder prefix" description="Optional S3 folder prefix (e.g., experiments/batch1)">
+              <Input
+                value={prefix}
+                onChange={handlePrefixChange}
+                placeholder="Leave empty for root folder"
+                disabled={isUploading}
+              />
+            </FormField>
+          </ExpandableSection>
+
+          <SpaceBetween size="xs" direction="horizontal" alignItems="center">
+            <Button
+              variant="primary"
+              onClick={uploadFiles}
+              loading={isUploading}
+              disabled={!documentFile || !selectedVersion || isUploading || isValidatingJson}
+            >
+              {pageRanges.length > 0
+                ? `Start Discovery (${pageRanges.length} section${pageRanges.length !== 1 ? 's' : ''})`
+                : 'Start Discovery'}
+            </Button>
+            {isUploading && uploadPhase && (
+              <StatusIndicator type="in-progress">{uploadPhase}</StatusIndicator>
+            )}
+          </SpaceBetween>
 
           {uploadStatus.length > 0 && (
             <Container header={<Header variant="h3">Upload Results</Header>}>

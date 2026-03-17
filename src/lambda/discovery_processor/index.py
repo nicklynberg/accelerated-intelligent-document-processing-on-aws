@@ -56,14 +56,16 @@ def handler(event, context):
             ground_truth_key = message_body.get('groundTruthKey')
             bucket = message_body.get('bucket')
             version = message_body.get('version')
+            page_range = message_body.get('pageRange')
+            class_name_hint = message_body.get('classNameHint')
 
-            logger.info(f"Processing discovery job: {job_id} with version: {version}")
+            logger.info(f"Processing discovery job: {job_id} with version: {version}, page_range: {page_range}, class_name_hint: {class_name_hint}")
 
             # Update job status to IN_PROGRESS
             update_job_status(job_id, 'IN_PROGRESS', status_message="Starting discovery processing...")
 
             # Process the discovery job
-            result = process_discovery_job(job_id, document_key, ground_truth_key, bucket, version)
+            result = process_discovery_job(job_id, document_key, ground_truth_key, bucket, version, page_range, class_name_hint)
             results.append(result)
 
         except Exception as e:
@@ -153,7 +155,7 @@ def _get_user_friendly_error(error_str):
         return error_str
 
 
-def process_discovery_job(job_id, document_key, ground_truth_key, bucket, version):
+def process_discovery_job(job_id, document_key, ground_truth_key, bucket, version, page_range=None, class_name_hint=None):
     """
     Process a single discovery job using ClassesDiscovery.
 
@@ -163,12 +165,14 @@ def process_discovery_job(job_id, document_key, ground_truth_key, bucket, versio
         ground_truth_key (str): S3 key for the ground truth file
         bucket (str): S3 bucket name
         version (str): Configuration version to save to
+        page_range (str, optional): Page range string (e.g., "1-3") for multi-section discovery
 
     Returns:
         dict: Processing result
     """
     try:
-        logger.info(f"Processing discovery job {job_id}: document={document_key}, ground_truth={ground_truth_key}")
+        range_label = f", page_range={page_range}" if page_range else ""
+        logger.info(f"Processing discovery job {job_id}: document={document_key}, ground_truth={ground_truth_key}{range_label}")
 
         # Get required environment variables
         region = os.environ.get("AWS_REGION")
@@ -189,24 +193,28 @@ def process_discovery_job(job_id, document_key, ground_truth_key, bucket, versio
         )
 
         # Progress: Analyzing document
+        page_label = f" (pages {page_range})" if page_range else ""
         if ground_truth_key:
-            update_job_status(job_id, 'IN_PROGRESS', status_message="Analyzing document with ground truth reference...")
+            update_job_status(job_id, 'IN_PROGRESS', status_message=f"Analyzing document{page_label} with ground truth reference...")
         else:
-            update_job_status(job_id, 'IN_PROGRESS', status_message="Analyzing document structure with AI...")
+            update_job_status(job_id, 'IN_PROGRESS', status_message=f"Analyzing document structure{page_label} with AI...")
 
         # Process the discovery job based on whether ground truth is provided
         if ground_truth_key:
-            logger.info(f"Processing with ground truth: {ground_truth_key}")
+            logger.info(f"Processing with ground truth: {ground_truth_key}, page_range: {page_range}")
             result = classes_discovery.discovery_classes_with_document_and_ground_truth(
                 input_bucket=bucket,
                 input_prefix=document_key,
-                ground_truth_key=ground_truth_key
+                ground_truth_key=ground_truth_key,
+                page_range=page_range
             )
         else:
-            logger.info("Processing without ground truth")
+            logger.info(f"Processing without ground truth, page_range: {page_range}")
             result = classes_discovery.discovery_classes_with_document(
                 input_bucket=bucket,
-                input_prefix=document_key
+                input_prefix=document_key,
+                page_range=page_range,
+                class_name_hint=class_name_hint
             )
 
         # Extract the discovered class name from the result schema

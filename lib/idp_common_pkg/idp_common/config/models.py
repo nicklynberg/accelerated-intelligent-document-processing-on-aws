@@ -1012,6 +1012,10 @@ class DiscoveryConfig(BaseModel):
         default_factory=DiscoveryModelConfig,
         description="Configuration for discovery with ground truth",
     )
+    auto_split: DiscoveryModelConfig = Field(
+        default_factory=DiscoveryModelConfig,
+        description="Configuration for auto-detecting document section boundaries in multi-page packages",
+    )
 
 
 # Known deprecated fields that should be logged when encountered

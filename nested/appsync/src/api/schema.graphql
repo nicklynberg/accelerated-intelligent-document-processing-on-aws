@@ -253,6 +253,7 @@ type DiscoveryJobListItem @aws_cognito_user_pools @aws_iam {
   version: String
   discoveredClassName: String
   statusMessage: String
+  pageRange: String
 }
 
 input CreateDocumentInput {
@@ -652,7 +653,15 @@ type Mutation {
     bucket: String
     groundTruthFileName: String
     version: String
+    pageRanges: [String]
+    pageLabels: [String]
   ): DisPresignedUrlResponse!
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  autoDetectSections(
+    documentKey: String!
+    bucket: String!
+    version: String
+  ): String
     @aws_auth(cognito_groups: ["Admin", "Author"])
   copyToBaseline(objectKey: String!): CopyToBaselineResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])

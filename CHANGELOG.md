@@ -9,24 +9,15 @@ SPDX-License-Identifier: MIT-0
 
 - **Removed older Claude models** from Configuration UI picklists (3.x, 4.0, 4.1). Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4.5, and Opus 4.6 are available for selection in the UI. Existing configurations using older versions still work.
 
-- **Discovery UX Overhaul** — Comprehensive improvements to the Discovery UI experience:
-  - **Real-time progress updates** — Live status messages during processing (e.g., "Analyzing document structure with AI...", "Saving to configuration...")
-  - **Discovered class name display** — On success, shows the discovered document class name (e.g., `W4-Form`) as a green badge in the Result column
-  - **Failure root cause visibility** — Error details shown in an expandable section with user-friendly messages for common failures (throttling, timeouts, permissions, etc.)
-  - **Search and filter** — Text filter bar to search across document name, config version, status, class name, and error messages
-  - **Time range selector** — Filter jobs by Last hour, 24 hours, 2 days, 7 days, or All time
-  - **Pagination** — Client-side pagination with configurable page size (10/25/50)
-  - **Delete discovery jobs** — New `deleteDiscoveryJob` GraphQL mutation with multi-select + delete in the UI (Admin/Author only)
-  - **Column preferences** — Settings gear icon (CollectionPreferences) for page size and column visibility
-  - **Config Version hyperlinks** — Version column links to the configuration editor, consistent with Document List page
-  - **Duration column** — Shows live elapsed time for active jobs, total processing time for completed jobs
-  - **Clean document names** — Strips the timestamp prefix from uploaded filenames for cleaner display
-  - **Resizable columns** — Users can drag column borders to adjust widths
-  - **Sorted by newest** — Jobs sorted by creation date descending
-
-- **Discovery S3 Upload Race Condition Fix** — Replaced the hardcoded `time.sleep(30)` in the discovery processor with smart S3 polling (`_wait_for_s3_object`) using exponential backoff (2s initial, 10s max, 60s timeout). The processor now waits only as long as needed for the browser upload to complete.
-
-- **Discovery GraphQL Schema Enhancements** — Added `discoveredClassName`, `statusMessage` fields to `DiscoveryJob`, `DiscoveryJobListItem` types and `updateDiscoveryJobStatus` mutation. Added `deleteDiscoveryJob` mutation with VTL resolver. All changes are additive and backward-compatible.
+- **Discovery UX Enhancements** — Major improvements to the Discovery experience:
+  - **Multi-Section Package Discovery** — New "Multi-Section Package" discovery mode with PDF page thumbnail preview, color-coded page ranges, and parallel job creation. Users define page ranges to discover multiple classes from a single PDF. Each range creates an independent discovery job.
+  - **✨ AI Auto-Detect Sections** — "Auto-detect sections" button uses a configurable LLM prompt (`discovery.auto_split`) to automatically identify document boundaries and pre-fill page ranges with document type labels.
+  - **Discovery Mode Selector** — Tile-based mode choice between "Single Section Document" (with optional ground truth) and "Multi-Section Package" (with page ranges). Ground truth and page ranges are mutually exclusive.
+  - **Class Name Hints** — Document type labels (from auto-detect or manual entry) are passed as class name hints to guide the discovery LLM's `$id` and `x-aws-idp-document-type` output.
+  - **Real-time Job Monitoring** — Live progress messages, elapsed time counters, phased upload status ("Creating jobs..." → "Uploading..." → "Refreshing..."), discovered class name badges, and expandable error details with user-friendly messages.
+  - **Jobs Table UX** — Search/filter, time range selector, pagination, resizable columns, column preferences, multi-select delete, config version hyperlinks, and page range badges on multi-section jobs.
+  - **S3 Upload Race Condition Fix** — Replaced hardcoded `time.sleep(30)` with smart S3 polling using exponential backoff (2s–10s, 60s timeout).
+  - **New GraphQL APIs** — `autoDetectSections` mutation, `pageRanges`/`pageLabels` on `uploadDiscoveryDocument`, `pageRange`/`discoveredClassName`/`statusMessage` on job types, `deleteDiscoveryJob` mutation.
 
 - **SDK Client Interface** — Introduced `IDPClient` as the single public entry point for all IDP operations, with typed namespace access (`client.batch`, `client.stack`, `client.config`, `client.manifest`, `client.testing`).
 

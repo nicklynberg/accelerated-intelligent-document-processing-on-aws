@@ -930,7 +930,7 @@ wheels = [
 
 [[package]]
 name = "idp-common"
-version = "0.5.2.4"
+version = "0.5.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },

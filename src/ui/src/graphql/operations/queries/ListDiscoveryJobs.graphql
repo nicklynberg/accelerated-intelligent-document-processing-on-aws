@@ -11,6 +11,7 @@ query ListDiscoveryJobs {
       version
       discoveredClassName
       statusMessage
+      pageRange
     }
     nextToken
   }

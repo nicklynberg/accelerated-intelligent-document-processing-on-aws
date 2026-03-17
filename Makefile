@@ -42,6 +42,7 @@ endif
 	@echo "  - lib/idp_common_pkg/setup.py"
 
 # Default target - run both lint and test
+.DEFAULT_GOAL := all
 all: lint test
 
 # Create virtual environment and install all packages in development mode
@@ -242,7 +243,7 @@ ui-lint:
 	STORED_HASH=$$(test -f src/ui/.checksum && cat src/ui/.checksum || echo ""); \
 	if [ "$$CURRENT_HASH" != "$$STORED_HASH" ]; then \
 		echo "UI code checksum changed - running lint..."; \
-		cd src/ui && npm ci --prefer-offline --no-audit && npm run lint -- --fix && npm run typecheck && \
+		cd src/ui && npm ci --prefer-offline --no-audit && npm run lint -- --fix && npm run typecheck || exit 1; \
 		echo "$$CURRENT_HASH" > .checksum; \
 		echo -e "$(GREEN)✅ UI lint and typecheck completed and checksum updated$(NC)"; \
 	else \
@@ -265,11 +266,11 @@ codegen-check:
 		if [ -n "$$CI" ] || [ -n "$$GITHUB_ACTIONS" ]; then \
 			echo -e "$(RED)ERROR: Generated GraphQL files are out of date!$(NC)"; \
 			echo -e "$(YELLOW)Run 'make codegen' and commit the updated files.$(NC)"; \
-			git diff --stat src/ui/src/graphql/generated/; \
+			git --no-pager diff --stat src/ui/src/graphql/generated/; \
 			exit 1; \
 		else \
 			echo -e "$(YELLOW)Generated GraphQL files were out of date — auto-updated.$(NC)"; \
-			git diff --stat src/ui/src/graphql/generated/; \
+			git --no-pager diff --stat src/ui/src/graphql/generated/; \
 			echo -e "$(YELLOW)Please commit the changes above.$(NC)"; \
 		fi \
 	else \

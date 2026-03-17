@@ -216,6 +216,7 @@ export type DiscoveryJobListItem = {
   errorMessage?: Maybe<Scalars['String']['output']>;
   groundTruthKey?: Maybe<Scalars['String']['output']>;
   jobId: Scalars['ID']['output'];
+  pageRange?: Maybe<Scalars['String']['output']>;
   status: Scalars['String']['output'];
   statusMessage?: Maybe<Scalars['String']['output']>;
   updatedAt?: Maybe<Scalars['String']['output']>;
@@ -351,6 +352,7 @@ export type Mutation = {
   abortWorkflow: AbortWorkflowResponse;
   addTestSet?: Maybe<TestSet>;
   addTestSetFromUpload?: Maybe<TestSetUploadResponse>;
+  autoDetectSections?: Maybe<Scalars['String']['output']>;
   claimReview?: Maybe<Document>;
   completeSectionReview?: Maybe<Document>;
   copyToBaseline: CopyToBaselineResponse;
@@ -404,6 +406,13 @@ export type MutationAddTestSetArgs = {
 
 export type MutationAddTestSetFromUploadArgs = {
   input: TestSetUploadInput;
+};
+
+
+export type MutationAutoDetectSectionsArgs = {
+  bucket: Scalars['String']['input'];
+  documentKey: Scalars['String']['input'];
+  version?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -594,6 +603,8 @@ export type MutationUploadDiscoveryDocumentArgs = {
   contentType?: InputMaybe<Scalars['String']['input']>;
   fileName: Scalars['String']['input'];
   groundTruthFileName?: InputMaybe<Scalars['String']['input']>;
+  pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
+  pageRanges?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   prefix?: InputMaybe<Scalars['String']['input']>;
   version?: InputMaybe<Scalars['String']['input']>;
 };
@@ -1107,6 +1118,15 @@ export type AddTestSetFromUploadMutationVariables = Exact<{
 
 export type AddTestSetFromUploadMutation = { addTestSetFromUpload?: { testSetId: string, presignedUrl: string, objectKey: string } | null };
 
+export type AutoDetectSectionsMutationVariables = Exact<{
+  documentKey: Scalars['String']['input'];
+  bucket: Scalars['String']['input'];
+  version?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type AutoDetectSectionsMutation = { autoDetectSections?: string | null };
+
 export type ClaimReviewMutationVariables = Exact<{
   objectKey: Scalars['String']['input'];
 }>;
@@ -1306,6 +1326,8 @@ export type UploadDiscoveryDocumentMutationVariables = Exact<{
   bucket?: InputMaybe<Scalars['String']['input']>;
   groundTruthFileName?: InputMaybe<Scalars['String']['input']>;
   version?: InputMaybe<Scalars['String']['input']>;
+  pageRanges?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
+  pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
 }>;
 
 
@@ -1487,7 +1509,7 @@ export type ListConfigurationLibraryQuery = { listConfigurationLibrary?: { succe
 export type ListDiscoveryJobsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListDiscoveryJobsQuery = { listDiscoveryJobs?: { nextToken?: string | null, DiscoveryJobs?: Array<{ jobId: string, documentKey?: string | null, groundTruthKey?: string | null, status: string, createdAt?: string | null, updatedAt?: string | null, errorMessage?: string | null, version?: string | null, discoveredClassName?: string | null, statusMessage?: string | null } | null> | null } | null };
+export type ListDiscoveryJobsQuery = { listDiscoveryJobs?: { nextToken?: string | null, DiscoveryJobs?: Array<{ jobId: string, documentKey?: string | null, groundTruthKey?: string | null, status: string, createdAt?: string | null, updatedAt?: string | null, errorMessage?: string | null, version?: string | null, discoveredClassName?: string | null, statusMessage?: string | null, pageRange?: string | null } | null> | null } | null };
 
 export type ListDocumentsQueryVariables = Exact<{
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;

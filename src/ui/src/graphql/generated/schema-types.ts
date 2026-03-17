@@ -216,6 +216,7 @@ export type DiscoveryJobListItem = {
   errorMessage?: Maybe<Scalars['String']['output']>;
   groundTruthKey?: Maybe<Scalars['String']['output']>;
   jobId: Scalars['ID']['output'];
+  pageRange?: Maybe<Scalars['String']['output']>;
   status: Scalars['String']['output'];
   statusMessage?: Maybe<Scalars['String']['output']>;
   updatedAt?: Maybe<Scalars['String']['output']>;
@@ -351,6 +352,7 @@ export type Mutation = {
   abortWorkflow: AbortWorkflowResponse;
   addTestSet?: Maybe<TestSet>;
   addTestSetFromUpload?: Maybe<TestSetUploadResponse>;
+  autoDetectSections?: Maybe<Scalars['String']['output']>;
   claimReview?: Maybe<Document>;
   completeSectionReview?: Maybe<Document>;
   copyToBaseline: CopyToBaselineResponse;
@@ -404,6 +406,13 @@ export type MutationAddTestSetArgs = {
 
 export type MutationAddTestSetFromUploadArgs = {
   input: TestSetUploadInput;
+};
+
+
+export type MutationAutoDetectSectionsArgs = {
+  bucket: Scalars['String']['input'];
+  documentKey: Scalars['String']['input'];
+  version?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -594,6 +603,8 @@ export type MutationUploadDiscoveryDocumentArgs = {
   contentType?: InputMaybe<Scalars['String']['input']>;
   fileName: Scalars['String']['input'];
   groundTruthFileName?: InputMaybe<Scalars['String']['input']>;
+  pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
+  pageRanges?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   prefix?: InputMaybe<Scalars['String']['input']>;
   version?: InputMaybe<Scalars['String']['input']>;
 };

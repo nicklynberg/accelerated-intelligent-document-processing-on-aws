@@ -1664,22 +1664,29 @@ Resources:
       Handler: index.handler
       Runtime: python3.12
       CodeUri: ./src/lambda/discovery_upload_resolver
-      Description: Lambda function to handle discovery document uploads via GraphQL API
+      Description: Lambda function to handle discovery document uploads and auto-detect sections via GraphQL API
       MemorySize: 512
       Timeout: 120
+      Layers:
+        - !Ref IDPCommonBaseLayerArn
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
           DISCOVERY_BUCKET: !Ref DiscoveryBucketName
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTableName
           DISCOVERY_QUEUE_URL: !Ref DiscoveryQueueUrl
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
       LoggingConfig:
         LogGroup: !Ref DiscoveryUploadResolverFunctionLogGroup
       Policies:
         - S3WritePolicy:
             BucketName: !Ref DiscoveryBucketName
+        - S3ReadPolicy:
+            BucketName: !Ref DiscoveryBucketName
         - DynamoDBCrudPolicy:
             TableName: !Ref DiscoveryTrackingTableName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTableName
         - SQSSendMessagePolicy:
             QueueName: !Ref DiscoveryQueueName
         - Statement:
@@ -1691,6 +1698,14 @@ Resources:
                 - kms:GenerateDataKey*
                 - kms:DescribeKey
               Resource: !Ref CustomerManagedEncryptionKeyArn
+            # Bedrock permissions for auto-detect sections
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - bedrock:Converse
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
 
 
   ##########################################################################
@@ -1719,6 +1734,18 @@ Resources:
       DataSourceName: !GetAtt DiscoveryUploadResolverDataSource.Name
       TypeName: Mutation
       FieldName: uploadDiscoveryDocument
+
+  ##########################################################################
+  # AutoDetectSectionsResolver
+  ##########################################################################
+  AutoDetectSectionsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt DiscoveryUploadResolverDataSource.Name
+      TypeName: Mutation
+      FieldName: autoDetectSections
 
   ##########################################################################
   # Discovery Jobs List Resolver
