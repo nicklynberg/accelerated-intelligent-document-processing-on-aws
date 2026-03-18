@@ -3,5 +3,7 @@ subscription OnDiscoveryJobStatusChange($jobId: ID!) {
     jobId
     status
     errorMessage
+    discoveredClassName
+    statusMessage
   }
 }

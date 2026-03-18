@@ -115,3 +115,26 @@ class ConfigDeleteResult(BaseModel):
         description="The configuration version that was deleted"
     )
     error: Optional[str] = Field(default=None, description="Error message if failed")
+
+
+class ConfigSyncBdaResult(BaseModel):
+    """Result of BDA blueprint synchronization."""
+
+    success: bool = Field(description="Whether sync succeeded")
+    direction: str = Field(
+        description="Sync direction: 'bidirectional', 'bda_to_idp', or 'idp_to_bda'"
+    )
+    mode: str = Field(
+        default="replace",
+        description="Sync mode: 'replace' or 'merge'",
+    )
+    classes_synced: int = Field(
+        default=0, description="Number of classes successfully synced"
+    )
+    classes_failed: int = Field(
+        default=0, description="Number of classes that failed to sync"
+    )
+    processed_classes: List[str] = Field(
+        default_factory=list, description="Names of processed classes"
+    )
+    error: Optional[str] = Field(default=None, description="Error message if failed")

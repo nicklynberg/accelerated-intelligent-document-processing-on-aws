@@ -19,19 +19,25 @@ endif
 
 # Update version across all packages
 # Usage: make version V=0.6.0
+# Validates PEP 440 compliance before updating (e.g., 0.5.3, 1.0.0, 0.6.0.dev1, 1.0.0rc1)
 .PHONY: version
 version:
 ifndef V
 	$(error VERSION is not set. Usage: make version V=x.y.z)
 endif
+	@$(PYTHON) -c "from packaging.version import Version; Version('$(V)')" 2>/dev/null || \
+		(echo -e "$(RED)ERROR: '$(V)' is not a valid PEP 440 version.$(NC)" && \
+		 echo -e "$(YELLOW)Valid examples: 0.5.3, 1.0.0, 0.6.0.dev1, 1.0.0a1, 1.0.0rc1, 1.0.0.post1$(NC)" && \
+		 echo -e "$(YELLOW)Invalid examples: 0.5.3.wip5, 1.0-beta, v1.0.0$(NC)" && \
+		 exit 1)
 	@echo "Updating version to $(V)..."
 	@echo "$(V)" > VERSION
-	@sed -i '' 's/^version = ".*"/version = "$(V)"/' lib/idp_cli_pkg/pyproject.toml
-	@sed -i '' 's/^version = ".*"/version = "$(V)"/' lib/idp_sdk/pyproject.toml
-	@sed -i '' 's/^version = ".*"/version = "$(V)"/' lib/idp_common_pkg/pyproject.toml
-	@sed -i '' 's/version=".*"/version="$(V)"/' lib/idp_common_pkg/setup.py
-	@sed -i '' 's/@click.version_option(version=".*")/@click.version_option(version="$(V)")/' lib/idp_cli_pkg/idp_cli/cli.py
-	@sed -i '' 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/idp_sdk/idp_sdk/__init__.py
+	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' lib/idp_cli_pkg/pyproject.toml && rm -f lib/idp_cli_pkg/pyproject.toml.bak
+	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' lib/idp_sdk/pyproject.toml && rm -f lib/idp_sdk/pyproject.toml.bak
+	@sed -i.bak 's/^version = ".*"/version = "$(V)"/' lib/idp_common_pkg/pyproject.toml && rm -f lib/idp_common_pkg/pyproject.toml.bak
+	@sed -i.bak 's/version=".*"/version="$(V)"/' lib/idp_common_pkg/setup.py && rm -f lib/idp_common_pkg/setup.py.bak
+	@sed -i.bak 's/@click.version_option(version=".*")/@click.version_option(version="$(V)")/' lib/idp_cli_pkg/idp_cli/cli.py && rm -f lib/idp_cli_pkg/idp_cli/cli.py.bak
+	@sed -i.bak 's/^__version__ = ".*"/__version__ = "$(V)"/' lib/idp_sdk/idp_sdk/__init__.py && rm -f lib/idp_sdk/idp_sdk/__init__.py.bak
 	@echo -e "$(GREEN)✅ Version updated to $(V) in:$(NC)"
 	@echo "  - VERSION"
 	@echo "  - lib/idp_cli_pkg/pyproject.toml"
@@ -42,6 +48,7 @@ endif
 	@echo "  - lib/idp_common_pkg/setup.py"
 
 # Default target - run both lint and test
+.DEFAULT_GOAL := all
 all: lint test
 
 # Create virtual environment and install all packages in development mode
@@ -75,6 +82,9 @@ setup:
 # Start the UI development server
 # Usage: make ui-start [STACK_NAME=<stack-name>]
 ui-start:
+ifndef STACK_NAME
+	$(error STACK_NAME is not set. Usage: make ui-start STACK_NAME)
+endif
 	@if [ -n "$(STACK_NAME)" ]; then \
 		echo "Retrieving .env configuration from stack $(STACK_NAME)..."; \
 		ENV_CONTENT=$$(aws cloudformation describe-stacks \
@@ -133,7 +143,7 @@ test-capacity-coverage:
 	@echo -e "$(GREEN)✅ Coverage report generated at src/lambda/calculate_capacity/htmlcov/index.html$(NC)"
 
 # Run both linting and formatting in one command
-lint: ruff-lint format check-arn-partitions validate-buildspec ui-lint
+lint: ruff-lint format check-arn-partitions validate-buildspec ui-lint codegen-check
 fastlint: ruff-lint format check-arn-partitions validate-buildspec
 
 # Run linting checks and fix issues automatically
@@ -239,7 +249,7 @@ ui-lint:
 	STORED_HASH=$$(test -f src/ui/.checksum && cat src/ui/.checksum || echo ""); \
 	if [ "$$CURRENT_HASH" != "$$STORED_HASH" ]; then \
 		echo "UI code checksum changed - running lint..."; \
-		cd src/ui && npm ci --prefer-offline --no-audit && npm run lint -- --fix && npm run typecheck && \
+		cd src/ui && npm ci --prefer-offline --no-audit && npm run lint -- --fix && npm run typecheck || exit 1; \
 		echo "$$CURRENT_HASH" > .checksum; \
 		echo -e "$(GREEN)✅ UI lint and typecheck completed and checksum updated$(NC)"; \
 	else \
@@ -262,11 +272,11 @@ codegen-check:
 		if [ -n "$$CI" ] || [ -n "$$GITHUB_ACTIONS" ]; then \
 			echo -e "$(RED)ERROR: Generated GraphQL files are out of date!$(NC)"; \
 			echo -e "$(YELLOW)Run 'make codegen' and commit the updated files.$(NC)"; \
-			git diff --stat src/ui/src/graphql/generated/; \
+			git --no-pager diff --stat src/ui/src/graphql/generated/; \
 			exit 1; \
 		else \
 			echo -e "$(YELLOW)Generated GraphQL files were out of date — auto-updated.$(NC)"; \
-			git diff --stat src/ui/src/graphql/generated/; \
+			git --no-pager diff --stat src/ui/src/graphql/generated/; \
 			echo -e "$(YELLOW)Please commit the changes above.$(NC)"; \
 		fi \
 	else \

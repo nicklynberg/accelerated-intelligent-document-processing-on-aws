@@ -28,11 +28,14 @@ from .config import (
     ConfigDeleteResult,
     ConfigDownloadResult,
     ConfigListResult,
+    ConfigSyncBdaResult,
     ConfigUploadResult,
     ConfigValidationResult,
     ConfigVersionInfo,
 )
 from .discovery import (
+    AutoDetectResult,
+    AutoDetectSection,
     DiscoveryBatchResult,
     DiscoveryResult,
 )
@@ -125,9 +128,12 @@ __all__ = [
     "ConfigVersionInfo",
     "ConfigListResult",
     "ConfigDeleteResult",
+    "ConfigSyncBdaResult",
     # Discovery models
     "DiscoveryResult",
     "DiscoveryBatchResult",
+    "AutoDetectResult",
+    "AutoDetectSection",
     # Manifest models
     "ManifestDocument",
     "ManifestResult",

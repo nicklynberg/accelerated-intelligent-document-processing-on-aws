@@ -251,6 +251,9 @@ type DiscoveryJobListItem @aws_cognito_user_pools @aws_iam {
   updatedAt: String
   errorMessage: String
   version: String
+  discoveredClassName: String
+  statusMessage: String
+  pageRange: String
 }
 
 input CreateDocumentInput {
@@ -420,6 +423,8 @@ type DiscoveryJob @aws_cognito_user_pools @aws_iam {
   jobId: ID!
   status: String!
   errorMessage: String
+  discoveredClassName: String
+  statusMessage: String
 }
 
 type Agent @aws_cognito_user_pools @aws_iam {
@@ -604,6 +609,8 @@ type Mutation {
     jobId: ID!
     status: String!
     errorMessage: String
+    discoveredClassName: String
+    statusMessage: String
   ): DiscoveryJob @aws_iam
 
   # Admin-only operations
@@ -637,6 +644,8 @@ type Mutation {
     version: String
   ): PresignedUrlResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])
+  deleteDiscoveryJob(jobId: ID!): Boolean!
+    @aws_auth(cognito_groups: ["Admin", "Author"])
   uploadDiscoveryDocument(
     fileName: String!
     contentType: String
@@ -644,7 +653,15 @@ type Mutation {
     bucket: String
     groundTruthFileName: String
     version: String
+    pageRanges: [String]
+    pageLabels: [String]
   ): DisPresignedUrlResponse!
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  autoDetectSections(
+    documentKey: String!
+    bucket: String!
+    version: String
+  ): String
     @aws_auth(cognito_groups: ["Admin", "Author"])
   copyToBaseline(objectKey: String!): CopyToBaselineResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])

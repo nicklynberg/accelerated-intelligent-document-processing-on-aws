@@ -208,7 +208,7 @@ TEMPLATE_URLS = {
 
 
 @click.group()
-@click.version_option(version="0.5.2")
+@click.version_option(version="0.5.3.dev6")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -2416,6 +2416,15 @@ def generate_manifest(
                     f"[yellow]Warning: Could not clear existing files: {e}[/yellow]"
                 )
 
+            # Place .uploading marker to prevent resolver race condition
+            # The test set resolver's auto-detection skips folders with this marker,
+            # preventing premature validation before all files are uploaded.
+            # See: https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/193
+            marker_key = f"{test_set}/.uploading"
+            s3_client.put_object(
+                Bucket=test_set_bucket, Key=marker_key, Body=b"upload-in-progress"
+            )
+
             # Upload input documents
             for i, doc in enumerate(documents):
                 doc_path = doc["document_path"]
@@ -2471,6 +2480,15 @@ def generate_manifest(
             console.print()
 
         if test_set:
+            # Remove .uploading marker now that all files are uploaded
+            marker_key = f"{test_set}/.uploading"
+            try:
+                s3_client.delete_object(Bucket=test_set_bucket, Key=marker_key)
+            except Exception as e:
+                console.print(
+                    f"[yellow]Warning: Could not remove upload marker: {e}[/yellow]"
+                )
+
             # Auto-register test set in tracking table
             _client2 = IDPClient(stack_name=stack_name, region=region)
             resources = _client2._get_stack_resources(stack_name)
@@ -3030,6 +3048,12 @@ def _create_test_set_from_manifest(
     except Exception as e:
         console.print(f"[yellow]Warning: Could not clear existing files: {e}[/yellow]")
 
+    # Place .uploading marker to prevent resolver race condition (issue #193)
+    marker_key = f"{test_set_name}/.uploading"
+    s3_client.put_object(
+        Bucket=test_set_bucket, Key=marker_key, Body=b"upload-in-progress"
+    )
+
     # Copy input files
     for _, row in df.iterrows():
         source_path = row["document_path"]
@@ -3066,6 +3090,12 @@ def _create_test_set_from_manifest(
                     rel_path = os.path.relpath(baseline_file, baseline_path)
                     s3_key = f"{test_set_name}/baseline/{filename}/{rel_path}"
                     s3_client.upload_file(baseline_file, test_set_bucket, s3_key)
+
+    # Remove .uploading marker now that all files are uploaded (issue #193)
+    try:
+        s3_client.delete_object(Bucket=test_set_bucket, Key=marker_key)
+    except Exception as e:
+        console.print(f"[yellow]Warning: Could not remove upload marker: {e}[/yellow]")
 
     console.print(
         f"[green]✓ Test set '{test_set_name}' created with {len(df)} files[/green]"
@@ -4087,6 +4117,107 @@ def config_delete(
         sys.exit(1)
 
 
+@cli.command(name="config-sync-bda")
+@click.option(
+    "--stack-name",
+    required=True,
+    help="CloudFormation stack name",
+)
+@click.option(
+    "--direction",
+    type=click.Choice(["bidirectional", "bda-to-idp", "idp-to-bda"]),
+    default="bidirectional",
+    help="Sync direction (default: bidirectional)",
+)
+@click.option(
+    "--mode",
+    type=click.Choice(["replace", "merge"]),
+    default="replace",
+    help="Sync mode: 'replace' (full alignment) or 'merge' (additive, don't delete) (default: replace)",
+)
+@click.option(
+    "--config-version",
+    help="Configuration version to sync (default: active version)",
+)
+@click.option("--region", help="AWS region (optional)")
+def config_sync_bda(
+    stack_name: str,
+    direction: str,
+    mode: str,
+    config_version: Optional[str],
+    region: Optional[str],
+):
+    """
+    Synchronize IDP document classes with BDA blueprints
+
+    Performs bidirectional or one-way synchronization between the IDP
+    configuration's document classes and BDA (Bedrock Data Automation) blueprints.
+
+    Sync directions:
+      bidirectional: Full two-way sync (default)
+      bda-to-idp:    Import BDA blueprints into IDP config
+      idp-to-bda:    Push IDP classes to BDA blueprints
+
+    Sync modes:
+      replace: Target is aligned to match source exactly (default)
+      merge:   Source items are added without removing existing items
+
+    Examples:
+
+      # Bidirectional sync (default)
+      idp-cli config-sync-bda --stack-name my-stack
+
+      # Import BDA blueprints to IDP
+      idp-cli config-sync-bda --stack-name my-stack --direction bda-to-idp
+
+      # Push IDP to BDA (merge mode)
+      idp-cli config-sync-bda --stack-name my-stack --direction idp-to-bda --mode merge
+
+      # Sync specific config version
+      idp-cli config-sync-bda --stack-name my-stack --config-version v2
+    """
+    try:
+        from idp_sdk import IDPClient
+
+        # Normalize direction for SDK (CLI uses dashes, SDK uses underscores)
+        sdk_direction = direction.replace("-", "_")
+
+        console.print(f"[bold blue]BDA Sync for stack: {stack_name}[/bold blue]")
+        console.print(f"Direction: {direction}")
+        console.print(f"Mode: {mode}")
+        if config_version:
+            console.print(f"Config Version: {config_version}")
+        console.print()
+
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        with console.status("[cyan]Synchronizing with BDA...[/cyan]"):
+            result = client.config.sync_bda(
+                direction=sdk_direction,
+                mode=mode,
+                config_version=config_version,
+            )
+
+        if result.success:
+            console.print("[green]✓ BDA sync completed successfully[/green]")
+            console.print(f"  Classes synced: {result.classes_synced}")
+            if result.processed_classes:
+                for cls_name in result.processed_classes:
+                    console.print(f"    • {cls_name}")
+        else:
+            console.print("[yellow]⚠ BDA sync completed with issues[/yellow]")
+            console.print(f"  Classes synced: {result.classes_synced}")
+            console.print(f"  Classes failed: {result.classes_failed}")
+            if result.error:
+                console.print(f"  [red]Error: {result.error}[/red]")
+            sys.exit(1)
+
+    except Exception as e:
+        logger.error(f"Error syncing BDA: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
 @cli.command(name="discover")
 @click.option(
     "--stack-name",
@@ -4118,6 +4249,30 @@ def config_delete(
     type=click.Path(),
     help="Output path: file (single doc or JSON array for batch) or directory (one file per schema)",
 )
+@click.option(
+    "--class-hint",
+    help="Hint for the document class name (e.g., 'W2 Form'). The LLM will use this as $id.",
+)
+@click.option(
+    "--page-range",
+    multiple=True,
+    help="Page range to discover (e.g., '1-3'). Repeatable for multi-section. Requires PDF document.",
+)
+@click.option(
+    "--page-label",
+    multiple=True,
+    help="Label for corresponding --page-range (e.g., 'W2 Form'). Used as class name hint per range.",
+)
+@click.option(
+    "--auto-detect",
+    is_flag=True,
+    help="Auto-detect document section boundaries using AI, then discover each section.",
+)
+@click.option(
+    "--detect-only",
+    is_flag=True,
+    help="Only detect section boundaries (use with --auto-detect). Prints boundaries without running discovery.",
+)
 def discover(
     stack_name: str,
     document: tuple,
@@ -4125,6 +4280,11 @@ def discover(
     config_version: Optional[str],
     region: Optional[str],
     output: Optional[str],
+    class_hint: Optional[str],
+    page_range: tuple,
+    page_label: tuple,
+    auto_detect: bool,
+    detect_only: bool,
 ):
     """
     Discover document class schema from sample document(s)
@@ -4148,17 +4308,20 @@ def discover(
       # With ground truth (matched by filename stem)
       idp-cli discover -d ./invoice.pdf -g ./invoice.json
 
-      # Output to file
-      idp-cli discover -d ./form.pdf -o ./form-schema.json
+      # With class name hint
+      idp-cli discover -d ./form.pdf --class-hint "W2 Tax Form"
 
-      # Batch with auto-matched ground truth
-      idp-cli discover -d ./invoice.pdf -d ./w2.pdf -g ./invoice.json -g ./w2.json
+      # Multi-section: discover specific page ranges
+      idp-cli discover -d ./lending_package.pdf \\
+          --page-range "1-2" --page-label "Cover Letter" \\
+          --page-range "3-5" --page-label "W2 Form" \\
+          -o ./schemas/
 
-      # Batch with output directory
-      idp-cli discover -d ./invoice.pdf -d ./w2.pdf -o ./schemas/
+      # Auto-detect sections then discover each
+      idp-cli discover -d ./lending_package.pdf --auto-detect -o ./schemas/
 
-      # Batch with output file (JSON array)
-      idp-cli discover -d ./invoice.pdf -d ./w2.pdf -o ./all-schemas.json
+      # Only detect section boundaries (no discovery)
+      idp-cli discover -d ./lending_package.pdf --auto-detect --detect-only
 
       # Stack mode (saves to config)
       idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
@@ -4171,6 +4334,165 @@ def discover(
 
         client = IDPClient(stack_name=stack_name, region=region)
 
+        # --- Auto-detect mode ---
+        if auto_detect:
+            if len(document) > 1:
+                console.print(
+                    "[red]✗ Error: --auto-detect works with a single document only[/red]"
+                )
+                sys.exit(1)
+
+            doc_path = document[0]
+            console.print("[bold blue]IDP Discovery — Auto-Detect Sections[/bold blue]")
+            if stack_name:
+                console.print(f"Stack: {stack_name}")
+            console.print(f"Document: {doc_path}")
+            console.print()
+
+            if detect_only:
+                # Only detect boundaries, don't run discovery
+                with console.status(
+                    "[cyan]Detecting section boundaries with AI...[/cyan]"
+                ):
+                    detect_result = client.discovery.auto_detect_sections(
+                        document_path=doc_path
+                    )
+
+                if detect_result.status != "SUCCESS":
+                    console.print(
+                        f"[red]✗ Auto-detect failed: {detect_result.error}[/red]"
+                    )
+                    sys.exit(1)
+
+                console.print(
+                    f"[green]✓ Detected {len(detect_result.sections)} section(s):[/green]"
+                )
+                console.print()
+                for s in detect_result.sections:
+                    label = s.type or "Unknown"
+                    console.print(f"  Pages {s.start}-{s.end}: [cyan]{label}[/cyan]")
+
+                # Print as JSON if output specified
+                if output:
+                    sections_json = [
+                        {"start": s.start, "end": s.end, "type": s.type}
+                        for s in detect_result.sections
+                    ]
+                    with open(output, "w", encoding="utf-8") as f:
+                        f.write(json.dumps(sections_json, indent=2))
+                    console.print()
+                    console.print(
+                        f"[green]✓ Section boundaries written to: {output}[/green]"
+                    )
+                return
+
+            # Auto-detect + discover each section
+            console.print("[bold]Step 1: Detecting section boundaries...[/bold]")
+            with console.status("[cyan]Detecting section boundaries with AI...[/cyan]"):
+                batch_result = client.discovery.run(
+                    document_path=doc_path,
+                    config_version=config_version,
+                    auto_detect=True,
+                )
+
+            # batch_result is DiscoveryBatchResult
+            all_schemas = []
+            for r in batch_result.results:
+                doc_class = r.document_class or "Unknown"
+                range_info = f" (pages {r.page_range})" if r.page_range else ""
+                if r.status == "SUCCESS":
+                    console.print(f"  [green]✓ {doc_class}{range_info}[/green]")
+                    if r.json_schema:
+                        all_schemas.append(r.json_schema)
+                else:
+                    console.print(f"  [red]✗ Failed{range_info}: {r.error}[/red]")
+
+            console.print()
+            console.print(
+                f"[bold]Summary:[/bold] {batch_result.succeeded}/{batch_result.total} succeeded"
+            )
+
+            # Write output
+            _write_discover_output(output, all_schemas, console)
+
+            if stack_name and config_version and batch_result.succeeded > 0:
+                console.print(
+                    f"[green]✓ Schema(s) saved to configuration"
+                    f" (version: {config_version})[/green]"
+                )
+
+            if batch_result.failed > 0:
+                sys.exit(1)
+            return
+
+        # --- Multi-section page range mode ---
+        if page_range:
+            if len(document) > 1:
+                console.print(
+                    "[red]✗ Error: --page-range works with a single document only[/red]"
+                )
+                sys.exit(1)
+
+            doc_path = document[0]
+            console.print("[bold blue]IDP Discovery — Multi-Section[/bold blue]")
+            if stack_name:
+                console.print(f"Stack: {stack_name}")
+            console.print(f"Document: {doc_path}")
+            console.print(f"Page ranges: {len(page_range)}")
+            console.print()
+
+            # Build page_ranges list
+            page_ranges_list = []
+            for idx, pr in enumerate(page_range):
+                label = page_label[idx] if idx < len(page_label) else None
+                # Parse "start-end" format
+                parts = pr.strip().split("-")
+                start = int(parts[0])
+                end = int(parts[1]) if len(parts) > 1 else start
+                page_ranges_list.append({"start": start, "end": end, "label": label})
+                label_str = f" → {label}" if label else ""
+                console.print(f"  Range {idx + 1}: pages {start}-{end}{label_str}")
+
+            console.print()
+
+            with console.status(
+                "[cyan]Analyzing sections with Amazon Bedrock...[/cyan]"
+            ):
+                batch_result = client.discovery.run_multi_section(
+                    document_path=doc_path,
+                    page_ranges=page_ranges_list,
+                    config_version=config_version,
+                )
+
+            all_schemas = []
+            for r in batch_result.results:
+                doc_class = r.document_class or "Unknown"
+                range_info = f" (pages {r.page_range})" if r.page_range else ""
+                if r.status == "SUCCESS":
+                    console.print(f"  [green]✓ {doc_class}{range_info}[/green]")
+                    if r.json_schema:
+                        all_schemas.append(r.json_schema)
+                else:
+                    console.print(f"  [red]✗ Failed{range_info}: {r.error}[/red]")
+
+            console.print()
+            console.print(
+                f"[bold]Summary:[/bold] {batch_result.succeeded}/{batch_result.total} succeeded"
+            )
+
+            _write_discover_output(output, all_schemas, console)
+
+            if stack_name and config_version and batch_result.succeeded > 0:
+                console.print(
+                    f"[green]✓ Schema(s) saved to configuration"
+                    f" (version: {config_version})[/green]"
+                )
+
+            if batch_result.failed > 0:
+                sys.exit(1)
+            return
+
+        # --- Standard discovery mode (original logic) ---
         # Build ground truth map: filename stem → gt path
         gt_map = {}
         for gt_path in ground_truth:
@@ -4202,6 +4524,8 @@ def discover(
         gt_matched = sum(1 for _, gt in doc_gt_pairs if gt)
         if gt_matched:
             console.print(f"Ground truth matched: {gt_matched}/{len(document)}")
+        if class_hint:
+            console.print(f"Class hint: {class_hint}")
         if config_version:
             console.print(f"Config Version: {config_version}")
         console.print()
@@ -4232,6 +4556,7 @@ def discover(
                     document_path=doc_path,
                     ground_truth_path=matched_gt,
                     config_version=config_version,
+                    class_name_hint=class_hint,
                 )
 
             if result.status == "SUCCESS":
@@ -4271,42 +4596,7 @@ def discover(
                 console.print()
 
         # Write/print output
-        if not output and all_schemas and is_batch:
-            # No -o specified in batch mode → print schemas to stdout
-            console.print()
-            console.print("[bold]Discovered schemas:[/bold]")
-            if len(all_schemas) == 1:
-                console.print(json.dumps(all_schemas[0], indent=2))
-            else:
-                console.print(json.dumps(all_schemas, indent=2))
-            console.print()
-        elif output and all_schemas:
-            output_path = Path(output)
-            if len(all_schemas) == 1 and not output_path.is_dir():
-                # Single schema → write directly to file
-                with open(output, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(all_schemas[0], indent=2))
-                console.print(f"[green]✓ Schema written to: {output}[/green]")
-            elif output_path.is_dir() or (is_batch and not output_path.suffix):
-                # Directory mode → one file per schema
-                output_path.mkdir(parents=True, exist_ok=True)
-                for schema in all_schemas:
-                    class_name = (
-                        schema.get("$id")
-                        or schema.get("x-aws-idp-document-type")
-                        or "unknown"
-                    )
-                    file_path = output_path / f"{class_name}.json"
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write(json.dumps(schema, indent=2))
-                    console.print(f"[green]✓ Schema written to: {file_path}[/green]")
-            else:
-                # File mode with multiple schemas → JSON array
-                with open(output, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(all_schemas, indent=2))
-                console.print(
-                    f"[green]✓ {len(all_schemas)} schemas written to: {output}[/green]"
-                )
+        _write_discover_output(output, all_schemas, console, is_batch)
 
         # Summary
         if is_batch:
@@ -4331,6 +4621,52 @@ def discover(
     except Exception as e:
         console.print(f"[red]✗ Error: {e}[/red]")
         sys.exit(1)
+
+
+def _write_discover_output(output, all_schemas, console, is_batch=True):
+    """Helper to write discovery output to file or stdout."""
+    import json
+    from pathlib import Path
+
+    if not all_schemas:
+        return
+
+    if not output and is_batch:
+        # No -o specified in batch mode → print schemas to stdout
+        console.print()
+        console.print("[bold]Discovered schemas:[/bold]")
+        if len(all_schemas) == 1:
+            console.print(json.dumps(all_schemas[0], indent=2))
+        else:
+            console.print(json.dumps(all_schemas, indent=2))
+        console.print()
+    elif output:
+        output_path = Path(output)
+        if len(all_schemas) == 1 and not output_path.is_dir():
+            # Single schema → write directly to file
+            with open(output, "w", encoding="utf-8") as f:
+                f.write(json.dumps(all_schemas[0], indent=2))
+            console.print(f"[green]✓ Schema written to: {output}[/green]")
+        elif output_path.is_dir() or (is_batch and not output_path.suffix):
+            # Directory mode → one file per schema
+            output_path.mkdir(parents=True, exist_ok=True)
+            for schema in all_schemas:
+                class_name = (
+                    schema.get("$id")
+                    or schema.get("x-aws-idp-document-type")
+                    or "unknown"
+                )
+                file_path = output_path / f"{class_name}.json"
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(schema, indent=2))
+                console.print(f"[green]✓ Schema written to: {file_path}[/green]")
+        else:
+            # File mode with multiple schemas → JSON array
+            with open(output, "w", encoding="utf-8") as f:
+                f.write(json.dumps(all_schemas, indent=2))
+            console.print(
+                f"[green]✓ {len(all_schemas)} schemas written to: {output}[/green]"
+            )
 
 
 def main():

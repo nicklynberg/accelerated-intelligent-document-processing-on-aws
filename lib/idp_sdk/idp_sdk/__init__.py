@@ -40,6 +40,9 @@ from .models import (
     AssessmentFieldGeometry,
     AssessmentGeometryResult,
     AssessmentMetrics,
+    # Discovery models
+    AutoDetectResult,
+    AutoDetectSection,
     # Batch models
     BatchDeletionResult,
     BatchDownloadResult,
@@ -56,9 +59,12 @@ from .models import (
     ConfigDeleteResult,
     ConfigDownloadResult,
     ConfigListResult,
+    ConfigSyncBdaResult,
     ConfigUploadResult,
     ConfigValidationResult,
     ConfigVersionInfo,
+    DiscoveryBatchResult,
+    DiscoveryResult,
     # Document models
     DocumentDeletionResult,
     DocumentDownloadResult,
@@ -98,7 +104,7 @@ from .models import (
     StopWorkflowsResult,
 )
 
-__version__ = "0.5.2"
+__version__ = "0.5.3.dev6"
 
 __all__ = [
     # Client
@@ -164,6 +170,12 @@ __all__ = [
     "ConfigVersionInfo",
     "ConfigListResult",
     "ConfigDeleteResult",
+    "ConfigSyncBdaResult",
+    # Discovery models
+    "DiscoveryResult",
+    "DiscoveryBatchResult",
+    "AutoDetectResult",
+    "AutoDetectSection",
     # Manifest models
     "ManifestDocument",
     "ManifestResult",

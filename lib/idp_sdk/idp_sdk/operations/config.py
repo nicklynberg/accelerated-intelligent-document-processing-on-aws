@@ -13,6 +13,7 @@ from idp_sdk.models import (
     ConfigDeleteResult,
     ConfigDownloadResult,
     ConfigListResult,
+    ConfigSyncBdaResult,
     ConfigUploadResult,
     ConfigValidationResult,
     ConfigVersionInfo,
@@ -603,4 +604,108 @@ class ConfigOperation:
         except Exception as e:
             return ConfigDeleteResult(
                 success=False, deleted_version=config_version, error=str(e)
+            )
+
+    def sync_bda(
+        self,
+        direction: str = "bidirectional",
+        mode: str = "replace",
+        config_version: Optional[str] = None,
+        stack_name: Optional[str] = None,
+        **kwargs,
+    ) -> ConfigSyncBdaResult:
+        """Synchronize document class schemas between IDP configuration and BDA blueprints.
+
+        Performs bidirectional or one-way synchronization between the IDP
+        configuration's document classes and BDA (Bedrock Data Automation)
+        blueprints.
+
+        Args:
+            direction: Sync direction — ``'bidirectional'`` (default),
+                ``'bda_to_idp'``, or ``'idp_to_bda'``.
+            mode: Sync mode — ``'replace'`` (default, full alignment) or
+                ``'merge'`` (additive, don't delete).
+            config_version: Configuration version to sync (default: active version).
+            stack_name: Optional stack name override.
+            **kwargs: Additional parameters.
+
+        Returns:
+            ConfigSyncBdaResult with sync status and details.
+        """
+        import os
+
+        name = self._client._require_stack(stack_name)
+        config_table = self._get_config_table(name)
+
+        try:
+            os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+            from idp_common.bda.bda_blueprint_service import BdaBlueprintService
+            from idp_common.config.configuration_manager import ConfigurationManager
+
+            manager = ConfigurationManager()
+
+            # Resolve config version if not provided
+            if not config_version:
+                for v in manager.list_config_versions():
+                    if v.get("isActive"):
+                        config_version = v.get("versionName")
+                        break
+
+            # Get or create BDA project ARN
+            bda_project_arn = manager.get_bda_project_arn(config_version)
+            bda_service = BdaBlueprintService(dataAutomationProjectArn=bda_project_arn)
+
+            if not bda_project_arn:
+                bda_project_arn = bda_service.get_or_create_project_for_version(
+                    config_version
+                )
+                bda_service.dataAutomationProjectArn = bda_project_arn
+
+            # Perform sync
+            sync_result = bda_service.create_blueprints_from_custom_configuration(
+                sync_direction=direction,
+                version=config_version,
+                sync_mode=mode,
+            )
+
+            # Process results
+            sync_succeeded = [
+                item for item in sync_result if item.get("status") == "success"
+            ]
+            sync_failed = [
+                item for item in sync_result if item.get("status") != "success"
+            ]
+            processed_names = [
+                item.get("class_name", item.get("name", "unknown"))
+                for item in sync_result
+            ]
+
+            classes_synced = len(sync_succeeded)
+            classes_failed = len(sync_failed)
+
+            # Update BDA project ARN status
+            if classes_synced > 0 and classes_failed == 0:
+                manager.set_bda_project_arn(config_version, bda_project_arn, "synced")
+            elif classes_synced > 0:
+                manager.set_bda_project_arn(config_version, bda_project_arn, "partial")
+
+            return ConfigSyncBdaResult(
+                success=classes_failed == 0,
+                direction=direction,
+                mode=mode,
+                classes_synced=classes_synced,
+                classes_failed=classes_failed,
+                processed_classes=processed_names,
+                error=f"{classes_failed} class(es) failed to sync"
+                if classes_failed > 0
+                else None,
+            )
+
+        except Exception as e:
+            logger.error(f"BDA sync failed: {e}")
+            return ConfigSyncBdaResult(
+                success=False,
+                direction=direction,
+                mode=mode,
+                error=str(e),
             )

@@ -17,6 +17,7 @@ This page contains all demonstration videos for the GenAI Intelligent Document P
 - [Web User Interface](#web-user-interface)
 - [Command Line Interface (CLI)](#command-line-interface-cli)
 - [AI Agents & Analytics](#ai-agents--analytics)
+- [Role-Based Access Control (RBAC)](#role-based-access-control-rbac)
 - [Configuration & Management](#configuration--management)
 - [Evaluation & Testing](#evaluation--testing)
 - [Rule Validation](#rule-validation)
@@ -167,25 +168,23 @@ https://github.com/user-attachments/assets/78764207-0fcf-4523-ad12-f428581a685f
 
 ---
 
-## Configuration & Management
+## Role-Based Access Control (RBAC)
 
-### Discovery Module (Quick Overview)
-Intelligent document analysis that automatically identifies structures and creates processing blueprints.
+### RBAC Demo
+Role-based access control for managing user permissions and access to document processing features, configurations, and review workflows.
 
-**Duration**: 3 minutes
+https://github.com/user-attachments/assets/a1e9ce1a-1b2e-4e98-a387-d2e48d7e557d
 
-https://github.com/user-attachments/assets/101f73f6-27f1-4995-b35e-fa2fb44eb254
-
-**Related Documentation**: [Discovery Module Documentation](./discovery.md)
+**Related Documentation**: [RBAC Documentation](./rbac.md)
 
 ---
 
-### Discovery Module (Comprehensive)
-Detailed walkthrough of the pattern-neutral discovery process and pattern-specific implementations.
+## Configuration & Management
 
-**Duration**: 10 minutes
+### Discovery Module
+Intelligent document analysis that automatically identifies structures and creates processing blueprints, including pattern-neutral discovery and pattern-specific implementations.
 
-https://github.com/user-attachments/assets/ba7f863f-0cac-4778-8bcf-b4beee8a3301
+https://github.com/user-attachments/assets/9c3923fb-f4ff-43cd-a563-44c7c6132921
 
 **Related Documentation**: [Discovery Module Documentation](./discovery.md)
 

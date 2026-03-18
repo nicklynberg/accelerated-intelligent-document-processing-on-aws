@@ -7,52 +7,54 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
-- **SDK Client Interface** — Introduced `IDPClient` as the single public entry point for all IDP operations, with typed namespace access (`client.batch`, `client.stack`, `client.config`, `client.manifest`, `client.testing`).
+- **Removed older Claude models** from Configuration UI picklists (3.x, 4.0, 4.1). Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4.5, and Opus 4.6 are available for selection in the UI. Existing configurations using older versions still work.
 
-- **Typed Return Models** — SDK operations return Pydantic models instead of raw dictionaries, enabling IDE auto-complete, type checking, and consistent error handling.
+- **Discovery UX Enhancements** — Major improvements to the Discovery experience:
+  - **Multi-Section Package Discovery** — New "Multi-Section Package" discovery mode with PDF page thumbnail preview, color-coded page ranges, and parallel job creation. Users define page ranges to discover multiple classes from a single PDF. Each range creates an independent discovery job.
+  - **✨ AI Auto-Detect Sections** — "Auto-detect sections" button uses a configurable LLM prompt (`discovery.auto_split`) to automatically identify document boundaries and pre-fill page ranges with document type labels.
+  - **Discovery Mode Selector** — Tile-based mode choice between "Single Section Document" (with optional ground truth) and "Multi-Section Package" (with page ranges). Ground truth and page ranges are mutually exclusive.
+  - **Class Name Hints** — Document type labels (from auto-detect or manual entry) are passed as class name hints to guide the discovery LLM's `$id` and `x-aws-idp-document-type` output.
+  - **Real-time Job Monitoring** — Live progress messages, elapsed time counters, phased upload status ("Creating jobs..." → "Uploading..." → "Refreshing..."), discovered class name badges, and expandable error details with user-friendly messages.
+  - **Jobs Table UX** — Search/filter, time range selector, pagination, resizable columns, column preferences, multi-select delete, config version hyperlinks, and page range badges on multi-section jobs.
+  - **S3 Upload Race Condition Fix** — Replaced hardcoded `time.sleep(30)` with smart S3 polling using exponential backoff (2s–10s, 60s timeout).
+  - **New GraphQL APIs** — `autoDetectSections` mutation, `pageRanges`/`pageLabels` on `uploadDiscoveryDocument`, `pageRange`/`discoveredClassName`/`statusMessage` on job types, `deleteDiscoveryJob` mutation.
 
-- **Configuration Validation Enhancements** — Manifest and config validation now reports deprecated and unknown fields, enabling stricter validation policies.
+- **IDP SDK & CLI Overhaul** — Major refactoring of the SDK and CLI for a cleaner, more maintainable architecture:
+  - **`IDPClient` entry point** — Single public interface with typed namespace access (`client.batch`, `client.stack`, `client.config`, `client.manifest`, `client.testing`). CLI commands now route through `IDPClient` instead of importing internal modules, ensuring consistent behavior across CLI, Web UI, and programmatic access.
+  - **Typed return models** — SDK operations return Pydantic models instead of raw dictionaries, enabling IDE auto-complete and type checking.
+  - **Enhanced config validation** — Manifest and config validation reports deprecated/unknown fields; config upload detects whether a version exists and handles creation vs. update correctly.
+  - **Enhanced stack operations** — Deploy and delete commands support in-progress detection, live monitoring, cancel-update, and failure analysis.
+  - **Private API boundaries** — Internal modules renamed from `core/` to `_core/` with lint rules enforcing the boundary.
 
-- **Configuration Upload Version Detection** — Uploading a configuration now detects whether a version exists and correctly handles new version creation vs. updates.
-
-- **Private Internal Modules** — Internal SDK modules renamed from `core/` to `_core/` to clearly signal private API boundaries, with lint rules enforcing the boundary.
-
-- **CLI Refactored to Use SDK** — CLI commands now route through `IDPClient` instead of importing internal modules directly, improving maintainability and ensuring consistent behavior across CLI, Web UI, and programmatic access.
-
-- **Stack Deploy/Delete Enhanced** — Deploy and delete commands now use expanded SDK stack operations for in-progress detection, monitoring, cancel-update, and failure analysis.
+- **Discovery CLI & SDK Enhancements** — New capabilities in `idp-cli discover` and `client.discovery` that bring parity with the Web UI's Discovery features:
+  - **Class Name Hints** — `--class-hint` (CLI) / `class_name_hint=` (SDK) to pre-label discovered classes, guiding the LLM's `$id` output.
+  - **Multi-Section Page Ranges** — `--page-range "1-3" --page-label "W2 Form"` (CLI, repeatable) / `discovery.run_multi_section(page_ranges=[...])` (SDK) to discover multiple document classes from a single multi-page PDF.
+  - **AI Auto-Detect Sections** — `--auto-detect` / `--detect-only` (CLI) / `discovery.auto_detect_sections()` (SDK) to automatically identify document section boundaries using LLM analysis, then optionally discover each section.
+  - **BDA Sync Command** — New `idp-cli config-sync-bda` command and `client.config.sync_bda()` SDK method for explicit bidirectional synchronization between IDP configuration classes and BDA blueprints. Supports `--direction` (bidirectional, bda-to-idp, idp-to-bda) and `--mode` (replace, merge).
+  - **New Models** — `AutoDetectResult`, `AutoDetectSection`, `ConfigSyncBdaResult`, `page_range` field on `DiscoveryResult`.
 
 ### Changed
 
-- **SDK: `batch.run()` renamed to `batch.process()`** — The `run()` method is now deprecated and emits a `DeprecationWarning`. Existing code using `client.batch.run(...)` will continue to work but should be migrated to `client.batch.process(...)`.
+- **SDK & CLI: Renamed processing commands for clarity** — Old names are deprecated (emit `DeprecationWarning`) but remain available for backward compatibility:
+  - `client.batch.run()` → `client.batch.process()`
+  - `client.batch.rerun()` → `client.batch.reprocess()` (same for `client.document.rerun()` → `.reprocess()`)
+  - `idp-cli run-inference` → `idp-cli process`
+  - `idp-cli rerun-inference` → `idp-cli reprocess`
 
-- **SDK: `batch.rerun()` renamed to `batch.reprocess()`** — The `rerun()` method is now deprecated and emits a `DeprecationWarning`. Existing code using `client.batch.rerun(...)` should be migrated to `client.batch.reprocess(...)`. Same applies to `client.document.rerun()` → `client.document.reprocess()`.
-
-- **SDK: `stack.delete()` now waits by default** — The `wait` parameter on `client.stack.delete()` now defaults to `True` (previously the delete operation returned immediately). Scripts relying on the old fire-and-forget behavior should explicitly pass `wait=False`.
-
-- **CLI: `run-inference` renamed to `process`** — The `idp-cli run-inference` command is now deprecated. Use `idp-cli process` instead. The old command remains available for backward compatibility with a deprecation notice.
-
-- **CLI: `rerun-inference` renamed to `reprocess`** — The `idp-cli rerun-inference` command is now deprecated. Use `idp-cli reprocess` instead. The old command remains available for backward compatibility with a deprecation notice.
-
-- **MCP: Renamed `docs/mcp-integration.md` to `docs/mcp-server.md`** for clarity.
-
-- **MCP: Renamed Lambda function `agentcore_analytics_processor` to `agentcore_mcp_handler`** to better reflect its role as the MCP protocol handler (not just analytics).
-  - CloudFormation resource `AgentCoreAnalyticsLambdaFunction` → `AgentCoreMCPHandlerFunction`
-  - CloudFormation resource `AgentCoreAnalyticsLambdaLogGroup` → `AgentCoreMCPHandlerLogGroup`
-  - Lambda FunctionName: `${StackName}-agentcore-analytics` → `${StackName}-agentcore-mcp-handler`
-  - Source directory: `src/lambda/agentcore_analytics_processor/` → `src/lambda/agentcore_mcp_handler/`
+- **SDK: `stack.delete()` now waits by default** — The `wait` parameter defaults to `True` (previously fire-and-forget). Pass `wait=False` to restore the old behavior.
 
 ### Fixed
 
+- **Fillable PDF form fields missing from rendered page images** — Fixed bug where fillable PDF form fields (text inputs, checkboxes, radio buttons, dropdowns) were not rendered in page images, causing OCR and extraction to miss user-entered data. Two-part fix: (1) `PdfDocument.init_forms()` initializes the form rendering engine so PDFium can process form fields, and (2) `page.flatten()` merges form field appearances into page content before rendering — required because many fillable PDFs (especially government forms) lack pre-generated appearance streams. Applied in both Pattern 2 (`OcrService`) and Pattern 1 (`create_pdf_page_images`) PDF rendering pipelines. ([#240](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/240))
+
+- **Discovery subscription handler dropping errorMessage and other fields** — Fixed bug where the UI subscription handler did `{ ...oldJob, status: updatedJob.status }`, discarding all fields except status from real-time subscription updates. Error messages, discovered class names, and status messages were being sent by the backend but silently dropped by the UI. Now spreads all fields: `{ ...oldJob, ...updatedJob }`.
+
+- **Discovery processor S3 race condition causing NoSuchKey failures** — The discovery upload resolver sends the SQS message before the browser finishes uploading the file to S3 via presigned POST. Previously worked around with a hardcoded `time.sleep(30)`. Replaced with `_wait_for_s3_object()` that polls S3 with exponential backoff (2s initial, 10s max, 60s timeout), proceeding as soon as the file appears.
+
 - **GovCloud template: fix unresolved RBAC resource dependencies** — Added `AuthorGroup`, `ViewerGroup`, `GetMyProfileResolver`, and `UpdateUserResolver` to GovCloud removal lists so they are stripped alongside the `UserPool` they depend on.
+- **Fix race condition in `idp-cli generate-manifest --test-set`** — Added `.uploading` marker file protocol to prevent the test set resolver from prematurely validating test sets while the CLI is still uploading baseline files ([#193](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/193)).
 
 - **Test Fixes** — Updated CLI test mocks to align with the new `IDPClient`-based implementation, fixing broken test fixtures that referenced removed internal imports.
-
-- **MCP**: Fixed AgentCore Gateway manager to correctly update gateway target Lambda ARN during stack updates.
-
-### Upgrade Notes
-
-> **MCP users upgrading from a previous version:**
-> During the stack update, CloudFormation will replace the `AgentCoreMCPHandlerFunction` Lambda (previously `AgentCoreAnalyticsLambdaFunction`). The AgentCore Gateway target will be automatically updated to point to the new Lambda. MCP tools may be briefly unavailable (~30–60 seconds) during the update. Historical CloudWatch logs for the old `${StackName}-agentcore-analytics` Lambda will not be migrated to the new log group.
 
 
 ## [0.5.2]

@@ -1,12 +1,13 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import remarkGithubVideo from "./plugins/remark-github-video.mjs";
+import remarkRewriteDocsLinks from "./plugins/remark-rewrite-docs-links.mjs";
 
 export default defineConfig({
   site: "https://aws-solutions-library-samples.github.io",
   base: "/accelerated-intelligent-document-processing-on-aws",
   markdown: {
-    remarkPlugins: [remarkGithubVideo],
+    remarkPlugins: [remarkGithubVideo, remarkRewriteDocsLinks],
   },
   integrations: [
     starlight({

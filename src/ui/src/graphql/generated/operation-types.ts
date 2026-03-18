@@ -197,9 +197,11 @@ export type DisPresignedUrlResponse = {
 };
 
 export type DiscoveryJob = {
+  discoveredClassName?: Maybe<Scalars['String']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
   jobId: Scalars['ID']['output'];
   status: Scalars['String']['output'];
+  statusMessage?: Maybe<Scalars['String']['output']>;
 };
 
 export type DiscoveryJobList = {
@@ -209,11 +211,14 @@ export type DiscoveryJobList = {
 
 export type DiscoveryJobListItem = {
   createdAt?: Maybe<Scalars['String']['output']>;
+  discoveredClassName?: Maybe<Scalars['String']['output']>;
   documentKey?: Maybe<Scalars['String']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
   groundTruthKey?: Maybe<Scalars['String']['output']>;
   jobId: Scalars['ID']['output'];
+  pageRange?: Maybe<Scalars['String']['output']>;
   status: Scalars['String']['output'];
+  statusMessage?: Maybe<Scalars['String']['output']>;
   updatedAt?: Maybe<Scalars['String']['output']>;
   version?: Maybe<Scalars['String']['output']>;
 };
@@ -347,6 +352,7 @@ export type Mutation = {
   abortWorkflow: AbortWorkflowResponse;
   addTestSet?: Maybe<TestSet>;
   addTestSetFromUpload?: Maybe<TestSetUploadResponse>;
+  autoDetectSections?: Maybe<Scalars['String']['output']>;
   claimReview?: Maybe<Document>;
   completeSectionReview?: Maybe<Document>;
   copyToBaseline: CopyToBaselineResponse;
@@ -355,6 +361,7 @@ export type Mutation = {
   deleteAgentJob?: Maybe<Scalars['Boolean']['output']>;
   deleteChatSession?: Maybe<Scalars['Boolean']['output']>;
   deleteConfigVersion?: Maybe<UpdateConfigurationResponse>;
+  deleteDiscoveryJob: Scalars['Boolean']['output'];
   deleteDocument: Scalars['Boolean']['output'];
   deleteTestSets: Scalars['Boolean']['output'];
   deleteTests: Scalars['Boolean']['output'];
@@ -377,6 +384,7 @@ export type Mutation = {
   updateDocumentSection?: Maybe<Document>;
   updateDocumentStatus?: Maybe<Document>;
   updatePricing?: Maybe<UpdatePricingResponse>;
+  updateUser?: Maybe<User>;
   uploadDiscoveryDocument: DisPresignedUrlResponse;
   uploadDocument: PresignedUrlResponse;
 };
@@ -398,6 +406,13 @@ export type MutationAddTestSetArgs = {
 
 export type MutationAddTestSetFromUploadArgs = {
   input: TestSetUploadInput;
+};
+
+
+export type MutationAutoDetectSectionsArgs = {
+  bucket: Scalars['String']['input'];
+  documentKey: Scalars['String']['input'];
+  version?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -430,12 +445,6 @@ export type MutationCreateUserArgs = {
 };
 
 
-export type MutationUpdateUserArgs = {
-  allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
-  userId: Scalars['ID']['input'];
-};
-
-
 export type MutationDeleteAgentJobArgs = {
   jobId: Scalars['ID']['input'];
 };
@@ -448,6 +457,11 @@ export type MutationDeleteChatSessionArgs = {
 
 export type MutationDeleteConfigVersionArgs = {
   versionName: Scalars['String']['input'];
+};
+
+
+export type MutationDeleteDiscoveryJobArgs = {
+  jobId: Scalars['ID']['input'];
 };
 
 
@@ -550,9 +564,11 @@ export type MutationUpdateConfigurationArgs = {
 
 
 export type MutationUpdateDiscoveryJobStatusArgs = {
+  discoveredClassName?: InputMaybe<Scalars['String']['input']>;
   errorMessage?: InputMaybe<Scalars['String']['input']>;
   jobId: Scalars['ID']['input'];
   status: Scalars['String']['input'];
+  statusMessage?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -576,11 +592,19 @@ export type MutationUpdatePricingArgs = {
 };
 
 
+export type MutationUpdateUserArgs = {
+  allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
+  userId: Scalars['ID']['input'];
+};
+
+
 export type MutationUploadDiscoveryDocumentArgs = {
   bucket?: InputMaybe<Scalars['String']['input']>;
   contentType?: InputMaybe<Scalars['String']['input']>;
   fileName: Scalars['String']['input'];
   groundTruthFileName?: InputMaybe<Scalars['String']['input']>;
+  pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
+  pageRanges?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   prefix?: InputMaybe<Scalars['String']['input']>;
   version?: InputMaybe<Scalars['String']['input']>;
 };
@@ -649,6 +673,7 @@ export type Query = {
   getDocument?: Maybe<Document>;
   getDocumentCount?: Maybe<DocumentCount>;
   getFileContents?: Maybe<FileContentsResponse>;
+  getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
   getTestRun?: Maybe<TestRun>;
@@ -1093,6 +1118,15 @@ export type AddTestSetFromUploadMutationVariables = Exact<{
 
 export type AddTestSetFromUploadMutation = { addTestSetFromUpload?: { testSetId: string, presignedUrl: string, objectKey: string } | null };
 
+export type AutoDetectSectionsMutationVariables = Exact<{
+  documentKey: Scalars['String']['input'];
+  bucket: Scalars['String']['input'];
+  version?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type AutoDetectSectionsMutation = { autoDetectSections?: string | null };
+
 export type ClaimReviewMutationVariables = Exact<{
   objectKey: Scalars['String']['input'];
 }>;
@@ -1145,6 +1179,13 @@ export type DeleteConfigVersionMutationVariables = Exact<{
 
 
 export type DeleteConfigVersionMutation = { deleteConfigVersion?: { success: boolean, message?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
+
+export type DeleteDiscoveryJobMutationVariables = Exact<{
+  jobId: Scalars['ID']['input'];
+}>;
+
+
+export type DeleteDiscoveryJobMutation = { deleteDiscoveryJob: boolean };
 
 export type DeleteDocumentMutationVariables = Exact<{
   objectKeys: Array<Scalars['String']['input']> | Scalars['String']['input'];
@@ -1270,6 +1311,14 @@ export type UpdatePricingMutationVariables = Exact<{
 
 export type UpdatePricingMutation = { updatePricing?: { success: boolean, message?: string | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
+export type UpdateUserMutationVariables = Exact<{
+  userId: Scalars['ID']['input'];
+  allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
+}>;
+
+
+export type UpdateUserMutation = { updateUser?: { userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null } | null };
+
 export type UploadDiscoveryDocumentMutationVariables = Exact<{
   fileName: Scalars['String']['input'];
   contentType?: InputMaybe<Scalars['String']['input']>;
@@ -1277,6 +1326,8 @@ export type UploadDiscoveryDocumentMutationVariables = Exact<{
   bucket?: InputMaybe<Scalars['String']['input']>;
   groundTruthFileName?: InputMaybe<Scalars['String']['input']>;
   version?: InputMaybe<Scalars['String']['input']>;
+  pageRanges?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
+  pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
 }>;
 
 
@@ -1374,6 +1425,11 @@ export type GetFileContentsQueryVariables = Exact<{
 
 export type GetFileContentsQuery = { getFileContents?: { content: string, contentType: string, size: number, isBinary?: boolean | null } | null };
 
+export type GetMyProfileQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type GetMyProfileQuery = { getMyProfile?: { userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null } | null };
+
 export type GetPricingQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -1453,7 +1509,7 @@ export type ListConfigurationLibraryQuery = { listConfigurationLibrary?: { succe
 export type ListDiscoveryJobsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type ListDiscoveryJobsQuery = { listDiscoveryJobs?: { nextToken?: string | null, DiscoveryJobs?: Array<{ jobId: string, documentKey?: string | null, groundTruthKey?: string | null, status: string, createdAt?: string | null, updatedAt?: string | null, errorMessage?: string | null } | null> | null } | null };
+export type ListDiscoveryJobsQuery = { listDiscoveryJobs?: { nextToken?: string | null, DiscoveryJobs?: Array<{ jobId: string, documentKey?: string | null, groundTruthKey?: string | null, status: string, createdAt?: string | null, updatedAt?: string | null, errorMessage?: string | null, version?: string | null, discoveredClassName?: string | null, statusMessage?: string | null, pageRange?: string | null } | null> | null } | null };
 
 export type ListDocumentsQueryVariables = Exact<{
   startDateTime?: InputMaybe<Scalars['AWSDateTime']['input']>;
@@ -1495,19 +1551,6 @@ export type ListUsersQueryVariables = Exact<{ [key: string]: never; }>;
 
 
 export type ListUsersQuery = { listUsers?: { users?: Array<{ userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null } | null> | null } | null };
-
-export type GetMyProfileQueryVariables = Exact<{ [key: string]: never; }>;
-
-
-export type GetMyProfileQuery = { getMyProfile?: { userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null } | null };
-
-export type UpdateUserMutationVariables = Exact<{
-  userId: Scalars['ID']['input'];
-  allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>> | InputMaybe<Scalars['String']['input']>>;
-}>;
-
-
-export type UpdateUserMutation = { updateUser?: { userId: string, email: string, persona: string, status?: string | null, createdAt?: string | null, allowedConfigVersions?: Array<string | null> | null } | null };
 
 export type QueryKnowledgeBaseQueryVariables = Exact<{
   input: Scalars['String']['input'];
@@ -1556,7 +1599,7 @@ export type OnDiscoveryJobStatusChangeSubscriptionVariables = Exact<{
 }>;
 
 
-export type OnDiscoveryJobStatusChangeSubscription = { onDiscoveryJobStatusChange?: { jobId: string, status: string, errorMessage?: string | null } | null };
+export type OnDiscoveryJobStatusChangeSubscription = { onDiscoveryJobStatusChange?: { jobId: string, status: string, errorMessage?: string | null, discoveredClassName?: string | null, statusMessage?: string | null } | null };
 
 export type OnUpdateDocumentSubscriptionVariables = Exact<{ [key: string]: never; }>;
 

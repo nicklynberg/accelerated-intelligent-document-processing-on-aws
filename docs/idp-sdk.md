@@ -99,6 +99,8 @@ client.document.delete(...)
 # Discovery operations (schema generation)
 client.discovery.run(...)
 client.discovery.run_batch(...)
+client.discovery.run_multi_section(...)
+client.discovery.auto_detect_sections(...)
 
 # Evaluation operations (baseline comparison)
 client.evaluation.create_baseline(...)
@@ -123,6 +125,7 @@ client.config.download(...)
 client.config.list()
 client.config.activate(...)
 client.config.delete(...)
+client.config.sync_bda(...)
 
 # Manifest operations
 client.manifest.generate(...)
@@ -1293,6 +1296,42 @@ else:
 
 **Note:** Cannot delete `"default"` or currently active versions.
 
+### config.sync_bda()
+
+Synchronize IDP document class schemas with BDA (Bedrock Data Automation) blueprints.
+
+**Parameters:**
+- `direction` (str, optional): Sync direction — `"bidirectional"` (default), `"bda_to_idp"`, or `"idp_to_bda"`
+- `mode` (str, optional): Sync mode — `"replace"` (default, full alignment) or `"merge"` (additive)
+- `config_version` (str, optional): Configuration version to sync (default: active version)
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `ConfigSyncBdaResult` with `success`, `direction`, `mode`, `classes_synced`, `classes_failed`, `processed_classes`, and `error`
+
+```python
+# Bidirectional sync (default)
+result = client.config.sync_bda()
+
+# Import BDA blueprints to IDP (merge mode)
+result = client.config.sync_bda(
+    direction="bda_to_idp",
+    mode="merge"
+)
+
+# Push IDP classes to BDA
+result = client.config.sync_bda(
+    direction="idp_to_bda",
+    config_version="v2"
+)
+
+if result.success:
+    print(f"Synced {result.classes_synced} classes")
+    for cls in result.processed_classes:
+        print(f"  • {cls}")
+else:
+    print(f"Sync failed: {result.error}")
+```
+
 ---
 
 ## Discovery Operations
@@ -1312,8 +1351,11 @@ Analyze a document to generate a JSON Schema definition for a document class.
 - `ground_truth_path` (str, optional): Path to JSON ground truth file
 - `config_version` (str, optional): Config version to save to (stack mode only)
 - `stack_name` (str, optional): Stack name override
+- `page_range` (str, optional): Page range to extract from a PDF (e.g., "1-3")
+- `class_name_hint` (str, optional): Hint for the document class name (LLM uses this as `$id`)
+- `auto_detect` (bool, optional): If True, auto-detect section boundaries and discover each section. Returns `DiscoveryBatchResult`.
 
-**Returns:** `DiscoveryResult` with `status`, `document_class`, `json_schema`, `config_version`, `document_path`, and `error`
+**Returns:** `DiscoveryResult` with `status`, `document_class`, `json_schema`, `config_version`, `document_path`, `page_range`, and `error`. When `auto_detect=True`, returns `DiscoveryBatchResult`.
 
 ```python
 # Local mode — no stack needed
@@ -1331,11 +1373,87 @@ result = client.discovery.run(
     ground_truth_path="./invoice-expected.json"
 )
 
+# With class name hint
+result = client.discovery.run(
+    "./form.pdf",
+    class_name_hint="W2 Tax Form"
+)
+
+# Discover specific page range from a PDF
+result = client.discovery.run(
+    "./lending_package.pdf",
+    page_range="3-5",
+    class_name_hint="W2 Form"
+)
+
+# Auto-detect sections and discover each
+batch_result = client.discovery.run(
+    "./lending_package.pdf",
+    auto_detect=True,
+    config_version="v2"
+)
+for r in batch_result.results:
+    print(f"{r.document_class} (pages {r.page_range}): {r.status}")
+
 # Save to specific config version
 result = client.discovery.run(
     "./form.pdf",
     config_version="v2"
 )
+```
+
+### discovery.auto_detect_sections()
+
+Detect document section boundaries in a multi-page PDF using LLM analysis.
+
+**Parameters:**
+- `document_path` (str, required): Local path to a PDF document
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `AutoDetectResult` with `status`, `sections` (list of `AutoDetectSection`), `document_path`, and `error`
+
+**AutoDetectSection fields:** `start` (int), `end` (int), `type` (str, optional)
+
+```python
+# Detect section boundaries
+result = client.discovery.auto_detect_sections("./lending_package.pdf")
+
+if result.status == "SUCCESS":
+    for section in result.sections:
+        print(f"Pages {section.start}-{section.end}: {section.type}")
+    # Output:
+    # Pages 1-2: Cover Letter
+    # Pages 3-5: W2 Form
+    # Pages 6-8: Bank Statement
+```
+
+### discovery.run_multi_section()
+
+Discover multiple document classes from page ranges in a single PDF.
+
+**Parameters:**
+- `document_path` (str, required): Local path to a multi-page PDF
+- `page_ranges` (list, required): List of dicts with `start` (int), `end` (int), and optional `label` (str)
+- `config_version` (str, optional): Config version to save to
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `DiscoveryBatchResult` with one result per page range
+
+```python
+# Discover specific page ranges
+result = client.discovery.run_multi_section(
+    "./lending_package.pdf",
+    page_ranges=[
+        {"start": 1, "end": 2, "label": "Cover Letter"},
+        {"start": 3, "end": 5, "label": "W2 Form"},
+        {"start": 6, "end": 8, "label": "Bank Statement"},
+    ],
+    config_version="v2"
+)
+
+print(f"Discovered {result.succeeded}/{result.total} sections")
+for r in result.results:
+    print(f"  Pages {r.page_range}: {r.document_class} ({r.status})")
 ```
 
 ### discovery.run_batch()

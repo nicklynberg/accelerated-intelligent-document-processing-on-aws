@@ -156,11 +156,22 @@ def create_pdf_page_images(bda_result_bucket, output_bucket, object_key):
 
         # Open the PDF using pypdfium2
         pdf_document = pdfium.PdfDocument(pdf_content)
+        # Initialize form rendering engine so fillable PDF form fields
+        # (text inputs, checkboxes, etc.) appear in rendered page images.
+        # Without this, may_draw_forms=True in render() has no effect.
+        pdf_document.init_forms()
 
         # Process each page
         for page_num in range(len(pdf_document)):
             # Render page to a PIL image
             page = pdf_document[page_num]
+            # Flatten form fields into page content before rendering.
+            # Many fillable PDFs (e.g., government forms) lack appearance
+            # streams for form fields — flatten() forces PDFium to generate
+            # them and merge into page content so render() can display them.
+            # Only applies when PDF has form fields (formenv is set by init_forms).
+            if page.formenv is not None:
+                page.flatten()
             pil_img = page.render(scale=150 / 72).to_pil()
 
             # Save the image to a BytesIO object as JPEG

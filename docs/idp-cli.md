@@ -2059,6 +2059,9 @@ idp-cli discover -d ./invoice.pdf -g ./invoice.json
 # Save schema to file
 idp-cli discover -d ./form.pdf -o ./form-schema.json
 
+# With class name hint (guides LLM to use specific class name)
+idp-cli discover -d ./form.pdf --class-hint "W2 Tax Form"
+
 # Batch with auto-matched ground truth
 idp-cli discover -d ./invoice.pdf -d ./w2.pdf -g ./invoice.json -g ./w2.json
 
@@ -2067,6 +2070,22 @@ idp-cli discover -d ./invoice.pdf -d ./w2.pdf -o ./schemas/
 
 # Batch output to single file (JSON array)
 idp-cli discover -d ./invoice.pdf -d ./w2.pdf -o ./all-schemas.json
+
+# Multi-section: discover specific page ranges from a single PDF
+idp-cli discover -d ./lending_package.pdf \
+    --page-range "1-2" --page-label "Cover Letter" \
+    --page-range "3-5" --page-label "W2 Form" \
+    --page-range "6-8" --page-label "Bank Statement" \
+    -o ./schemas/
+
+# Auto-detect sections then discover each
+idp-cli discover -d ./lending_package.pdf --auto-detect -o ./schemas/
+
+# Only detect section boundaries (no discovery)
+idp-cli discover -d ./lending_package.pdf --auto-detect --detect-only
+
+# Auto-detect with output to file
+idp-cli discover -d ./lending_package.pdf --auto-detect --detect-only -o sections.json
 
 # Stack mode (saves to config)
 idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
@@ -2079,7 +2098,49 @@ idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
 | `-g, --ground-truth` | Path to JSON ground truth file(s) (repeatable, auto-matched by filename stem) |
 | `--config-version` | Config version to save to (stack mode only) |
 | `-o, --output` | Output path: file (single/JSON array) or directory (one file per schema) |
+| `--class-hint` | Hint for the document class name (e.g., "W2 Form"). The LLM will use this as `$id`. |
+| `--page-range` | Page range to discover (e.g., "1-3"). Repeatable for multi-section. Requires PDF. |
+| `--page-label` | Label for corresponding `--page-range` (e.g., "W2 Form"). Used as class name hint per range. |
+| `--auto-detect` | Auto-detect document section boundaries using AI, then discover each section. |
+| `--detect-only` | Only detect section boundaries (use with `--auto-detect`). Prints boundaries without running discovery. |
 | `--region` | AWS region |
+
+---
+
+### `config-sync-bda`
+
+Synchronize IDP document class schemas with BDA (Bedrock Data Automation) blueprints.
+
+**Usage:**
+```bash
+idp-cli config-sync-bda [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--direction`: Sync direction — `bidirectional` (default), `bda-to-idp`, or `idp-to-bda`
+- `--mode`: Sync mode — `replace` (default, full alignment) or `merge` (additive, don't delete)
+- `--config-version`: Configuration version to sync (default: active version)
+- `--region`: AWS region (optional)
+
+**Examples:**
+
+```bash
+# Bidirectional sync (default)
+idp-cli config-sync-bda --stack-name my-stack
+
+# Import BDA blueprints into IDP config
+idp-cli config-sync-bda --stack-name my-stack --direction bda-to-idp
+
+# Push IDP classes to BDA blueprints
+idp-cli config-sync-bda --stack-name my-stack --direction idp-to-bda
+
+# Merge mode (additive — don't remove existing items)
+idp-cli config-sync-bda --stack-name my-stack --direction bda-to-idp --mode merge
+
+# Sync specific config version
+idp-cli config-sync-bda --stack-name my-stack --config-version v2
+```
 
 ---
 
