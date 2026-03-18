@@ -41,6 +41,7 @@ class DocumentState(str, Enum):
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
     ABORTED = "ABORTED"
+    NOT_FOUND = "NOT_FOUND"
     UNKNOWN = "UNKNOWN"
 
 
