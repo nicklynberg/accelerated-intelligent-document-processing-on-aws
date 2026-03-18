@@ -432,6 +432,14 @@ Resources:
               - 'bedrock:GetBlueprint'
             Resource:
               - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint/*'
+          - Effect: Allow
+            Action:
+              - 'bedrock:CreateDataAutomationProject'
+              - 'bedrock:UpdateDataAutomationProject'
+              - 'bedrock:GetDataAutomationProject'
+              - 'bedrock:DeleteDataAutomationProject'
+            Resource:
+              - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*'
 
   CodeBuildKMSPolicy:
     Type: 'AWS::IAM::Policy'
