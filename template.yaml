@@ -6688,7 +6688,6 @@ Resources:
         ALBScheme: !Ref ALBScheme
         ALBAllowedCIDRs: !Ref ALBAllowedCIDRs
         WebUIBucketName: !Ref WebUIBucket
-        WebUIBucketArn: !GetAtt WebUIBucket.Arn
         StackName: !Ref AWS::StackName
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LoggingBucketName: !Ref LoggingBucket

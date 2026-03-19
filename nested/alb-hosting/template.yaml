@@ -34,10 +34,6 @@ Parameters:
     Type: String
     Description: S3 bucket name for static web content
 
-  WebUIBucketArn:
-    Type: String
-    Description: S3 bucket ARN
-
   StackName:
     Type: String
     Description: Parent stack name for resource naming
