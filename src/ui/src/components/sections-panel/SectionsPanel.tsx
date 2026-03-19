@@ -1293,7 +1293,11 @@ const SectionsPanel = ({ sections, pages = [], documentItem, mergedConfig, onDoc
         handleNavigateToSection,
       );
 
-  const tableItems = isEditMode ? editedSections : sections || [];
+  // Sort sections by their starting page ID for consistent display order.
+  // During parallel Map state execution (Extraction/Assessment), subscription events
+  // may arrive out of order — the DynamoDB Sections array order depends on which
+  // parallel Lambda finishes first. Sorting ensures stable visual ordering.
+  const tableItems = isEditMode ? editedSections : sortSectionsByPageId(sections || []);
 
   // Check if there are any validation errors
   const hasValidationErrors = Object.keys(validationErrors).length > 0;

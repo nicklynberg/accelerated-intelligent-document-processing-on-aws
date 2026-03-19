@@ -194,6 +194,22 @@ const DocumentDetails = (): React.JSX.Element => {
       logger.debug('Reprocess result', result);
       // Close the modal
       setIsReprocessModalVisible(false);
+
+      // Immediately clear stale sections/pages so the UI doesn't show old data
+      // while waiting for the backend pipeline to start and send subscription updates.
+      if (document) {
+        setDocument({
+          ...document,
+          objectStatus: 'QUEUED',
+          sections: [],
+          pages: [],
+          evaluationReportUri: '',
+          summaryReportUri: '',
+          ruleValidationResultUri: '',
+          metering: null,
+          confidenceAlertCount: 0,
+        } as MappedDocument);
+      }
     } finally {
       setIsReprocessLoading(false);
     }
