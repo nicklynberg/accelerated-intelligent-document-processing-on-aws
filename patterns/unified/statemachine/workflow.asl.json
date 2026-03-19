@@ -329,7 +329,7 @@
             "Parameters": {
                 "document.$": "$.Result.document"
             },
-            "ResultPath": "$.RuleValidationOrchestrationResult",
+            "ResultPath": "$.Result",
             "Next": "SummarizationStep"
         },
         "ProcessRuleValidationSections": {
@@ -398,7 +398,7 @@
                     "BackoffRate": 2.5
                 }
             ],
-            "ResultPath": "$.RuleValidationOrchestrationResult",
+            "ResultPath": "$.Result",
             "Next": "SummarizationStep"
         },
         "CheckHITLRequired": {
