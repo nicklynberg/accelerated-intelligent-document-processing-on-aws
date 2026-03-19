@@ -1088,6 +1088,16 @@ class IDPConfig(BaseModel):
         "extraction, and assessment stages.",
     )
 
+    managed: bool = Field(
+        default=False,
+        description="Stack-managed configuration that is overwritten on stack updates.",
+    )
+
+    test_set: Optional[str] = Field(
+        default=None,
+        description="Associated test set name (documentation/reference only).",
+    )
+
     notes: Optional[str] = Field(default=None, description="Configuration notes")
     ocr: OCRConfig = Field(default_factory=OCRConfig, description="OCR configuration")
     classification: ClassificationConfig = Field(

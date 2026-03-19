@@ -1742,10 +1742,10 @@ Resources:
       CustomClassificationModelARN: !Ref CustomClassificationModelARN
       CustomExtractionModelARN: !Ref CustomExtractionModelARN
       PreviousIDPPattern: !Ref PreviousIDPPattern
-      fake-w2: !Sub "s3://${ConfigurationBucket}/config_library/unified/fake-w2/config.yaml"
-      docsplit: !Sub "s3://${ConfigurationBucket}/config_library/unified/docsplit/config.yaml"
-      ocr-benchmark: !Sub "s3://${ConfigurationBucket}/config_library/unified/ocr-benchmark/config.yaml"
-      realkie-fcc-verified: !Sub "s3://${ConfigurationBucket}/config_library/unified/realkie-fcc-verified/config.yaml"
+      fake-w2: !Sub "s3://${ConfigurationBucket}/config_library/managed_config/fake-w2/config.yaml"
+      docsplit: !Sub "s3://${ConfigurationBucket}/config_library/managed_config/docsplit/config.yaml"
+      ocr-benchmark: !Sub "s3://${ConfigurationBucket}/config_library/managed_config/ocr-benchmark/config.yaml"
+      realkie-fcc-verified: !Sub "s3://${ConfigurationBucket}/config_library/managed_config/realkie-fcc-verified/config.yaml"
 
 
   ##########################################################################

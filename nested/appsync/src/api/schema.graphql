@@ -176,6 +176,7 @@ type ConfigurationVersion @aws_cognito_user_pools @aws_iam {
   createdAt: AWSDateTime
   updatedAt: AWSDateTime
   description: String
+  managed: Boolean
   bdaProjectArn: String
   bdaSyncStatus: String
   bdaLastSyncedAt: String

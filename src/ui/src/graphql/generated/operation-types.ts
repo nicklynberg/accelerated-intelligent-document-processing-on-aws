@@ -159,6 +159,7 @@ export type ConfigurationVersion = {
   createdAt?: Maybe<Scalars['AWSDateTime']['output']>;
   description?: Maybe<Scalars['String']['output']>;
   isActive?: Maybe<Scalars['Boolean']['output']>;
+  managed?: Maybe<Scalars['Boolean']['output']>;
   updatedAt?: Maybe<Scalars['AWSDateTime']['output']>;
   versionName: Scalars['String']['output'];
 };
@@ -1370,7 +1371,7 @@ export type GetConfigVersionQuery = { getConfigVersion?: { success: boolean, Sch
 export type GetConfigVersionsQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type GetConfigVersionsQuery = { getConfigVersions?: { success: boolean, versions?: Array<{ versionName: string, isActive?: boolean | null, createdAt?: string | null, updatedAt?: string | null, description?: string | null, bdaProjectArn?: string | null, bdaSyncStatus?: string | null, bdaLastSyncedAt?: string | null } | null> | null, error?: { type?: string | null, message?: string | null } | null } | null };
+export type GetConfigVersionsQuery = { getConfigVersions?: { success: boolean, versions?: Array<{ versionName: string, isActive?: boolean | null, createdAt?: string | null, updatedAt?: string | null, description?: string | null, managed?: boolean | null, bdaProjectArn?: string | null, bdaSyncStatus?: string | null, bdaLastSyncedAt?: string | null } | null> | null, error?: { type?: string | null, message?: string | null } | null } | null };
 
 export type GetConfigurationLibraryFileQueryVariables = Exact<{
   pattern: Scalars['String']['input'];

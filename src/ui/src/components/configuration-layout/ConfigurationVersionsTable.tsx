@@ -11,6 +11,7 @@ interface ConfigVersion {
   createdAt?: string;
   updatedAt?: string;
   description?: string;
+  managed?: boolean;
 }
 
 interface ConfigurationVersionsTableProps {
@@ -207,14 +208,22 @@ const ConfigurationVersionsTable = ({
               <Button
                 variant="primary"
                 onClick={() => {
-                  // Check if any selected versions are active or default
+                  // Check if any selected versions are active, default, or managed
                   const activeVersions = selectedVersionsForCompare.filter((vId) => {
                     const version = versions.find((v) => v.versionName === vId);
                     return version?.isActive || vId === 'default';
                   });
+                  const managedVersions = selectedVersionsForCompare.filter((vId) => {
+                    const version = versions.find((v) => v.versionName === vId);
+                    return version?.managed === true;
+                  });
 
                   if (activeVersions.length > 0) {
                     setDeleteError(`Cannot delete active or default versions: ${activeVersions.join(', ')}`);
+                    return;
+                  }
+                  if (managedVersions.length > 0) {
+                    setDeleteError(`Cannot delete stack-managed versions: ${managedVersions.join(', ')}`);
                     return;
                   }
 

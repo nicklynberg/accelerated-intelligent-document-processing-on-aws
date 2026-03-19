@@ -2215,13 +2215,18 @@ const ConfigurationLayout = (): React.JSX.Element => {
                     Save as Version
                   </Button>
                 )}
-                {/* Save changes - hidden for read-only users, disabled on default version */}
+                {/* Save changes - hidden for read-only users, disabled on default or managed versions */}
                 {canWrite && (
                   <Button
                     variant="primary"
                     onClick={() => handleSave(false)}
                     loading={isSaving}
-                    disabled={!hasUnsavedChanges || validationErrors.length > 0 || currentVersionName === 'default'}
+                    disabled={
+                      !hasUnsavedChanges ||
+                      validationErrors.length > 0 ||
+                      currentVersionName === 'default' ||
+                      mergedConfig?.managed === true
+                    }
                   >
                     Save changes
                   </Button>
@@ -2242,6 +2247,13 @@ const ConfigurationLayout = (): React.JSX.Element => {
                 <Spinner size="normal" />
                 <Box margin={{ left: 's' }}>Refreshing data from server</Box>
               </Box>
+            </Alert>
+          )}
+
+          {mergedConfig?.managed === true && (
+            <Alert type="info" header="Stack-managed configuration">
+              This configuration is managed by the stack and will be overwritten on updates. Use &quot;Save as Version&quot; to create an
+              editable copy.
             </Alert>
           )}
 

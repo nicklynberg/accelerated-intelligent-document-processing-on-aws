@@ -819,6 +819,20 @@ def handle_delete_config_version(manager, version, delete_bda_project=True):
                 },
             }
         
+        # Prevent deletion of stack-managed versions
+        try:
+            existing_config = manager.get_configuration("Config", version)
+            if existing_config and getattr(existing_config, 'managed', False):
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "ValidationError",
+                        "message": f"Cannot delete stack-managed version '{version}'",
+                    },
+                }
+        except Exception as e:
+            logger.warning(f"Error checking managed status for version {version}: {e}")
+        
         # Check for linked BDA project and optionally delete it
         bda_cleanup_message = ""
         if delete_bda_project:

@@ -283,6 +283,7 @@ export const getConfigVersions = /* GraphQL */ `
         createdAt
         updatedAt
         description
+        managed
         bdaProjectArn
         bdaSyncStatus
         bdaLastSyncedAt

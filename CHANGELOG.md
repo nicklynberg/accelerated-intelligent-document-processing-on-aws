@@ -7,6 +7,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **Managed Configuration Versions** — Pre-deployed test sets now have dedicated stack-managed config versions (`managed: true`) that are automatically created and overwritten on stack updates. Save and delete are disabled for managed versions in the UI and API. Test Studio auto-selects the matching config version when a test set is selected, replacing the hardcoded mapping.
+
 - **Discovery UX Overhaul** — Comprehensive improvements to the Discovery UI experience:
   - **Real-time progress updates** — Live status messages during processing (e.g., "Analyzing document structure with AI...", "Saving to configuration...")
   - **Discovered class name display** — On success, shows the discovered document class name (e.g., `W4-Form`) as a green badge in the Result column
