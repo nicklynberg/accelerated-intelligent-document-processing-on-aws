@@ -69,6 +69,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **"View Rule Validation Summary" button not appearing in real-time** — Fixed two-part bug: (1) State machine `ResultPath` for rule validation steps wrote to `$.RuleValidationOrchestrationResult` instead of `$.Result`, so downstream steps lost the `rule_validation_result`. (2) `RuleValidationResultUri` was missing from `UPDATE_DOCUMENT` and `GET_DOCUMENT` GraphQL selection sets in `mutations.py`, so AppSync subscriptions never delivered the field to the UI. Button appeared only after page refresh.
+
 - **Fillable PDF form fields missing from rendered page images** — Fixed bug where fillable PDF form fields (text inputs, checkboxes, radio buttons, dropdowns) were not rendered in page images, causing OCR and extraction to miss user-entered data. Two-part fix: (1) `PdfDocument.init_forms()` initializes the form rendering engine so PDFium can process form fields, and (2) `page.flatten()` merges form field appearances into page content before rendering — required because many fillable PDFs (especially government forms) lack pre-generated appearance streams. Applied in both Pattern 2 (`OcrService`) and Pattern 1 (`create_pdf_page_images`) PDF rendering pipelines. ([#240](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/240))
 
 - **Discovery subscription handler dropping errorMessage and other fields** — Fixed bug where the UI subscription handler did `{ ...oldJob, status: updatedJob.status }`, discarding all fields except status from real-time subscription updates. Error messages, discovered class names, and status messages were being sent by the backend but silently dropped by the UI. Now spreads all fields: `{ ...oldJob, ...updatedJob }`.
