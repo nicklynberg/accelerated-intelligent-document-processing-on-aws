@@ -22,8 +22,8 @@ from copy import deepcopy
 
 # Use importlib.resources for Python 3.9+
 if sys.version_info >= (3, 9):
-    from importlib.resources import files as importlib_files
-    from importlib.resources import as_file
+    from importlib.resources import files as importlib_files  # nosemgrep: python.lang.compatibility.python37.python37-compatibility-importlib2
+    from importlib.resources import as_file  # nosemgrep: python.lang.compatibility.python37.python37-compatibility-importlib2
 else:
     from importlib_resources import files as importlib_files
     from importlib_resources import as_file

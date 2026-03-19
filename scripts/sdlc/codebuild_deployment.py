@@ -20,7 +20,7 @@ import boto3
 def run_command(cmd, check=True):
     """Run shell command and return result"""
     print(f"Running: {cmd}")
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True) # nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true - Reviewed: command input is controlled and sanitized
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)  # nosec B602 nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true - hardcoded commands, no user input
     if result.stdout:
         print(result.stdout)
     if result.stderr:
@@ -259,8 +259,10 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
             print(f"✅ BDA config activated and synced")
             
             # Run inference with BDA config version
+            # BDA writes text to parsedResult.json
             batch_id = "test-bda"
-            if not run_inference_test(stack_name, sample_file, batch_id, verify_string, result_location, content_path, config_version):
+            bda_result_location = "pages/1/parsedResult.json"
+            if not run_inference_test(stack_name, sample_file, batch_id, verify_string, bda_result_location, content_path, config_version):
                 return {
                     "stack_name": stack_name,
                     "success": False,
@@ -323,7 +325,7 @@ def run_inference_test(stack_name, sample_file, batch_id, verify_string, result_
 
         # Download results
         print(f"Downloading results...")
-        result_dir = f"/tmp/result-{batch_id}"
+        result_dir = f"/tmp/result-{batch_id}"  # nosec B108 - isolated CodeBuild environment
         cmd = f"idp-cli download-results --stack-name {stack_name} --batch-id {batch_id} --output-dir {result_dir}"
         run_command(cmd)
 

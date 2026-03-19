@@ -4,6 +4,7 @@
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -23,6 +24,15 @@ class DecimalEncoder(json.JSONEncoder):
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+_SAFE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_\-./]+$')
+
+
+def _validate_sql_input(value, name):
+    """Validate that a value is safe for use in SQL queries."""
+    if not value or not _SAFE_ID_PATTERN.match(value):
+        raise ValueError(f"{name} contains invalid characters: {value}")
+    return value
 
 dynamodb = boto3.resource('dynamodb')
 
@@ -845,6 +855,9 @@ def _get_evaluation_metrics_from_athena(test_run_id):
         logger.warning("ATHENA_DATABASE environment variable not set")
         return {}
     
+    _validate_sql_input(test_run_id, 'test_run_id')
+    _validate_sql_input(database, 'database')
+
     # Get aggregated metrics directly from document_evaluations table
     query = f"""
     SELECT 
@@ -923,6 +936,9 @@ def _get_cost_data_from_athena(test_run_id):
         logger.warning("ATHENA_DATABASE environment variable not set")
         return {'total_cost': 0, 'cost_breakdown': {}}
     
+    _validate_sql_input(test_run_id, 'test_run_id')
+    _validate_sql_input(database, 'database')
+
     query = f"""
     SELECT 
         context,

@@ -937,7 +937,7 @@ STDERR:
                 CFLoader.add_constructor(func, construct_unknown)
 
             with open(template_path, "r", encoding="utf-8") as f:
-                template = yaml.load(f, Loader=CFLoader)
+                template = yaml.load(f, Loader=CFLoader)  # nosec B506 - CFLoader required for CloudFormation intrinsic functions
 
             if not template or not isinstance(template, dict):
                 raise Exception(f"Failed to parse YAML template: {template_path}")

@@ -117,7 +117,7 @@ class TestBatchProcessor:
 
         doc = {
             "document_id": "doc1",
-            "path": "/tmp/test.pdf",
+            "path": "/tmp/test.pdf",  # nosec B108 - mock test data, no file created
             "filename": "test.pdf",
             "type": "local",
         }

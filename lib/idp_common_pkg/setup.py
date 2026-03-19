@@ -90,7 +90,7 @@ extras_require = {
     # Agents module dependencies
     "agents": [
         "strands-agents==1.14.0",  # Pin to exact working version
-        "strands-agents-tools==0.2.13",  # Pin to exact working version
+        "strands-agents-tools==0.2.22",  # Pin to exact working version
         "bedrock-agentcore>=0.1.1",  # Specifically for the code interpreter tool
         "regex>=2024.0.0,<2026.0.0",  # Pin regex version to avoid conflicts
     ],
@@ -109,7 +109,7 @@ extras_require = {
         "openpyxl==3.1.5",
         "python-docx==1.2.0",
         "strands-agents==1.14.0",  # Pin to exact working version
-        "strands-agents-tools==0.2.13",  # Pin to exact working version
+        "strands-agents-tools==0.2.22",  # Pin to exact working version
         "bedrock-agentcore>=0.1.1",
         "regex>=2024.0.0,<2026.0.0",
     ],
@@ -117,7 +117,7 @@ extras_require = {
 
 setup(
     name="idp_common",
-    version="0.5.3.dev6",
+    version="0.5.3.dev7",
     packages=find_packages(
         exclude=[
             "build",

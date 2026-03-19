@@ -1982,6 +1982,36 @@ class StackDeployer:
             except Exception as e:
                 logger.warning(f"Failed to cleanup IAM custom policies: {e}")
 
+            # Clean up BDA blueprints associated with this stack
+            try:
+                bda_client = boto3.client(
+                    "bedrock-data-automation", region_name=self.region
+                )
+                paginator = bda_client.get_paginator("list_blueprints")
+                deleted_count = 0
+                for page in paginator.paginate(blueprintStage="LIVE"):
+                    for blueprint in page.get("blueprints", []):
+                        bp_name = blueprint.get("blueprintName", "")
+                        bp_arn = blueprint.get("blueprintArn", "")
+                        # Skip AWS-managed blueprints
+                        if "aws:blueprint" in bp_arn:
+                            continue
+                        if bp_name.startswith(f"{stack_name}-"):
+                            try:
+                                bda_client.delete_blueprint(blueprintArn=bp_arn)
+                                deleted_count += 1
+                                logger.info(f"Deleted BDA blueprint: {bp_name}")
+                            except Exception as bp_error:
+                                logger.warning(
+                                    f"Failed to delete BDA blueprint {bp_name}: {bp_error}"
+                                )
+                if deleted_count > 0:
+                    logger.info(
+                        f"Deleted {deleted_count} BDA blueprints for stack {stack_name}"
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to cleanup BDA blueprints: {e}")
+
         except Exception as e:
             logger.warning(f"Additional resource cleanup failed: {e}")
 
@@ -2055,7 +2085,7 @@ def get_or_create_config_bucket(region: str) -> str:
         logger.warning(f"Error listing buckets: {e}")
 
     # Create new bucket with random suffix
-    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))  # nosec B311 - bucket name suffix
     bucket_name = f"{bucket_prefix}{suffix}"
 
     logger.info(f"Creating new config bucket: {bucket_name}")

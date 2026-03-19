@@ -446,6 +446,7 @@ class ConfigOperation:
 
         try:
             os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+            os.environ["STACK_NAME"] = name
             from idp_common.config.configuration_manager import ConfigurationManager
 
             manager = ConfigurationManager()
