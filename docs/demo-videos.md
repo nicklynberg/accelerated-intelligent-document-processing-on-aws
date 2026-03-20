@@ -285,9 +285,15 @@ https://github.com/user-attachments/assets/5d115b90-ff52-4e17-ab70-d259efe5a183
 ### MCP Integration
 Model Context Protocol integration enabling external applications like Amazon Quick Suite to access IDP data.
 
-**Duration**: ~3 minutes
 
+#### Demo with Quick Suite
+**Duration**: ~3 minutes
 https://github.com/user-attachments/assets/529ce6ad-1062-4af5-97c1-86c3a47ac12c
+
+#### Demo with Cline 
+**Duration**: ~5 minutes
+https://github.com/user-attachments/assets/28d3a358-7aec-4c40-9081-ad4683d2a89f
+
 
 **Related Documentation**: [MCP Server Documentation](./mcp-server.md)
 
