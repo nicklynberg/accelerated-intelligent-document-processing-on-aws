@@ -2,6 +2,7 @@
 # To customize, use "Save as Version" in the UI to create an editable copy.
 managed: true
 test_set: "OmniAI-OCR-Benchmark"
+description: "Managed config for OmniAI-OCR-Benchmark test set"
 notes: Pattern-2 default configuration - Bedrock LLM-based processing
 classes:
 - $schema: https://json-schema.org/draft/2020-12/schema

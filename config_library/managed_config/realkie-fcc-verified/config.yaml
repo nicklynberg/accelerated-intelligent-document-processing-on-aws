@@ -2,6 +2,7 @@
 # To customize, use "Save as Version" in the UI to create an editable copy.
 managed: true
 test_set: "RealKIE-FCC-Verified"
+description: "Managed config for RealKIE-FCC-Verified test set"
 
 use_bda: false
 

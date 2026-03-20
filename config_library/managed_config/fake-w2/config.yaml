@@ -2,6 +2,7 @@
 # To customize, use "Save as Version" in the UI to create an editable copy.
 managed: true
 test_set: "Fake-W2-Tax-Forms"
+description: "Managed config for Fake-W2-Tax-Forms test set"
 notes: >-
   Fake W-2 Tax Form configuration for evaluating extraction accuracy on synthetic
   US W-2 tax documents. Uses 45 flat ground truth fields matching standard W-2 boxes.

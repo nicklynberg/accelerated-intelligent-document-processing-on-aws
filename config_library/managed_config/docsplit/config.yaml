@@ -2,6 +2,7 @@
 # To customize, use "Save as Version" in the UI to create an editable copy.
 managed: true
 test_set: "DocSplit-Poly-Seq"
+description: "Managed config for DocSplit-Poly-Seq test set"
 
 use_bda: false
 
