@@ -19,8 +19,15 @@ The MCP integration exposes IDP capabilities to external applications by:
 - **Real-time Queries**: Enables external applications to query document processing results in real-time
 - **Extensible Architecture**: Designed to support additional IDP functionality in future releases
 
-
+#### Demo with Quick Suite
 https://github.com/user-attachments/assets/529ce6ad-1062-4af5-97c1-86c3a47ac12c
+
+#### Demo with Cline 
+
+
+
+https://github.com/user-attachments/assets/28d3a358-7aec-4c40-9081-ad4683d2a89f
+
 
 
 ## External Application Integration
