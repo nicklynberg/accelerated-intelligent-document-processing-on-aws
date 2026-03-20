@@ -2225,7 +2225,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
                       !hasUnsavedChanges ||
                       validationErrors.length > 0 ||
                       currentVersionName === 'default' ||
-                      mergedConfig?.managed === true
+                      currentVersion?.managed === true
                     }
                   >
                     Save changes
@@ -2250,7 +2250,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
             </Alert>
           )}
 
-          {mergedConfig?.managed === true && (
+          {currentVersion?.managed === true && (
             <Alert type="info" header="Stack-managed configuration">
               This configuration is managed by the stack and will be overwritten on updates. Use &quot;Save as Version&quot; to create an
               editable copy.
