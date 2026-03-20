@@ -327,7 +327,7 @@ const ComprehensiveBreakdown = ({
                     <span style={{ display: 'inline-block', width: '16px', flexShrink: 0 }}>
                       {item.hasChildren ? (item.isExpanded ? '▼' : '▶') : ''}
                     </span>
-                    {item.fieldName.split('.').pop()}
+                    {item.fieldName}
                   </span>
                 );
               },
