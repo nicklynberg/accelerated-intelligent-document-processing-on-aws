@@ -50,14 +50,16 @@ def handler(event, context):
         args = event.get('arguments', {})
         start_date_time = args.get('startDateTime')
         end_date_time = args.get('endDateTime')
-        time_period_hours = args.get('timePeriodHours', 2)  # Default 2 hours
+        time_period_hours = args.get('timePeriodHours', 2)
         
         if start_date_time and end_date_time:
-            logger.info(f"Processing getTestRuns request with date range: {start_date_time} → {end_date_time}")
-            return get_test_runs_by_date_range(start_date_time, end_date_time)
+            start_iso, end_iso = start_date_time, end_date_time
         else:
-            logger.info(f"Processing getTestRuns request with timePeriodHours: {time_period_hours}")
-            return get_test_runs(time_period_hours)
+            end_iso = datetime.utcnow().isoformat() + 'Z'
+            start_iso = (datetime.utcnow() - timedelta(hours=time_period_hours)).isoformat() + 'Z'
+        
+        logger.info(f"Processing getTestRuns request: {start_iso} → {end_iso}")
+        return get_test_runs(start_iso, end_iso)
     elif field_name == 'getTestRun':
         test_run_id = event['arguments']['testRunId']
         logger.info(f"Processing getTestRun request for test run: {test_run_id}")
@@ -320,124 +322,42 @@ def _query_test_runs_from_gsi(table, start_iso, end_iso):
     return items
 
 
-def get_test_runs_by_date_range(start_date_time, end_date_time):
-    """Get list of test runs within a specific date range (startDateTime to endDateTime)"""
-    table = dynamodb.Table(os.environ['TRACKING_TABLE'])
-    
-    logger.info(f"Fetching test runs between: {start_date_time} and {end_date_time}")
-    
-    items = _query_test_runs_from_gsi(table, start_date_time, end_date_time)
-    
-    logger.info(f"Test runs found: {len(items)}")
-    
+def _build_test_run_list(items):
+    """Build sorted test run list from raw DynamoDB items."""
     test_runs = []
+
     for item in items:
-        # If completedAt is missing, call get_test_run_status to update it
-        status_result = None
-        if not item.get('CompletedAt'):
-            status_result = get_test_run_status(item['TestRunId'])
-            # Refresh item from database to get updated CompletedAt
-            updated_response = table.get_item(
-                Key={'PK': f'testrun#{item["TestRunId"]}', 'SK': 'metadata'}
-            )
-            if 'Item' in updated_response:
-                item = updated_response['Item']
-        
-        # Show EVALUATING if metrics not yet cached
-        display_status = status_result.get('status') if status_result else item.get('Status')
+        display_status = item.get('Status')
         if display_status in ['COMPLETE', 'PARTIAL_COMPLETE'] and not item.get('testRunResult'):
             display_status = 'EVALUATING'
-        
+
         test_runs.append({
             'testRunId': item['TestRunId'],
             'testSetId': item.get('TestSetId'),
             'testSetName': item.get('TestSetName'),
             'status': display_status,
             'filesCount': item.get('FilesCount', 0),
-            'completedFiles': status_result.get('completedFiles') if status_result else item.get('CompletedFiles', 0),
-            'failedFiles': status_result.get('failedFiles') if status_result else item.get('FailedFiles', 0),
-            'createdAt': _format_datetime(item.get('CreatedAt')),
-            'completedAt': _format_datetime(item.get('CompletedAt')),
-            'context': item.get('Context')
-        })
-    
-    # Sort by createdAt descending (most recent first)
-    def sort_key(test_run):
-        created_at = test_run.get('createdAt')
-        if not created_at:
-            return '1970-01-01T00:00:00Z'
-        return created_at
-    
-    test_runs.sort(key=sort_key, reverse=True)
-    
-    return test_runs
-
-
-def get_test_runs(time_period_hours=2):
-    """Get list of test runs within specified time period"""
-    table = dynamodb.Table(os.environ['TRACKING_TABLE'])  # type: ignore[attr-defined]  # type: ignore[attr-defined]
-    
-    # Validate and sanitize time_period_hours
-    if time_period_hours is None or not isinstance(time_period_hours, (int, float)):
-        time_period_hours = 2  # Default to 2 hours
-    
-    # Calculate cutoff time
-    cutoff_time = datetime.utcnow() - timedelta(hours=time_period_hours)
-    cutoff_iso = cutoff_time.isoformat() + 'Z'
-    
-    logger.info(f"Fetching test runs created after: {cutoff_iso}")
-    logger.info(f"Current UTC time: {datetime.utcnow().isoformat()}Z")
-    logger.info(f"Time period hours: {time_period_hours}")
-    
-    # Use GSI query instead of full table scan
-    end_iso = datetime.utcnow().isoformat() + 'Z'
-    items = _query_test_runs_from_gsi(table, cutoff_iso, end_iso)
-    
-    logger.info(f"Test runs found: {len(items)}")
-    
-    test_runs = []
-    for item in items:
-        # If completedAt is missing, call get_test_run_status to update it
-        status_result = None
-        if not item.get('CompletedAt'):
-            status_result = get_test_run_status(item['TestRunId'])
-            # Refresh item from database to get updated CompletedAt
-            updated_response = table.get_item(
-                Key={'PK': f'testrun#{item["TestRunId"]}', 'SK': 'metadata'}
-            )
-            if 'Item' in updated_response:
-                item = updated_response['Item']
-        
-        # Show EVALUATING if metrics not yet cached
-        display_status = status_result.get('status') if status_result else item.get('Status')
-        if display_status in ['COMPLETE', 'PARTIAL_COMPLETE'] and not item.get('testRunResult'):
-            display_status = 'EVALUATING'
-        
-        test_runs.append({
-            'testRunId': item['TestRunId'],
-            'testSetId': item.get('TestSetId'),
-            'testSetName': item.get('TestSetName'),
-            'status': display_status,
-            'filesCount': item.get('FilesCount', 0),
-            'completedFiles': status_result.get('completedFiles') if status_result else item.get('CompletedFiles', 0),
-            'failedFiles': status_result.get('failedFiles') if status_result else item.get('FailedFiles', 0),
+            'completedFiles': item.get('CompletedFiles', 0),
+            'failedFiles': item.get('FailedFiles', 0),
             'createdAt': _format_datetime(item.get('CreatedAt')),
             'completedAt': _format_datetime(item.get('CompletedAt')),
             'context': item.get('Context'),
             'configVersion': item.get('ConfigVersion')
         })
-    
-    # Sort by createdAt descending (most recent first)
-    # Handle None values and convert to datetime for proper sorting
-    def sort_key(test_run):
-        created_at = test_run.get('createdAt')
-        if not created_at:
-            return '1970-01-01T00:00:00Z'  # Very old date for None values
-        return created_at
-    
-    test_runs.sort(key=sort_key, reverse=True)
-    
+
+    test_runs.sort(key=lambda r: r.get('createdAt') or '1970-01-01T00:00:00Z', reverse=True)
     return test_runs
+
+
+def get_test_runs(start_iso, end_iso):
+    """Get list of test runs within a date range"""
+    table = dynamodb.Table(os.environ['TRACKING_TABLE'])  # type: ignore[attr-defined]
+
+    logger.info(f"Fetching test runs between: {start_iso} and {end_iso}")
+    items = _query_test_runs_from_gsi(table, start_iso, end_iso)
+    logger.info(f"Test runs found: {len(items)}")
+
+    return _build_test_run_list(items)
 
 def _calculate_completed_at(test_run_id, files, table):
     """Calculate completedAt timestamp from document CompletionTime"""
