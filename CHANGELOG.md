@@ -6,6 +6,8 @@ SPDX-License-Identifier: MIT-0
 ## [Unreleased]
 ### Added
 
+- **`make help` target** — Added `make help` with categorized, auto-generated descriptions for all 33 Makefile targets; updated CONTRIBUTING.md to match.
+
 - **Test Studio Field-Level Metrics** — Test results now display per-field extraction performance in an interactive table showing Field Name, Accuracy, Precision, Recall, TP, FP, TN, FN. Metrics are searchable, sortable, and paginated in an expandable section. Enables identification of low-performing fields and tracking improvements after configuration changes.
 
 - **Stickler Bulk Aggregation for Test Studio** — Test Studio now uses Stickler's `BulkStructuredModelEvaluator` with `aggregate_from_comparisons()` for accurate metric aggregation across multiple documents. Each document is evaluated with `include_confusion_matrix=True`, results are stored in S3, and aggregated when viewing test results. Eliminates Athena queries for new data, improving accuracy, consistency, and cost-effectiveness.
