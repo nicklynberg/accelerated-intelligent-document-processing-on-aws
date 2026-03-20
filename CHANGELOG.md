@@ -4,15 +4,49 @@ SPDX-License-Identifier: MIT-0
 # Changelog
 
 ## [Unreleased]
+
+## [0.5.3]
+
 ### Added
+
+- **Discovery UX Enhancements** — Major improvements to the Discovery experience:
+  - **Multi-Section Package Discovery** — New "Multi-Section Package" discovery mode with PDF page thumbnail preview, color-coded page ranges, and parallel job creation. Users define page ranges to discover multiple classes from a single PDF. Each range creates an independent discovery job.
+  - **✨ AI Auto-Detect Sections** — "Auto-detect sections" button uses a configurable LLM prompt (`discovery.auto_split`) to automatically identify document boundaries and pre-fill page ranges with document type labels.
+  - **Discovery Mode Selector** — Tile-based mode choice between "Single Section Document" (with optional ground truth) and "Multi-Section Package" (with page ranges). Ground truth and page ranges are mutually exclusive.
+  - **Class Name Hints** — Document type labels (from auto-detect or manual entry) are passed as class name hints to guide the discovery LLM's `$id` and `x-aws-idp-document-type` output.
+  - **Real-time Job Monitoring** — Live progress messages, elapsed time counters, phased upload status ("Creating jobs..." → "Uploading..." → "Refreshing..."), discovered class name badges, and expandable error details with user-friendly messages.
+  - **Jobs Table UX** — Search/filter, time range selector, pagination, resizable columns, column preferences, multi-select delete, config version hyperlinks, and page range badges on multi-section jobs.
+  - **S3 Upload Race Condition Fix** — Replaced hardcoded `time.sleep(30)` with smart S3 polling using exponential backoff (2s–10s, 60s timeout).
+  - **New GraphQL APIs** — `autoDetectSections` mutation, `pageRanges`/`pageLabels` on `uploadDiscoveryDocument`, `pageRange`/`discoveredClassName`/`statusMessage` on job types, `deleteDiscoveryJob` mutation.
+
+- **Discovery CLI & SDK Enhancements** — New capabilities in `idp-cli discover` and `client.discovery` that bring parity with the Web UI's Discovery features:
+  - **Class Name Hints** — `--class-hint` (CLI) / `class_name_hint=` (SDK) to pre-label discovered classes, guiding the LLM's `$id` output.
+  - **Multi-Section Page Ranges** — `--page-range "1-3" --page-label "W2 Form"` (CLI, repeatable) / `discovery.run_multi_section(page_ranges=[...])` (SDK) to discover multiple document classes from a single multi-page PDF.
+  - **AI Auto-Detect Sections** — `--auto-detect` / `--detect-only` (CLI) / `discovery.auto_detect_sections()` (SDK) to automatically identify document section boundaries using LLM analysis, then optionally discover each section.
+  - **BDA Sync Command** — New `idp-cli config-sync-bda` command and `client.config.sync_bda()` SDK method for explicit bidirectional synchronization between IDP configuration classes and BDA blueprints. Supports `--direction` (bidirectional, bda-to-idp, idp-to-bda) and `--mode` (replace, merge).
+  - **New Models** — `AutoDetectResult`, `AutoDetectSection`, `ConfigSyncBdaResult`, `page_range` field on `DiscoveryResult`.
+
+- **IDP SDK & CLI Overhaul** — Major refactoring of the SDK and CLI for a cleaner, more maintainable architecture:
+  - **`IDPClient` entry point** — Single public interface with typed namespace access (`client.batch`, `client.stack`, `client.config`, `client.manifest`, `client.testing`). CLI commands now route through `IDPClient` instead of importing internal modules, ensuring consistent behavior across CLI, Web UI, and programmatic access.
+  - **Typed return models** — SDK operations return Pydantic models instead of raw dictionaries, enabling IDE auto-complete and type checking.
+  - **Enhanced config validation** — Manifest and config validation reports deprecated/unknown fields; config upload detects whether a version exists and handles creation vs. update correctly.
+  - **Enhanced stack operations** — Deploy and delete commands support in-progress detection, live monitoring, cancel-update, and failure analysis.
+  - **Private API boundaries** — Internal modules renamed from `core/` to `_core/` with lint rules enforcing the boundary.
+
+- **IDP MCP Connector** — Local package that bridges coding assistants like Cline and Kiro to the IDP MCP Server with automatic Cognito authentication and dynamic tool discovery.
+
+- **ALB+S3 VPC Hosting Mode** — Alternative web UI hosting using Application Load Balancer with S3 VPC Interface Endpoint for environments that require VPC-based hosting (private networks, regulated environments, corporate networks without internet-facing CDN access). ([#245](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/245))
+  - New `WebUIHosting` parameter (`CloudFront` | `ALB`) with conditional resource creation — CloudFront and ALB resources are mutually exclusive
+  - ALB hosting nested stack (`nested/alb-hosting/template.yaml`) with ALB, S3 Interface VPC Endpoint, security groups, custom resource Lambdas for VPC CIDR lookup and target registration
+  - TLS 1.3 enforcement, access logging, scoped VPC endpoint policy (`s3:GetObject`/`s3:ListBucket` only), and multi-CIDR security group ingress management
+  - Self-signed certificate generation script (`scripts/generate_self_signed_cert.sh`) for demo/testing
+  - New documentation: `docs/alb-hosting.md` — prerequisites, deployment steps, security considerations, troubleshooting, CloudFront vs ALB comparison
 
 - **`make help` target** — Added `make help` with categorized, auto-generated descriptions for all 33 Makefile targets; updated CONTRIBUTING.md to match.
 
 - **Test Studio Field-Level Metrics** — Test results now display per-field extraction performance in an interactive table showing Field Name, Accuracy, Precision, Recall, TP, FP, TN, FN. Metrics are searchable, sortable, and paginated in an expandable section. Enables identification of low-performing fields and tracking improvements after configuration changes.
 
 - **Stickler Bulk Aggregation for Test Studio** — Test Studio now uses Stickler's `BulkStructuredModelEvaluator` with `aggregate_from_comparisons()` for accurate metric aggregation across multiple documents. Each document is evaluated with `include_confusion_matrix=True`, results are stored in S3, and aggregated when viewing test results. Eliminates Athena queries for new data, improving accuracy, consistency, and cost-effectiveness.
-
-### Added
 
 - **RBAC Security Hardening** — Comprehensive audit and hardening of GraphQL API authorization against the documented RBAC permission matrix:
   - **Query-level `@aws_auth` directives** — Added server-side role enforcement to 20+ GraphQL queries that were previously open to all authenticated users. Configuration, pricing, capacity, discovery, test studio, config library, and agent query system queries now enforce role restrictions at the AppSync schema level (e.g., Reviewer cannot access configuration, discovery, test studio, or pricing queries).
@@ -25,39 +59,6 @@ SPDX-License-Identifier: MIT-0
 - **Managed Configuration Versions** — Pre-deployed test sets now have dedicated stack-managed config versions (`managed: true`) that are automatically created and overwritten on stack updates. Save and delete are disabled for managed versions in the UI and API. Test Studio auto-selects the matching config version when a test set is selected, replacing the hardcoded mapping.
 
 - **Removed older Claude models** from Configuration UI picklists (3.x, 4.0, 4.1). Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4.5, and Opus 4.6 are available for selection in the UI. Existing configurations using older versions still work.
-
-- **Discovery UX Enhancements** — Major improvements to the Discovery experience:
-  - **Multi-Section Package Discovery** — New "Multi-Section Package" discovery mode with PDF page thumbnail preview, color-coded page ranges, and parallel job creation. Users define page ranges to discover multiple classes from a single PDF. Each range creates an independent discovery job.
-  - **✨ AI Auto-Detect Sections** — "Auto-detect sections" button uses a configurable LLM prompt (`discovery.auto_split`) to automatically identify document boundaries and pre-fill page ranges with document type labels.
-  - **Discovery Mode Selector** — Tile-based mode choice between "Single Section Document" (with optional ground truth) and "Multi-Section Package" (with page ranges). Ground truth and page ranges are mutually exclusive.
-  - **Class Name Hints** — Document type labels (from auto-detect or manual entry) are passed as class name hints to guide the discovery LLM's `$id` and `x-aws-idp-document-type` output.
-  - **Real-time Job Monitoring** — Live progress messages, elapsed time counters, phased upload status ("Creating jobs..." → "Uploading..." → "Refreshing..."), discovered class name badges, and expandable error details with user-friendly messages.
-  - **Jobs Table UX** — Search/filter, time range selector, pagination, resizable columns, column preferences, multi-select delete, config version hyperlinks, and page range badges on multi-section jobs.
-  - **S3 Upload Race Condition Fix** — Replaced hardcoded `time.sleep(30)` with smart S3 polling using exponential backoff (2s–10s, 60s timeout).
-  - **New GraphQL APIs** — `autoDetectSections` mutation, `pageRanges`/`pageLabels` on `uploadDiscoveryDocument`, `pageRange`/`discoveredClassName`/`statusMessage` on job types, `deleteDiscoveryJob` mutation.
-
-- **IDP SDK & CLI Overhaul** — Major refactoring of the SDK and CLI for a cleaner, more maintainable architecture:
-  - **`IDPClient` entry point** — Single public interface with typed namespace access (`client.batch`, `client.stack`, `client.config`, `client.manifest`, `client.testing`). CLI commands now route through `IDPClient` instead of importing internal modules, ensuring consistent behavior across CLI, Web UI, and programmatic access.
-  - **Typed return models** — SDK operations return Pydantic models instead of raw dictionaries, enabling IDE auto-complete and type checking.
-  - **Enhanced config validation** — Manifest and config validation reports deprecated/unknown fields; config upload detects whether a version exists and handles creation vs. update correctly.
-  - **Enhanced stack operations** — Deploy and delete commands support in-progress detection, live monitoring, cancel-update, and failure analysis.
-  - **Private API boundaries** — Internal modules renamed from `core/` to `_core/` with lint rules enforcing the boundary.
-
-- **Discovery CLI & SDK Enhancements** — New capabilities in `idp-cli discover` and `client.discovery` that bring parity with the Web UI's Discovery features:
-  - **Class Name Hints** — `--class-hint` (CLI) / `class_name_hint=` (SDK) to pre-label discovered classes, guiding the LLM's `$id` output.
-  - **Multi-Section Page Ranges** — `--page-range "1-3" --page-label "W2 Form"` (CLI, repeatable) / `discovery.run_multi_section(page_ranges=[...])` (SDK) to discover multiple document classes from a single multi-page PDF.
-  - **AI Auto-Detect Sections** — `--auto-detect` / `--detect-only` (CLI) / `discovery.auto_detect_sections()` (SDK) to automatically identify document section boundaries using LLM analysis, then optionally discover each section.
-  - **BDA Sync Command** — New `idp-cli config-sync-bda` command and `client.config.sync_bda()` SDK method for explicit bidirectional synchronization between IDP configuration classes and BDA blueprints. Supports `--direction` (bidirectional, bda-to-idp, idp-to-bda) and `--mode` (replace, merge).
-  - **New Models** — `AutoDetectResult`, `AutoDetectSection`, `ConfigSyncBdaResult`, `page_range` field on `DiscoveryResult`.
-
-- **IDP MCP Connector** — Local package that bridges coding assistants like Cline and Kiro to the IDP MCP Server with automatic Cognito authentication and dynamic tool discovery.
-
-- **ALB+S3 VPC Hosting Mode** — Alternative web UI hosting using Application Load Balancer with S3 VPC Interface Endpoint for environments that require VPC-based hosting (private networks, regulated environments, corporate networks without internet-facing CDN access). ([#245](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/245))
-  - New `WebUIHosting` parameter (`CloudFront` | `ALB`) with conditional resource creation — CloudFront and ALB resources are mutually exclusive
-  - ALB hosting nested stack (`nested/alb-hosting/template.yaml`) with ALB, S3 Interface VPC Endpoint, security groups, custom resource Lambdas for VPC CIDR lookup and target registration
-  - TLS 1.3 enforcement, access logging, scoped VPC endpoint policy (`s3:GetObject`/`s3:ListBucket` only), and multi-CIDR security group ingress management
-  - Self-signed certificate generation script (`scripts/generate_self_signed_cert.sh`) for demo/testing
-  - New documentation: `docs/alb-hosting.md` — prerequisites, deployment steps, security considerations, troubleshooting, CloudFront vs ALB comparison
 
 ### Changed
 
@@ -77,23 +78,20 @@ SPDX-License-Identifier: MIT-0
 ### Fixed
 
 - **Page images broken for document IDs containing parentheses** — Fixed issue where document page thumbnails and Visual Document Editor images failed to load (showing "Image load error") when the document ID contained parentheses (e.g., `lending_package(1).pdf`). Root cause: JavaScript's `encodeURIComponent()` does not encode `(`, `)`, `!`, `'`, `*` but AWS S3 SigV4 requires them to be percent-encoded in the canonical URI, causing signature mismatches. Added S3-safe URI encoding in `generate-s3-presigned-url.ts`.
-
 - **"View Rule Validation Summary" button not appearing in real-time** — Fixed two-part bug: (1) State machine `ResultPath` for rule validation steps wrote to `$.RuleValidationOrchestrationResult` instead of `$.Result`, so downstream steps lost the `rule_validation_result`. (2) `RuleValidationResultUri` was missing from `UPDATE_DOCUMENT` and `GET_DOCUMENT` GraphQL selection sets in `mutations.py`, so AppSync subscriptions never delivered the field to the UI. Button appeared only after page refresh.
-
 - **Fillable PDF form fields missing from rendered page images** — Fixed bug where fillable PDF form fields (text inputs, checkboxes, radio buttons, dropdowns) were not rendered in page images, causing OCR and extraction to miss user-entered data. Two-part fix: (1) `PdfDocument.init_forms()` initializes the form rendering engine so PDFium can process form fields, and (2) `page.flatten()` merges form field appearances into page content before rendering — required because many fillable PDFs (especially government forms) lack pre-generated appearance streams. Applied in both Pattern 2 (`OcrService`) and Pattern 1 (`create_pdf_page_images`) PDF rendering pipelines. ([#240](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/240))
-
 - **Discovery subscription handler dropping errorMessage and other fields** — Fixed bug where the UI subscription handler did `{ ...oldJob, status: updatedJob.status }`, discarding all fields except status from real-time subscription updates. Error messages, discovered class names, and status messages were being sent by the backend but silently dropped by the UI. Now spreads all fields: `{ ...oldJob, ...updatedJob }`.
-
 - **Discovery processor S3 race condition causing NoSuchKey failures** — The discovery upload resolver sends the SQS message before the browser finishes uploading the file to S3 via presigned POST. Previously worked around with a hardcoded `time.sleep(30)`. Replaced with `_wait_for_s3_object()` that polls S3 with exponential backoff (2s initial, 10s max, 60s timeout), proceeding as soon as the file appears.
-
 - **CLI `--parameters` parsing for comma-delimited values** — Fixed `idp-cli deploy --parameters` to handle values containing commas (e.g., `ALBSubnetIds=subnet-a,subnet-b`). Previously the naive `split(",")` broke multi-value parameters. ([#245](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/pull/245))
-
 - **GovCloud template: fix unresolved RBAC resource dependencies** — Added `AuthorGroup`, `ViewerGroup`, `GetMyProfileResolver`, and `UpdateUserResolver` to GovCloud removal lists so they are stripped alongside the `UserPool` they depend on.
-
 - **Document status and sections not updating in real-time during processing** — Fixed regression from RBAC commit where `updateDocumentStatus` subscription events (used during Map state steps: Extraction, Assessment, Rule Validation) were silently discarded because they lacked `InitialEventTime`/`QueuedTime` fields, causing `isDocumentInActiveRange` to reject them. Also fixed: stale sections/pages not clearing immediately on full reprocess, sections appearing duplicated or out of order during parallel Map execution (null-protection merge + client-side sort by page ID).
 - **Fix race condition in `idp-cli generate-manifest --test-set`** — Added `.uploading` marker file protocol to prevent the test set resolver from prematurely validating test sets while the CLI is still uploading baseline files ([#193](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/193)).
-
 - **Test Fixes** — Updated CLI test mocks to align with the new `IDPClient`-based implementation, fixing broken test fixtures that referenced removed internal imports.
+
+### Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.0.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.0.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.0.yaml`
 
 
 ## [0.5.2]
