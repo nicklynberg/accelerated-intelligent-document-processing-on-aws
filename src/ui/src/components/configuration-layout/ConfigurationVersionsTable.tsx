@@ -81,16 +81,19 @@ const ConfigurationVersionsTable = ({
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
 
+  // Helper: treat both managed flag and 'default' version as managed
+  const isVersionManaged = (v: ConfigVersion): boolean => v.managed === true || v.versionName === 'default';
+
   // Filter versions by type (managed/custom) before passing to useCollection
   const filteredByType = useMemo(() => {
     if (typeFilter === 'all') return versions;
-    if (typeFilter === 'managed') return versions.filter((v) => v.managed === true);
-    return versions.filter((v) => !v.managed);
+    if (typeFilter === 'managed') return versions.filter((v) => isVersionManaged(v));
+    return versions.filter((v) => !isVersionManaged(v));
   }, [versions, typeFilter]);
 
   // Compute type counts for the segmented control labels
-  const managedCount = useMemo(() => versions.filter((v) => v.managed === true).length, [versions]);
-  const customCount = useMemo(() => versions.filter((v) => !v.managed).length, [versions]);
+  const managedCount = useMemo(() => versions.filter((v) => isVersionManaged(v)).length, [versions]);
+  const customCount = useMemo(() => versions.filter((v) => !isVersionManaged(v)).length, [versions]);
 
   const allColumnDefinitions = [
     {
@@ -152,13 +155,13 @@ const ConfigurationVersionsTable = ({
       header: 'Type',
       cell: (item: ConfigVersion) => (
         <SpaceBetween direction="horizontal" size="xxs">
-          {item.managed ? <Badge color="blue">Managed</Badge> : <Badge color="grey">Custom</Badge>}
+          {isVersionManaged(item) ? <Badge color="blue">Managed</Badge> : <Badge color="grey">Custom</Badge>}
           {item.isActive && <Badge color="green">Active</Badge>}
         </SpaceBetween>
       ),
       sortingComparator: (a: ConfigVersion, b: ConfigVersion) => {
-        const aType = a.managed ? 'managed' : 'custom';
-        const bType = b.managed ? 'managed' : 'custom';
+        const aType = isVersionManaged(a) ? 'managed' : 'custom';
+        const bType = isVersionManaged(b) ? 'managed' : 'custom';
         return aType.localeCompare(bType);
       },
       width: 160,
