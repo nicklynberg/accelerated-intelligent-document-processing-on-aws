@@ -105,7 +105,12 @@ class GovCloudTemplateGenerator:
             'AgentCoreGatewayManagerLogGroup',
             'AgentCoreGatewayExecutionRole',
             'AgentCoreGateway',
-            'ExternalAppClient'
+            'ExternalAppClient',
+            'AgentCoreMCPHandlerFunction',
+            'AgentCoreMCPHandlerLogGroup',
+            # MCP Connector Cognito resources (depend on UserPool which is removed)
+            'MCPConnectorClient',
+            'MCPResourceServer'
         }
         
         self.hitl_resources = {
@@ -189,7 +194,11 @@ class GovCloudTemplateGenerator:
             'MCPTokenURL',
             'MCPAuthorizationURL',
             'DynamoDBAgentTableName',
-            'DynamoDBAgentTableConsoleURL'
+            'DynamoDBAgentTableConsoleURL',
+            'ExternalMCPAgentsSecretConsoleURL',
+            # MCP Connector outputs (depend on removed MCPConnectorClient/UserPool)
+            'MCPConnectorClientId',
+            'MCPConnectorClientSecret'
         }
 
     def setup_logging(self):
@@ -772,6 +781,13 @@ class GovCloudTemplateGenerator:
                 
                 # Update policies list
                 func_def['Properties']['Policies'] = cleaned_policies
+        
+        # Clean ALB hosting nested stack parameters - remove WebUIBucket reference (removed resource)
+        if 'ALBHOSTINGSTACK' in resources:
+            alb_stack_params = resources['ALBHOSTINGSTACK'].get('Properties', {}).get('Parameters', {})
+            if 'WebUIBucketName' in alb_stack_params:
+                alb_stack_params['WebUIBucketName'] = ''
+                self.logger.debug("Replaced WebUIBucketName with empty string in ALBHOSTINGSTACK (WebUIBucket removed)")
         
         # Clean nested stack parameters comprehensively (unified pattern stack)
         pattern_stacks = ['PATTERNSTACK']
