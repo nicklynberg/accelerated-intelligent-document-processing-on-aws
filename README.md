@@ -187,6 +187,7 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 - [Assessment](./docs/assessment.md) - Extraction confidence evaluation using LLMs
 - [Rule Validation](./docs/rule-validation.md) - Business rule validation and compliance checking
 - [Evaluation Framework](./docs/evaluation.md) - Accuracy assessment system with analytics database and reporting
+- [MLflow Experiment Tracking](./docs/mlflow-integration.md) - Optional MLflow integration for tracking metrics, model parameters, and prompts across test runs
 - [Knowledge Base](./docs/knowledge-base.md) - Document knowledge base query feature
 - [Monitoring](./docs/monitoring.md) - Monitoring and logging capabilities
 - [IDP Accelerator Help Chat Bot](./docs/code-intelligence.md) - Chat bot for asking question about the IDP code base and features
