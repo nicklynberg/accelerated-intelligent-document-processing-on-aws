@@ -45,6 +45,96 @@ def generate_stack_name():
     return f"idp-{timestamp}"
 
 
+def cleanup_stale_bda_blueprints():
+    """Delete BDA projects, blueprint versions, and blueprints whose stacks are no longer active"""
+    print("🧹 Cleaning up stale BDA blueprints...")
+    try:
+        bda_client = boto3.client('bedrock-data-automation')
+        cf_client = boto3.client('cloudformation')
+
+        active_statuses = {
+            'CREATE_IN_PROGRESS', 'CREATE_COMPLETE',
+            'UPDATE_IN_PROGRESS', 'UPDATE_COMPLETE',
+            'UPDATE_ROLLBACK_COMPLETE', 'UPDATE_ROLLBACK_IN_PROGRESS',
+            'IMPORT_IN_PROGRESS', 'IMPORT_COMPLETE',
+        }
+
+        # Collect all idp- blueprints and projects
+        paginator = bda_client.get_paginator('list_blueprints')
+        blueprints = []
+        for page in paginator.paginate(blueprintStageFilter='LIVE'):
+            for bp in page.get('blueprints', []):
+                name = bp.get('blueprintName', '')
+                arn = bp.get('blueprintArn', '')
+                if name.startswith('idp-') and 'aws:blueprint' not in arn:
+                    blueprints.append((name, arn))
+
+        projects = []
+        for p in bda_client.list_data_automation_projects().get('projects', []):
+            name = p.get('projectName', '')
+            arn = p.get('projectArn', '')
+            if name.startswith('idp-'):
+                projects.append((name, arn))
+
+        if not blueprints and not projects:
+            print("✅ No stale BDA resources found")
+            return
+
+        # Check stack status for each unique stack prefix
+        stack_cache = {}
+        for name, _ in blueprints + projects:
+            parts = name.split('-')
+            if len(parts) >= 3:
+                prefix = f"{parts[0]}-{parts[1]}-{parts[2]}"
+                if prefix not in stack_cache:
+                    try:
+                        resp = cf_client.describe_stacks(StackName=prefix)
+                        status = resp['Stacks'][0]['StackStatus']
+                        stack_cache[prefix] = status in active_statuses
+                    except cf_client.exceptions.ClientError:
+                        stack_cache[prefix] = False
+
+        def _is_stale(name):
+            parts = name.split('-')
+            if len(parts) >= 3:
+                return not stack_cache.get(f"{parts[0]}-{parts[1]}-{parts[2]}", False)
+            return False
+
+        # Step 1: Delete projects first (blueprints are referenced by projects)
+        deleted_projects = 0
+        for name, arn in projects:
+            if _is_stale(name):
+                try:
+                    bda_client.delete_data_automation_project(projectArn=arn)
+                    deleted_projects += 1
+                except Exception as e:
+                    print(f"  ⚠️ Failed to delete project {name}: {e}")
+                    time.sleep(1)
+
+        if deleted_projects:
+            time.sleep(5)
+
+        # Step 2: Delete blueprint versions then base blueprints
+        deleted_bps = 0
+        for name, arn in blueprints:
+            if _is_stale(name):
+                try:
+                    try:
+                        bda_client.delete_blueprint(blueprintArn=arn, blueprintVersion='1')
+                    except Exception:
+                        pass
+                    time.sleep(0.3)
+                    bda_client.delete_blueprint(blueprintArn=arn)
+                    deleted_bps += 1
+                except Exception as e:
+                    print(f"  ⚠️ Failed to delete blueprint {name}: {e}")
+                    time.sleep(0.5)
+
+        print(f"✅ Cleaned up {deleted_projects} projects, {deleted_bps} blueprints (skipped active stacks)")
+    except Exception as e:
+        print(f"⚠️ BDA blueprint cleanup failed: {e}")
+
+
 def publish_templates():
     """Run publish.py to build and upload templates to S3"""
     print("📦 Publishing templates to S3...")
@@ -57,8 +147,8 @@ def publish_templates():
     bucket_basename = f"genaiic-sdlc-sourcecode-{account_id}"
     prefix = f"codebuild-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
-    # Run publish.sh
-    cmd = f"./publish.sh {bucket_basename} {prefix} {region}"
+    # Run idp-cli publish
+    cmd = f"idp-cli publish --source-dir . --bucket-basename {bucket_basename} --prefix {prefix} --region {region}"
     result = run_command(cmd)
 
     # Extract template URL from output - match S3 URLs only
@@ -760,6 +850,9 @@ def main():
     ai_summary = ""
     publish_success = False
     stack_success = False
+
+    # Step 0: Clean up stale BDA blueprints from previous runs
+    cleanup_stale_bda_blueprints()
 
     # Step 1: Publish templates to S3
     try:

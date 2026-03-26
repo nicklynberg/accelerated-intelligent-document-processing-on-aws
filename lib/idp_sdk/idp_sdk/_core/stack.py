@@ -1982,14 +1982,34 @@ class StackDeployer:
             except Exception as e:
                 logger.warning(f"Failed to cleanup IAM custom policies: {e}")
 
-            # Clean up BDA blueprints associated with this stack
+            # Clean up BDA projects and blueprints associated with this stack
             try:
                 bda_client = boto3.client(
                     "bedrock-data-automation", region_name=self.region
                 )
+
+                # Delete BDA projects first (blueprints are referenced by projects)
+                try:
+                    for p in bda_client.list_data_automation_projects().get(
+                        "projects", []
+                    ):
+                        if p.get("projectName", "").startswith(f"{stack_name}-"):
+                            try:
+                                bda_client.delete_data_automation_project(
+                                    projectArn=p["projectArn"]
+                                )
+                                logger.info(f"Deleted BDA project: {p['projectName']}")
+                            except Exception as proj_error:
+                                logger.warning(
+                                    f"Failed to delete BDA project {p['projectName']}: {proj_error}"
+                                )
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup BDA projects: {e}")
+
+                # Delete blueprints (versions first, then base)
                 paginator = bda_client.get_paginator("list_blueprints")
                 deleted_count = 0
-                for page in paginator.paginate(blueprintStage="LIVE"):
+                for page in paginator.paginate(blueprintStageFilter="LIVE"):
                     for blueprint in page.get("blueprints", []):
                         bp_name = blueprint.get("blueprintName", "")
                         bp_arn = blueprint.get("blueprintArn", "")
@@ -1998,6 +2018,12 @@ class StackDeployer:
                             continue
                         if bp_name.startswith(f"{stack_name}-"):
                             try:
+                                try:
+                                    bda_client.delete_blueprint(
+                                        blueprintArn=bp_arn, blueprintVersion="1"
+                                    )
+                                except Exception:
+                                    pass
                                 bda_client.delete_blueprint(blueprintArn=bp_arn)
                                 deleted_count += 1
                                 logger.info(f"Deleted BDA blueprint: {bp_name}")

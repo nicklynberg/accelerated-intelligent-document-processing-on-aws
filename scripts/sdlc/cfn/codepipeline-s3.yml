@@ -307,8 +307,9 @@ Resources:
               runtime-versions:
                 python: 3.12
               commands:
-                - n 22 && node --version || { echo "Node setup failed"; exit 1; }
-                - npm install -g npm@11 || { echo "npm upgrade failed"; exit 1; }
+                - n 22.14.0 && node --version || { echo "Node setup failed"; exit 1; }
+                - npm install -g npm@11 || echo "npm upgrade skipped, using bundled $(npm --version)"
+                - pip install uv || { echo "uv installation failed"; exit 1; }
                 - export IDP_ADMIN_EMAIL=$(aws s3api head-object --bucket ${SOURCE_BUCKET} --key deploy/code.zip --query 'Metadata."gitlab-user-email"' --output text 2>/dev/null || echo "")
                 - make setup || { echo "IDP Common and IDP CLI installation failed"; exit 1; }
                 - pip install rich || echo "Rich installation failed, using fallback formatting"
@@ -425,6 +426,11 @@ Resources:
               - 'bedrock:InvokeModel'
             Resource: 
               - !Sub 'arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0'
+          - Effect: Allow
+            Action:
+              - 'bedrock:ListBlueprints'
+              - 'bedrock:ListDataAutomationProjects'
+            Resource: '*'
           - Effect: Allow
             Action:
               - 'bedrock:CreateBlueprint'

@@ -371,10 +371,7 @@ docs-deploy: docs-build ## Deploy docs to GitHub Pages (from local build)
 
 ##@ Security (DSR)
 dsr: ## Run full DSR workflow (setup → scan → optional fix)
-	@if [ ! -f .dsr/dsr ]; then \
-		echo "DSR not found, running setup..."; \
-		$(MAKE) dsr-setup; \
-	fi
+	@$(MAKE) dsr-setup
 	@$(MAKE) dsr-scan
 	@echo ""
 	@echo "Do you want to run DSR fix? (y/N):"
