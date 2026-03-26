@@ -31,7 +31,7 @@ The GovCloud template supports four deployment configurations. Choose the one th
 ### What Gets Deployed in Each Package
 
 **Vanilla (all packages include this):**
-- Core document processing engine (Pattern 2 only in GovCloud)
+- Core document processing engine (unified pattern with pipeline mode)
 - Step Functions workflows
 - S3 buckets, DynamoDB tables, SQS queues, EventBridge rules
 - CloudWatch dashboards, alarms, SNS notifications
@@ -96,7 +96,6 @@ aws cloudformation deploy \
   --s3-prefix {your-s3-prefix} \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameter-overrides \
-    IDPPattern="Pattern2 - Packet processing with Textract and Bedrock"
 ```
 
 With this deployment, interact with the system via:
@@ -116,7 +115,6 @@ aws cloudformation deploy \
   --s3-prefix {your-s3-prefix} \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameter-overrides \
-    IDPPattern="Pattern2 - Packet processing with Textract and Bedrock" \
     EnableHeadless=true \
     VpcId=vpc-xxxxxxxxx \
     PrivateSubnetIds=subnet-xxxxx,subnet-xxxxx,subnet-xxxxx \
@@ -139,7 +137,6 @@ aws cloudformation deploy \
   --s3-prefix {your-s3-prefix} \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameter-overrides \
-    IDPPattern="Pattern2 - Packet processing with Textract and Bedrock" \
     EnableHeadless=true \
     DeployInVPC=true \
     VpcId=vpc-xxxxxxxxx \
@@ -163,7 +160,6 @@ aws cloudformation deploy \
   --s3-prefix {your-s3-prefix} \
   --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --parameter-overrides \
-    IDPPattern="Pattern2 - Packet processing with Textract and Bedrock" \
     EnableHeadless=true \
     DeployInVPC=true \
     VpcId=vpc-xxxxxxxxx \
