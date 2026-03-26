@@ -158,6 +158,17 @@ Parameters:
     Type: String
     Default: ""
 
+  EnableMLflow:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable MLflow experiment tracking integration
+
+  MlflowTrackingURI:
+    Type: String
+    Default: ""
+    Description: SageMaker MLflow tracking server ARN
+
 Conditions:
   HasGuardrailConfig:
     !And [
@@ -171,6 +182,7 @@ Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasAppSyncApi: !Not [!Equals [!Ref AppSyncApiArn, ""]]
   IsECRImageScanningEnabled: !Equals [!Ref EnableECRImageScanning, "true"]
+  IsMLflowEnabled: !Equals [!Ref EnableMLflow, "true"]
 
 Resources:
 
@@ -2038,6 +2050,7 @@ Resources:
         - "evaluation-function"
         - "rule-validation-function"
         - "rule-validation-orchestration-function"
+        - "mlflow-logger-function"
 
   EcrRepositoryCleanup:
     Type: Custom::ECRRepositoryCleanup
@@ -3478,6 +3491,85 @@ Resources:
       LogGroupName: !Sub "/${AWS::StackName}/lambda/RuleValidationOrchestrationFunction"
       RetentionInDays: !Ref LogRetentionDays
 
+  ##########################################################################
+  # MLflow Logger Function
+  ##########################################################################
+
+  MLflowLoggerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: IsMLflowEnabled
+    Properties:
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/MLflowLoggerFunction"
+      RetentionInDays: !Ref LogRetentionDays
+
+  MLflowLoggerFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsMLflowEnabled
+    DependsOn: DockerBuildRun
+    Metadata:
+      SkipBuild: True
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "CloudWatch does not support resource-level permissions"
+          - id: W89
+            reason: "This Lambda function does not require VPC access as it only interacts with AWS services via AWS APIs"
+          - id: W92
+            reason: "Function does not require concurrent execution limits as it is designed to scale based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for this function as StepFunctions will handle retries"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      PackageType: Image
+      ImageUri: !Sub "${ECRRepository.RepositoryUri}:mlflow-logger-function-${ImageVersion}"
+      Architectures:
+        - arm64
+      ImageConfig:
+        Command:
+          - "index.handler"
+      Timeout: 900
+      MemorySize: 1024
+      Tracing: Active
+      Environment:
+        Variables:
+          MLFLOW_TRACKING_URI: !Ref MlflowTrackingURI
+          METRIC_NAMESPACE: !Ref StackName
+          LOG_LEVEL: !Ref LogLevel
+      LoggingConfig:
+        LogGroup: !Ref MLflowLoggerFunctionLogGroup
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - !Ref LambdaECRAccessPolicy
+        - Statement:
+            - Effect: Allow
+              Action: cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - sagemaker-mlflow:*
+              Resource: !Ref MlflowTrackingURI
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:PutObjectAcl
+              Resource: !Sub "arn:${AWS::Partition}:s3:::sagemaker-${AWS::Region}-${AWS::AccountId}/mlflow-artifacts/*"
+
 
   ##########################################################################
   # Unified Document Processing State Machine
@@ -4340,3 +4432,8 @@ Outputs:
   TestExecutionAggregationFunctionArn:
     Description: ARN of the Test Execution Aggregation Function
     Value: !GetAtt TestExecutionAggregationFunction.Arn
+
+  MLflowLoggerFunctionArn:
+    Condition: IsMLflowEnabled
+    Description: ARN of the MLflow Logger Function
+    Value: !GetAtt MLflowLoggerFunction.Arn

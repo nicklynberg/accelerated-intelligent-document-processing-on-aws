@@ -29,6 +29,11 @@ Parameters:
     Type: String
     Default: ""
     Description: ARN of the TestExecutionAggregationFunction from pattern stack (optional)
+
+  MLflowLoggerFunctionArn:
+    Type: String
+    Default: ""
+    Description: ARN of the MLflowLoggerFunction from pattern stack (optional)
   
   # DynamoDB Tables
   TrackingTableName:
@@ -210,6 +215,7 @@ Conditions:
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
   ShouldCreateReportingBucket: !Equals [!Ref ShouldCreateReportingBucket, "true"]
   HasTestExecutionAggregationFunction: !Not [!Equals [!Ref TestExecutionAggregationFunctionArn, ""]]
+  HasMLflowLoggerFunction: !Not [!Equals [!Ref MLflowLoggerFunctionArn, ""]]
 
 Resources:
 
@@ -2884,6 +2890,7 @@ Resources:
                 - !Ref ReportingBucketName
                 - !Ref ReportingBucketName
           TEST_EXECUTION_AGGREGATION_FUNCTION_ARN: !Ref TestExecutionAggregationFunctionArn
+          MLFLOW_LOGGER_FUNCTION_ARN: !If [HasMLflowLoggerFunction, !Ref MLflowLoggerFunctionArn, ""]
       Events:
         SQSEvent:
           Type: SQS
@@ -2949,6 +2956,14 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: !Ref TestExecutionAggregationFunctionArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasMLflowLoggerFunction
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Ref MLflowLoggerFunctionArn
           - !Ref AWS::NoValue
 
 

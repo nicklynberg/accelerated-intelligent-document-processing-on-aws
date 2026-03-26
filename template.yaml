@@ -151,6 +151,26 @@ Parameters:
     AllowedValues: [ 'true', 'false' ]
     Description: Enable Model Context Protocol (MCP) integration for external application access via AWS Bedrock AgentCore Gateway
 
+  # MLflow Integration
+  EnableMLflow:
+    Type: String
+    Default: 'false'
+    AllowedValues: [ 'true', 'false' ]
+    Description: >-
+      Enable MLflow experiment tracking integration. MLflow is an open-source platform for managing the ML lifecycle,
+      including experiment tracking, metrics logging, and model performance monitoring. When enabled, document processing
+      metrics and model performance data are logged to a SageMaker MLflow tracking server for analysis and comparison.
+
+  MlflowTrackingURI:
+    Type: String
+    Default: ""
+    Description: >-
+      (Required if EnableMLflow is true) SageMaker MLflow tracking server ARN for logging metrics and experiments.
+      Format: arn:<partition>:sagemaker:<region>:<account-id>:mlflow-tracking-server/<server-name>
+      where <partition> is 'aws' for standard regions or 'aws-us-gov' for GovCloud.
+    AllowedPattern: "^(|arn:aws[a-z-]*:sagemaker:[a-z0-9-]+:[0-9]{12}:mlflow-tracking-server/.+)$"
+    ConstraintDescription: Must be empty or a valid SageMaker MLflow tracking server ARN
+
   # Optional Knowledge Base Configuration
   DocumentKnowledgeBase:
     Default: "BEDROCK_KNOWLEDGE_BASE (Create)"
@@ -398,6 +418,13 @@ Parameters:
     AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}(,\s*([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2})*$'
     ConstraintDescription: Must be valid comma-separated list of IPv4 CIDR ranges
 
+Rules:
+  MLflowTrackingURIRequired:
+    RuleCondition: !Equals [ !Ref EnableMLflow, "true" ]
+    Assertions:
+      - Assert: !Not [ !Equals [ !Ref MlflowTrackingURI, "" ] ]
+        AssertDescription: "MlflowTrackingURI is required when EnableMLflow is true"
+
 Conditions:
   HasGuardrailConfig:
     !And [
@@ -428,6 +455,7 @@ Conditions:
   CreateExternalAppClient: !Equals [ !Ref EnableMCP, "true" ]
   UseCloudFrontHosting: !Equals [ !Ref WebUIHosting, "CloudFront" ]
   UseALBHosting: !Equals [ !Ref WebUIHosting, "ALB" ]
+  IsMLflowEnabled: !Equals [ !Ref EnableMLflow, "true" ]
 
 Metadata:
   cfn-lint:
@@ -481,6 +509,11 @@ Metadata:
           default: "MCP Integration"
         Parameters:
           - EnableMCP
+      - Label:
+          default: "MLflow Integration"
+        Parameters:
+          - EnableMLflow
+          - MlflowTrackingURI
       - Label:
           default: "Web UI Hosting"
         Parameters:
@@ -554,6 +587,10 @@ Metadata:
         default: "WAF Allowed IPv4 Ranges"
       EnableMCP:
         default: "Enable MCP Integration"
+      EnableMLflow:
+        default: "Enable MLflow Integration"
+      MlflowTrackingURI:
+        default: "MLflow Tracking Server URI"
       WebUIHosting:
         default: "Web UI Hosting Method"
       ALBVpcId:
@@ -1275,6 +1312,8 @@ Resources:
         CustomExtractionModelARN: !Ref Pattern2CustomExtractionModelARN
         EnableECRImageScanning: !Ref EnableECRImageScanning
         PreviousIDPPattern: !GetAtt PreviousIDPPatternValue.IDPPattern
+        EnableMLflow: !Ref EnableMLflow
+        MlflowTrackingURI: !Ref MlflowTrackingURI
 
   ##########################################################################
   # Encryption key
@@ -1301,6 +1340,10 @@ Resources:
         AgentChatProcessorFunctionArn: !GetAtt AgentChatProcessorFunction.Arn
         AgentProcessorFunctionArn: !GetAtt AgentProcessorFunction.Arn
         TestExecutionAggregationFunctionArn: !GetAtt PATTERNSTACK.Outputs.TestExecutionAggregationFunctionArn
+        MLflowLoggerFunctionArn: !If
+          - IsMLflowEnabled
+          - !GetAtt PATTERNSTACK.Outputs.MLflowLoggerFunctionArn
+          - ""
         
         # DynamoDB Tables
         TrackingTableName: !Ref TrackingTable

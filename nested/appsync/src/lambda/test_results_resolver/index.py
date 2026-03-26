@@ -15,6 +15,42 @@ sqs = boto3.client('sqs')
 athena = boto3.client('athena')
 
 
+lambda_client = boto3.client('lambda')
+
+
+
+def _invoke_mlflow_logger(test_run_id, metrics, config=None):
+    """Asynchronously invoke the MLflow logger function if configured."""
+    mlflow_logger_arn = os.environ.get('MLFLOW_LOGGER_FUNCTION_ARN')
+    if not mlflow_logger_arn:
+        return
+
+    try:
+        payload = {
+            'experiment_name': test_run_id,
+            'metrics': metrics,
+            'params': {
+                'test_run_id': test_run_id,
+            },
+            'tags': {
+                'source': 'test_results_resolver',
+            },
+        }
+
+        if config:
+            payload['config'] = config
+
+        lambda_client.invoke(
+            FunctionName=mlflow_logger_arn,
+            InvocationType='Event',  # async, fire-and-forget
+            Payload=json.dumps(payload, cls=DecimalEncoder),
+        )
+        logger.info(f"Invoked MLflow logger for test run: {test_run_id}")
+    except Exception as e:
+        logger.warning(f"Failed to invoke MLflow logger for {test_run_id}: {e}")
+
+
+
 # Custom JSON encoder to handle Decimal objects from DynamoDB
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -540,13 +576,18 @@ def get_test_run_status(test_run_id):
 def _aggregate_test_run_metrics(test_run_id):
     """Aggregate metrics using Stickler bulk evaluator (with Athena fallback)"""
     
+    # Fetch config for MLflow logging (best-effort, don't block on failure)
+    test_run_config = None
+    try:
+        test_run_config = _get_test_run_config(test_run_id)
+    except Exception as e:
+        logger.warning(f"Failed to fetch config for MLflow logging: {e}")
+
     # Try Stickler-based aggregation via Lambda function
     test_execution_aggregation_arn = os.environ.get('TEST_EXECUTION_AGGREGATION_FUNCTION_ARN')
     
     if test_execution_aggregation_arn:
         try:
-            lambda_client = boto3.client('lambda')
-            
             # Invoke the test execution aggregation function
             response = lambda_client.invoke(
                 FunctionName=test_execution_aggregation_arn,
@@ -571,13 +612,15 @@ def _aggregate_test_run_metrics(test_run_id):
                     cost_data = _get_cost_data_from_athena(test_run_id)
                     
                     # Merge Stickler metrics with Athena split metrics and confidence
-                    return {
+                    merged_metrics = {
                         **stickler_metrics,
                         'average_confidence': athena_metrics.get('average_confidence'),
                         'split_classification_metrics': athena_metrics.get('split_classification_metrics', {}),
                         'total_cost': cost_data.get('total_cost', 0),
                         'cost_breakdown': cost_data.get('cost_breakdown', {})
                     }
+                    _invoke_mlflow_logger(test_run_id, merged_metrics, config=test_run_config)
+                    return merged_metrics
                 else:
                     logger.warning(f"Test execution aggregation returned empty metrics (document_count=0) for {test_run_id}, falling back to Athena")
             else:
@@ -593,7 +636,7 @@ def _aggregate_test_run_metrics(test_run_id):
     evaluation_metrics = _get_evaluation_metrics_from_athena(test_run_id)
     cost_data = _get_cost_data_from_athena(test_run_id)
     
-    return {
+    athena_result = {
         'overall_accuracy': evaluation_metrics.get('overall_accuracy'),
         'weighted_overall_scores': evaluation_metrics.get('weighted_overall_scores', {}),
         'average_confidence': evaluation_metrics.get('average_confidence'),
@@ -602,6 +645,8 @@ def _aggregate_test_run_metrics(test_run_id):
         'total_cost': cost_data.get('total_cost', 0),
         'cost_breakdown': cost_data.get('cost_breakdown', {})
     }
+    _invoke_mlflow_logger(test_run_id, athena_result, config=test_run_config)
+    return athena_result
 
 def _get_test_run_config(test_run_id):
     """Get test run configuration from metadata record"""
