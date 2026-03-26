@@ -20,7 +20,7 @@ from idp_sdk.models import (
     DocumentInfo,
     DocumentListResult,
     DocumentMetadata,
-    DocumentRerunResult,
+    DocumentReprocessResult,
     DocumentStatus,
     DocumentUploadResult,
     RerunStep,
@@ -33,14 +33,14 @@ class DocumentOperation:
     def __init__(self, client):
         self._client = client
 
-    def upload(
+    def process(
         self,
         file_path: str,
         document_id: Optional[str] = None,
         stack_name: Optional[str] = None,
         **kwargs,
     ) -> DocumentUploadResult:
-        """Upload and process a single document.
+        """Process a single document (upload and queue for processing).
 
         Args:
             file_path: Path to local file to upload
@@ -94,8 +94,8 @@ class DocumentOperation:
         Returns:
             DocumentStatus with processing information
         """
-        from idp_sdk.core.batch_processor import BatchProcessor
-        from idp_sdk.core.progress_monitor import ProgressMonitor
+        from idp_sdk._core.batch_processor import BatchProcessor
+        from idp_sdk._core.progress_monitor import ProgressMonitor
 
         name = self._client._require_stack(stack_name)
         processor = BatchProcessor(stack_name=name, region=self._client._region)
@@ -240,25 +240,25 @@ class DocumentOperation:
         except Exception as e:
             raise IDPProcessingError(f"Failed to download source: {e}") from e
 
-    def rerun(
+    def reprocess(
         self,
         document_id: str,
         step: Union[str, RerunStep],
         stack_name: Optional[str] = None,
         **kwargs,
-    ) -> DocumentRerunResult:
-        """Rerun processing for a single document from a specific step.
+    ) -> DocumentReprocessResult:
+        """Reprocess a single document from a specific step.
 
         Args:
             document_id: Document identifier (S3 key)
-            step: Pipeline step to rerun from (e.g., 'classification', 'extraction')
+            step: Pipeline step to reprocess from (e.g., 'classification', 'extraction')
             stack_name: Optional stack name override
             **kwargs: Additional parameters
 
         Returns:
-            DocumentRerunResult with rerun status
+            DocumentReprocessResult with reprocess status
         """
-        from idp_sdk.core.rerun_processor import RerunProcessor
+        from idp_sdk._core.rerun_processor import RerunProcessor
 
         name = self._client._require_stack(stack_name)
         step_str = step.value if isinstance(step, RerunStep) else step
@@ -271,13 +271,35 @@ class DocumentOperation:
 
             queued = result.get("documents_queued", 0) > 0
 
-            return DocumentRerunResult(
+            return DocumentReprocessResult(
                 document_id=document_id,
                 step=RerunStep(step_str),
                 queued=queued,
             )
         except Exception as e:
-            raise IDPProcessingError(f"Rerun failed: {e}") from e
+            raise IDPProcessingError(f"Reprocess failed: {e}") from e
+
+    def rerun(
+        self,
+        document_id: str,
+        step: Union[str, RerunStep],
+        stack_name: Optional[str] = None,
+        **kwargs,
+    ) -> DocumentReprocessResult:
+        """Deprecated: Use reprocess() instead."""
+        import warnings
+
+        warnings.warn(
+            "rerun() is deprecated, use reprocess() instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.reprocess(
+            document_id=document_id,
+            step=step,
+            stack_name=stack_name,
+            **kwargs,
+        )
 
     def delete(
         self,
@@ -363,7 +385,7 @@ class DocumentOperation:
         Returns:
             DocumentListResult with documents and optional next_token
         """
-        from idp_sdk.core.document_processor import DocumentProcessor
+        from idp_sdk._core.document_processor import DocumentProcessor
 
         name = self._client._require_stack(stack_name)
 
@@ -407,7 +429,7 @@ class DocumentOperation:
         Returns:
             DocumentMetadata with extracted fields and metadata
         """
-        from idp_sdk.core.document_processor import DocumentProcessor
+        from idp_sdk._core.document_processor import DocumentProcessor
 
         name = self._client._require_stack(stack_name)
 
