@@ -16,15 +16,28 @@ from .batch import (
     BatchDownloadResult,
     BatchInfo,
     BatchListResult,
+    BatchProcessResult,
+    BatchReprocessResult,
     BatchRerunResult,
     BatchResult,
     BatchStatus,
 )
 from .config import (
+    ConfigActivateResult,
     ConfigCreateResult,
+    ConfigDeleteResult,
     ConfigDownloadResult,
+    ConfigListResult,
+    ConfigSyncBdaResult,
     ConfigUploadResult,
     ConfigValidationResult,
+    ConfigVersionInfo,
+)
+from .discovery import (
+    AutoDetectResult,
+    AutoDetectSection,
+    DiscoveryBatchResult,
+    DiscoveryResult,
 )
 from .document import (
     DocumentDeletionResult,
@@ -32,6 +45,7 @@ from .document import (
     DocumentInfo,
     DocumentListResult,
     DocumentMetadata,
+    DocumentReprocessResult,
     DocumentRerunResult,
     DocumentStatus,
     DocumentUploadResult,
@@ -47,8 +61,25 @@ from .evaluation import (
 )
 from .manifest import ManifestDocument, ManifestResult, ManifestValidationResult
 from .search import SearchCitation, SearchDocumentReference, SearchResult
-from .stack import StackDeletionResult, StackDeploymentResult, StackResources
-from .testing import LoadTestResult, StopWorkflowsResult
+from .stack import (
+    BucketInfo,
+    CancelUpdateResult,
+    FailureAnalysis,
+    FailureCause,
+    OrphanedResourceCleanupResult,
+    StackDeletionResult,
+    StackDeploymentResult,
+    StackMonitorResult,
+    StackOperationInProgress,
+    StackResources,
+    StackStableStateResult,
+)
+from .testing import (
+    DocumentsAbortedResult,
+    ExecutionsStoppedResult,
+    LoadTestResult,
+    StopWorkflowsResult,
+)
 
 __all__ = [
     # Enums
@@ -60,12 +91,22 @@ __all__ = [
     "StackDeploymentResult",
     "StackDeletionResult",
     "StackResources",
+    "StackOperationInProgress",
+    "StackMonitorResult",
+    "StackStableStateResult",
+    "FailureCause",
+    "FailureAnalysis",
+    "BucketInfo",
+    "CancelUpdateResult",
+    "OrphanedResourceCleanupResult",
     # Batch models
     "BatchResult",
+    "BatchProcessResult",
     "BatchStatus",
     "BatchInfo",
     "BatchListResult",
     "BatchRerunResult",
+    "BatchReprocessResult",
     "BatchDownloadResult",
     "BatchDeletionResult",
     # Document models
@@ -73,6 +114,7 @@ __all__ = [
     "DocumentUploadResult",
     "DocumentDownloadResult",
     "DocumentRerunResult",
+    "DocumentReprocessResult",
     "DocumentDeletionResult",
     "DocumentMetadata",
     "DocumentInfo",
@@ -82,12 +124,24 @@ __all__ = [
     "ConfigValidationResult",
     "ConfigDownloadResult",
     "ConfigUploadResult",
+    "ConfigActivateResult",
+    "ConfigVersionInfo",
+    "ConfigListResult",
+    "ConfigDeleteResult",
+    "ConfigSyncBdaResult",
+    # Discovery models
+    "DiscoveryResult",
+    "DiscoveryBatchResult",
+    "AutoDetectResult",
+    "AutoDetectSection",
     # Manifest models
     "ManifestDocument",
     "ManifestResult",
     "ManifestValidationResult",
     # Testing models
     "StopWorkflowsResult",
+    "ExecutionsStoppedResult",
+    "DocumentsAbortedResult",
     "LoadTestResult",
     # Search models
     "SearchResult",
