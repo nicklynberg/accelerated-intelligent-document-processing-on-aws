@@ -9,6 +9,8 @@ SPDX-License-Identifier: MIT-0
 
 - **MLflow Experiment Tracking Integration** — Optional integration with Amazon SageMaker MLflow for automated test run logging. When enabled (`EnableMLflow=true`), every Test Studio run automatically logs metrics (accuracy, cost, field-level scores), configuration parameters (model IDs, temperatures, inference settings), and artifacts (full config snapshots, class definitions, cost breakdowns) to an MLflow tracking server. Fire-and-forget async invocation — never blocks or delays test results. Zero resources created when disabled. See `docs/mlflow-integration.md`.
 
+- **BDA Blueprint Optimization** — Automatically improves BDA extraction accuracy using the `InvokeBlueprintOptimizationAsync` API. When discovery includes a ground truth file and `enable_blueprint_optimization: true` is set, the system optimizes the BDA blueprint by comparing extraction results against ground truth, evaluates before/after metrics, and updates the blueprint schema if improved. Disabled by default. See `docs/discovery.md` — Blueprint Optimization section.
+
 - **idp_common API Reference & Documentation** — Added `docs/idpcommon-api-reference.md` covering all 22 modules, created 6 missing module READMEs (discovery, schema, image, s3, utils, metrics), updated core data model docs to match current code, fixed `IDPConfig` lazy-loading bug in `__init__.py`, and integrated into docs-site sidebar.
 
 - **Consolidated publish and headless deploy into `idp-cli`** — All build/publish/deploy functionality now available through the CLI, deprecating standalone scripts:
@@ -22,6 +24,8 @@ SPDX-License-Identifier: MIT-0
 - **HITL review start overwrites document sections** — Fixed the Start Review action to update only the Review Status and Review Owner fields, preserving all existing document sections and other fields.
 
 - **Evaluation schema error for free-form objects** — Stickler mapper now detects and skips unevaluable object schemas (e.g., objects with `additionalProperties` but no defined `properties`, and arrays of such objects) instead of raising validation errors.
+
+- **Full document reprocess not re-running OCR** — Fixed bug where clicking "Reprocess" in the UI reused stale OCR results from the previous run instead of re-executing OCR with the current configuration. The reprocess resolver now deletes previous output data from S3 before queuing, preventing the OCR function's retry-safe recovery from reinstalling old results.
 
 
 ## [0.5.3]
