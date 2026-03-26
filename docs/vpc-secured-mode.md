@@ -39,7 +39,7 @@ Dependencies to mirror:
 Options for providing these dependencies:
 
 1. Private registry + code changes — Mirror images to your internal container registry (e.g., private ECR, Artifactory, Nexus) and update 
-Dockerfile.optimized and patterns/pattern-2/buildspec.yml to reference your internal URLs. For Python packages, configure uv to use your internal PyPI 
+Dockerfile.optimized and patterns/unified/buildspec.yml to reference your internal URLs. For Python packages, configure uv to use your internal PyPI 
 mirror (e.g., AWS CodeArtifact) by setting UV_INDEX_URL in the Dockerfile.
 
 2. Private DNS overrides — Configure your VPC's private hosted zone to resolve public registry domains (ghcr.io, public.ecr.aws, pypi.org) to internal 
@@ -47,8 +47,6 @@ endpoints that serve mirrored content. This approach requires no code changes bu
 domains.
 
 ### Required VPC Endpoints
-
-> **Note:** VPC-Secured deployment is currently only supported for Pattern 2 (Textract + Bedrock).
 
 #### Gateway Endpoints
 - **S3**: `com.amazonaws.region.s3`
