@@ -1092,6 +1092,14 @@ class IDPConfig(BaseModel):
         "extraction, and assessment stages.",
     )
 
+    enable_blueprint_optimization: bool = Field(
+        default=False,
+        description="Enable BDA blueprint optimization during discovery. "
+        "When true and a ground truth file is provided, discovery will automatically "
+        "optimize the BDA blueprint using the InvokeBlueprintOptimizationAsync API "
+        "to improve extraction accuracy. Defaults to false.",
+    )
+
     managed: bool = Field(
         default=False,
         description="Stack-managed configuration that is overwritten on stack updates.",

@@ -212,8 +212,14 @@ Resources:
             type: boolean
             description: Use Bedrock Data Automation (BDA) for OCR, classification, extraction, and assessment
             default: false
-          ocr:
+          enable_blueprint_optimization:
             order: 2
+            type: boolean
+            description: Automatically optimize BDA blueprints using ground truth data during discovery to improve extraction accuracy
+            default: false
+            dependsOn: { field: "use_bda", value: true }
+          ocr:
+            order: 3
             type: object
             sectionLabel: OCR Configuration
             description: "Not used when BDA is enabled - BDA handles OCR internally"

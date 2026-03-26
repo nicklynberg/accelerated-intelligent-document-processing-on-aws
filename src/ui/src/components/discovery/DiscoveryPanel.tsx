@@ -211,7 +211,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
   // Timer for elapsed time display + fallback poll every 10s when there are active jobs
   // The poll catches subscription updates missed during rapid subscription teardown/recreation
   useEffect(() => {
-    const hasActiveJobs = discoveryJobs.some((j) => j.status === 'PENDING' || j.status === 'IN_PROGRESS');
+    const hasActiveJobs = discoveryJobs.some((j) => j.status === 'PENDING' || j.status === 'IN_PROGRESS' || j.status === 'OPTIMIZATION_IN_PROGRESS');
     if (hasActiveJobs && !tickRef.current) {
       tickRef.current = setInterval(() => {
         setTick((t) => t + 1);
@@ -245,11 +245,12 @@ const DiscoveryPanel = (): React.JSX.Element => {
         // Set updatedAt to now when terminal status arrives via subscription
         // (subscription doesn't include updatedAt, so we capture it client-side)
         const merged = { ...oldJob, ...updatedJob };
-        if (updatedJob.status === 'COMPLETED' || updatedJob.status === 'FAILED') {
+        if (updatedJob.status === 'COMPLETED' || updatedJob.status === 'FAILED' || updatedJob.status === 'OPTIMIZATION_COMPLETED' || updatedJob.status === 'OPTIMIZATION_FAILED') {
           merged.updatedAt = new Date().toISOString();
         }
         newJobs[jobIndex] = merged;
         console.log(`Updated job ${updatedJob.jobId}: ${oldJob.status} -> ${updatedJob.status}`);
+
         return newJobs;
       }
       console.warn(`Job ${updatedJob.jobId} not found in current jobs list, adding it`);
@@ -258,44 +259,65 @@ const DiscoveryPanel = (): React.JSX.Element => {
   }, []);
 
   // Set up subscriptions for active discovery jobs
+  // Use a ref to track active subscriptions and avoid teardown/recreation on status changes
+  const subscriptionsRef = useRef(new Map<string, { unsubscribe: () => void }>());
+
   useEffect(() => {
-    const subscriptions = new Map();
+    const terminalStatuses = new Set(['COMPLETED', 'FAILED', 'OPTIMIZATION_COMPLETED', 'OPTIMIZATION_FAILED']);
+    const activeJobIds = new Set<string>();
 
     discoveryJobs.forEach((job) => {
-      if (job.status === 'PENDING' || job.status === 'IN_PROGRESS') {
-        type GqlSubscription = {
-          subscribe: (callbacks: Record<string, unknown>) => { unsubscribe: () => void };
-        };
-        const observable = client.graphql({
-          query: onDiscoveryJobStatusChange,
-          variables: { jobId: job.jobId },
-        }) as unknown as GqlSubscription;
-        const subscription = observable.subscribe({
-            next: (data: { data?: { onDiscoveryJobStatusChange?: DiscoveryJob } }) => {
-              console.log('Discovery job status changed:', data);
-              const changedJob = data?.data?.onDiscoveryJobStatusChange;
-              if (changedJob) {
-                updateDiscoveryJob(changedJob);
-                return;
-              }
-              console.warn('Received subscription update but no job data, falling back to refresh');
-              loadDiscoveryJobs();
-            },
-            error: (subscriptionError: unknown) => {
-              console.error('Discovery job subscription error:', subscriptionError);
-            },
-          });
+      if (!terminalStatuses.has(job.status)) {
+        activeJobIds.add(job.jobId);
 
-        subscriptions.set(job.jobId, subscription);
+        // Only create a subscription if we don't already have one for this jobId
+        if (!subscriptionsRef.current.has(job.jobId)) {
+          type GqlSubscription = {
+            subscribe: (callbacks: Record<string, unknown>) => { unsubscribe: () => void };
+          };
+          const observable = client.graphql({
+            query: onDiscoveryJobStatusChange,
+            variables: { jobId: job.jobId },
+          }) as unknown as GqlSubscription;
+          const subscription = observable.subscribe({
+              next: (data: { data?: { onDiscoveryJobStatusChange?: DiscoveryJob } }) => {
+                console.log('Discovery job status changed:', data);
+                const changedJob = data?.data?.onDiscoveryJobStatusChange;
+                if (changedJob) {
+                  updateDiscoveryJob(changedJob);
+                  return;
+                }
+                console.warn('Received subscription update but no job data, falling back to refresh');
+                loadDiscoveryJobs();
+              },
+              error: (subscriptionError: unknown) => {
+                console.error('Discovery job subscription error:', subscriptionError);
+              },
+            });
+
+          subscriptionsRef.current.set(job.jobId, subscription);
+        }
       }
     });
 
+    // Clean up subscriptions for jobs that reached terminal state
+    subscriptionsRef.current.forEach((subscription, jobId) => {
+      if (!activeJobIds.has(jobId)) {
+        subscription.unsubscribe();
+        subscriptionsRef.current.delete(jobId);
+      }
+    });
+  }, [JSON.stringify(discoveryJobs.map((job) => ({ jobId: job.jobId, status: job.status }))), updateDiscoveryJob]);
+
+  // Clean up all subscriptions on unmount
+  useEffect(() => {
     return () => {
-      subscriptions.forEach((subscription) => {
+      subscriptionsRef.current.forEach((subscription) => {
         subscription.unsubscribe();
       });
+      subscriptionsRef.current.clear();
     };
-  }, [JSON.stringify(discoveryJobs.map((job) => ({ jobId: job.jobId, status: job.status }))), updateDiscoveryJob]);
+  }, []);
 
   if (!settings.DiscoveryBucket) {
     return (
@@ -534,6 +556,12 @@ const DiscoveryPanel = (): React.JSX.Element => {
         return <StatusIndicator type="in-progress">In Progress</StatusIndicator>;
       case 'PENDING':
         return <StatusIndicator type="pending">Pending</StatusIndicator>;
+      case 'OPTIMIZATION_IN_PROGRESS':
+        return <StatusIndicator type="in-progress">Optimizing</StatusIndicator>;
+      case 'OPTIMIZATION_COMPLETED':
+        return <StatusIndicator type="success">Optimized</StatusIndicator>;
+      case 'OPTIMIZATION_FAILED':
+        return <StatusIndicator type="error">Optimization Failed</StatusIndicator>;
       default:
         return <StatusIndicator type="info">{status}</StatusIndicator>;
     }
@@ -550,6 +578,27 @@ const DiscoveryPanel = (): React.JSX.Element => {
       );
     }
 
+    // Optimization completed: show class name + optimization result
+    if (item.status === 'OPTIMIZATION_COMPLETED' && item.discoveredClassName) {
+      return (
+        <Box>
+          <Badge color="green">{item.discoveredClassName}</Badge>
+          <Box fontSize="body-s" color="text-body-secondary" margin={{ top: 'xxs' }}>
+            {item.statusMessage || 'Blueprint optimization completed'}
+          </Box>
+        </Box>
+      );
+    }
+
+    // Optimization completed without class name
+    if (item.status === 'OPTIMIZATION_COMPLETED') {
+      return (
+        <Box fontSize="body-s" color="text-body-secondary">
+          {item.statusMessage || 'Blueprint optimization completed'}
+        </Box>
+      );
+    }
+
     // COMPLETED but no class name (backward compatibility with old jobs)
     if (item.status === 'COMPLETED') {
       return (
@@ -560,7 +609,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
     }
 
     // FAILED: show error message prominently
-    if (item.status === 'FAILED') {
+    if (item.status === 'FAILED' || item.status === 'OPTIMIZATION_FAILED') {
       const errorMsg = item.errorMessage || item.statusMessage || 'Unknown error';
       return (
         <ExpandableSection
@@ -572,6 +621,15 @@ const DiscoveryPanel = (): React.JSX.Element => {
             {errorMsg}
           </Box>
         </ExpandableSection>
+      );
+    }
+
+    // Optimization in progress: show status message
+    if (item.status === 'OPTIMIZATION_IN_PROGRESS') {
+      return (
+        <Box fontSize="body-s" color="text-body-secondary">
+          <StatusIndicator type="in-progress">{item.statusMessage || 'Optimizing blueprint...'}</StatusIndicator>
+        </Box>
       );
     }
 
@@ -694,7 +752,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
       id: 'elapsed',
       header: 'Duration',
       cell: (item: DiscoveryJob) => {
-        if (item.status === 'COMPLETED' || item.status === 'FAILED') {
+        if (item.status === 'COMPLETED' || item.status === 'FAILED' || item.status === 'OPTIMIZATION_COMPLETED' || item.status === 'OPTIMIZATION_FAILED') {
           // Show total duration: from createdAt to updatedAt
           if (item.createdAt && item.updatedAt) {
             const start = parseUtcTimestamp(item.createdAt);

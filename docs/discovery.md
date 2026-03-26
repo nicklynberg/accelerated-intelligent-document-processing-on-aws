@@ -844,12 +844,110 @@ BDABlueprintPermissions:
   - bedrock:ListBlueprints
   - bedrock:GetBlueprint
   - bedrock:DeleteBlueprint
+  - bedrock:InvokeBlueprintOptimizationAsync
+  - bedrock:GetBlueprintOptimizationStatus
 ```
 
 **Monitoring:**
 - Blueprint creation/update activities are logged to CloudWatch
 - Schema conversion details are captured
 - Error conditions are clearly documented
+
+### Blueprint Optimization
+
+The Blueprint Optimization feature uses the BDA `InvokeBlueprintOptimizationAsync` API to automatically improve extraction accuracy for discovered document classes. When a discovery job includes a ground truth file, the system can optimize the BDA blueprint by comparing extraction results against the ground truth and refining the blueprint schema.
+
+#### How It Works
+
+1. **Blueprint Lookup**: The optimizer checks if a blueprint already exists for the discovered class in the BDA project. If found, it reuses the existing blueprint; otherwise, it creates a new one following the standard naming convention (`{StackName}-{ClassName}-{hash}`).
+2. **S3 Asset Preparation**: The sample document (PDF) and ground truth (JSON) S3 URIs are constructed from the discovery bucket.
+3. **Optimization Invocation**: The `InvokeBlueprintOptimizationAsync` API is called with the blueprint ARN, sample document, ground truth, and an output S3 prefix.
+4. **Status Polling**: The system polls `GetBlueprintOptimizationStatus` with exponential backoff (5s initial, 30s max, 15-minute timeout) until a terminal state is reached.
+5. **Results Evaluation**: The optimization results (stored at `{outputPrefix}/optimization_results.json`) contain before/after metrics. The system compares `exactMatch` and `f1` scores.
+6. **Schema Application**: If the optimized schema shows improvement, the blueprint is updated with the new schema, a new version is created, and the IDP class configuration is updated.
+
+#### Optimization Flow
+
+```mermaid
+graph TD
+    A[Discovery Completes with Ground Truth] --> B[Blueprint Optimization Lambda]
+    B --> C{Existing Blueprint?}
+    C -->|Yes| D[Reuse Existing Blueprint]
+    C -->|No| E[Create New Blueprint]
+    D --> F[Invoke Optimization API]
+    E --> F
+    F --> G[Poll for Completion]
+    G --> H{Result?}
+    H -->|Success| I[Fetch Results from S3]
+    H -->|ServiceError/ClientError| J[Report Failure]
+    H -->|Timeout| J
+    I --> K{Improved?}
+    K -->|Yes| L[Update Blueprint Schema]
+    K -->|No| M[Keep Original Schema]
+    L --> N[Create Blueprint Version]
+    N --> O[Update IDP Config]
+    O --> P[Report OPTIMIZATION_COMPLETED]
+    M --> P
+    J --> Q[Report OPTIMIZATION_FAILED]
+```
+
+#### UI Status Display
+
+The Discovery Panel shows optimization progress with dedicated status indicators:
+
+| Status | UI Label | Description |
+|--------|----------|-------------|
+| `OPTIMIZATION_IN_PROGRESS` | Optimizing | Optimization is running (blueprint creation, API invocation, polling) |
+| `OPTIMIZATION_COMPLETED` | Optimized | Optimization finished (improved or no improvement) |
+| `OPTIMIZATION_FAILED` | Optimization Failed | Optimization encountered an error |
+
+The Result column shows additional context:
+- **Improved**: Class name badge + accuracy improvement message (e.g., "exactMatch: 0.78 → 0.91")
+- **No improvement**: Message indicating original schema was kept
+- **Failed**: Expandable error details
+
+#### Components
+
+- **`BlueprintOptimizer`** (`lib/idp_common_pkg/idp_common/bda/blueprint_optimizer.py`): Core orchestrator — manages the full optimization lifecycle including blueprint lookup/creation, API invocation, polling, evaluation, and schema application.
+- **`blueprint_optimization` Lambda** (`src/lambda/blueprint_optimization/index.py`): Async Lambda handler invoked by the discovery processor. Manages AppSync status updates and error reporting.
+- **`OptimizationResult`**: Dataclass returned by the optimizer with status, metrics, blueprint ARN, and optionally the optimized schema.
+
+#### Configuration
+
+Blueprint optimization is disabled by default. To enable it, set both `use_bda: true` and `enable_blueprint_optimization: true` in your configuration version via the View/Edit Configuration UI or directly in the config YAML:
+
+```yaml
+use_bda: true
+enable_blueprint_optimization: true
+```
+
+When enabled, the optimizer uses:
+- The same BDA project as the main blueprint service (per configuration version)
+- The same blueprint naming convention (`{StackName}-{ClassName}-{hash}`)
+- The discovery bucket for S3 input/output URIs
+- The `bedrock-data-automation` client with `boto3>=1.42.0` (bundled in the Lambda function's `requirements.txt`)
+
+#### IAM Permissions
+
+The Blueprint Optimization Lambda requires these additional Bedrock permissions (configured in `template.yaml`):
+
+```yaml
+- bedrock:InvokeBlueprintOptimizationAsync
+- bedrock:GetBlueprintOptimizationStatus
+```
+
+Resource ARN patterns:
+```yaml
+- arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint/*
+- arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint-optimization-invocation/*
+```
+
+#### Retry and Error Handling
+
+- **S3 Eventual Consistency**: The optimization results file may not be immediately available after the API reports success. The system retries up to 5 times with 2-second delays.
+- **Polling Timeout**: If optimization doesn't complete within 15 minutes, the result is `TIMED_OUT`.
+- **API Errors**: `ServiceError` and `ClientError` from the BDA API are captured and reported as `OPTIMIZATION_FAILED`.
+- **Blueprint Not Found**: If the blueprint stage doesn't match (must be `LIVE`), the API returns `ResourceNotFoundException`.
 
 ### BdaIDP Sync Feature
 

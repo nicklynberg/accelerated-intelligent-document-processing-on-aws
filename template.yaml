@@ -6565,6 +6565,7 @@ Resources:
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTable
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          BLUEPRINT_OPTIMIZATION_FUNCTION_NAME: !Ref BlueprintOptimizationFunction
       LoggingConfig:
         LogGroup: !Ref DiscoveryProcessorFunctionLogGroup
       Events:
@@ -6612,8 +6613,112 @@ Resources:
                 - aws-marketplace:Unsubscribe
                 - aws-marketplace:ViewSubscriptions
               Resource: "*"
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt BlueprintOptimizationFunction.Arn
 
   DiscoveryProcessorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  ##########################################################################
+  # Blueprint Optimization Function
+  ##########################################################################
+
+  BlueprintOptimizationFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access as it only interacts with AWS services via APIs"
+          - id: W92
+            reason: "Function does not require reserved concurrency as it scales based on demand"
+          - id: W12
+            reason: "Lambda requires CloudWatch logs permissions"
+          - id: W11
+            reason: "Role requires * resource access for CloudWatch Metrics and Logs"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for async invoked function - failures are handled internally"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
+    Properties:
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      FunctionName: !Sub "${AWS::StackName}-blueprint-optimization"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/blueprint_optimization/
+      Description: Lambda function to optimize BDA blueprints using ground truth data
+      MemorySize: 3008
+      Timeout: 900
+
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          APPSYNC_API_URL: !GetAtt GraphQLApi.GraphQLUrl
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          STACK_NAME: !Ref AWS::StackName
+          DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTable
+      LoggingConfig:
+        LogGroup: !Ref BlueprintOptimizationFunctionLogGroup
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref DiscoveryBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DiscoveryTrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - appsync:GraphQL
+              Resource:
+                - !Sub "${GraphQLApi.Arn}/types/Mutation/*"
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:ReEncrypt*
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+            # BDA permissions for blueprint optimization
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeDataAutomationAsync
+                - bedrock:CreateDataAutomationProject
+                - bedrock:UpdateDataAutomationProject
+                - bedrock:GetDataAutomationProject
+                - bedrock:GetDataAutomationStatus
+                - bedrock:GetBlueprint
+                - bedrock:UpdateBlueprint
+                - bedrock:CreateBlueprint
+                - bedrock:CreateBlueprintVersion
+                - bedrock:DeleteBlueprint
+                - bedrock:ListBlueprints
+                - bedrock:InvokeBlueprintOptimizationAsync
+                - bedrock:GetBlueprintOptimizationStatus
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:aws:blueprint/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint-optimization-invocation/*"
+
+  BlueprintOptimizationFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
