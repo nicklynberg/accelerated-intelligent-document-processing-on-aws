@@ -17,6 +17,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **HITL review start overwrites document sections** — Fixed the Start Review action to update only the Review Status and Review Owner fields, preserving all existing document sections and other fields.
+
 - **Evaluation schema error for free-form objects** — Stickler mapper now detects and skips unevaluable object schemas (e.g., objects with `additionalProperties` but no defined `properties`, and arrays of such objects) instead of raising validation errors.
 
 
