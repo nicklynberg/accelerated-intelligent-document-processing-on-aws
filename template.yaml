@@ -1606,6 +1606,10 @@ Resources:
         rules_to_suppress:
           - id: S3-001
             reason: "This is the logging destination bucket - does not require its own access logging"
+      cdk_nag:
+        rules_to_suppress:
+          - id: NIST.800.53.R5-S3DefaultEncryptionKMS
+            reason: "Logging destination bucket requires SSE-S3; CloudFront and S3 access logging cannot write to KMS-encrypted buckets"
     # checkov:skip=CKV_AWS_18: "This is the logging destination bucket - does not require its own access logging"
     DeletionPolicy: Retain
     Properties:
@@ -3005,6 +3009,10 @@ Resources:
         config:
           ignore_checks:
             - W3045
+      cdk_nag:
+        rules_to_suppress:
+          - id: NIST.800.53.R5-S3DefaultEncryptionKMS
+            reason: "Static web assets bucket served via CloudFront/ALB; KMS encryption adds cost and latency with no security benefit for public web content"
     Properties:
       AccessControl: Private
       BucketEncryption:
