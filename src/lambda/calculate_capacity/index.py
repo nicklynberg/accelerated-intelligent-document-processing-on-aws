@@ -1261,6 +1261,7 @@ def build_simple_quota_requirements(
                     # Extract actual page count from metering data
                     if 'number_of_pages' in item:
                         pages = convert_decimal_to_float(item['number_of_pages'])
+                        assert isinstance(pages, (int, float))
                         if actual_pages_per_doc is None:
                             actual_pages_per_doc = pages
                         else:
