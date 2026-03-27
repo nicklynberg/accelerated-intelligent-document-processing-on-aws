@@ -301,6 +301,7 @@ class RuleValidationOrchestratorService:
                     final_responses[rule_type] = []
 
                 if result:
+                    assert isinstance(result, dict)
                     # Add rule_type and rule to the result (code stitches these values)
                     result["rule_type"] = rule_type
                     result["rule"] = rule
