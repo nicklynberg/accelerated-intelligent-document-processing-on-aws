@@ -957,7 +957,7 @@ Resources:
           - Sid: Allow use of the key for EBS
             Effect: Allow
             Principal:
-              Service: !Sub "ec2.${AWS::URLSuffix}"
+              Service: ec2.amazonaws.com
             Action:
               - kms:Decrypt
               - kms:DescribeKey
@@ -977,7 +977,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: !Sub "ec2.${AWS::URLSuffix}"
+              Service: ec2.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
