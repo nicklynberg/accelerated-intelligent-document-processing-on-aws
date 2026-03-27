@@ -57,6 +57,11 @@ Resources:
 
   SGIngressManagerRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: "ec2:DescribeVpcs and ec2:DescribeSecurityGroupRules do not support resource-level permissions and require Resource: '*'"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -100,6 +105,8 @@ Resources:
             reason: "Custom resource Lambda does not need VPC access"
           - id: W92
             reason: "Custom resource Lambda does not need reserved concurrency"
+          - id: AwsSolutions-L1
+            reason: "Runtime version is managed project-wide; will be updated holistically across all Lambda functions"
     # checkov:skip=CKV_AWS_116: "DLQ not required for CloudFormation custom resource"
     # checkov:skip=CKV_AWS_117: "Function does not need VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not need reserved concurrency"
@@ -313,6 +320,11 @@ Resources:
 
   RegisterTargetsRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: "ec2:DescribeVpcEndpoints and ec2:DescribeNetworkInterfaces do not support resource-level permissions and require Resource: '*'"
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -356,6 +368,8 @@ Resources:
             reason: "Custom resource Lambda does not need VPC access"
           - id: W92
             reason: "Custom resource Lambda does not need reserved concurrency"
+          - id: AwsSolutions-L1
+            reason: "Runtime version is managed project-wide; will be updated holistically across all Lambda functions"
     # checkov:skip=CKV_AWS_116: "DLQ not required for CloudFormation custom resource"
     # checkov:skip=CKV_AWS_117: "Function does not need VPC access"
     # checkov:skip=CKV_AWS_115: "Function does not need reserved concurrency"
@@ -440,6 +454,12 @@ Resources:
         rules_to_suppress:
           - id: W52
             reason: "ALB access logging is configured to the logging bucket"
+      cdk_nag:
+        rules_to_suppress:
+          - id: NIST.800.53.R4-ALBWAFEnabled
+            reason: "ALB hosting is for GovCloud/private networks with IP-based access control via ALBAllowedCIDRs and security groups"
+          - id: NIST.800.53.R5-ALBWAFEnabled
+            reason: "ALB hosting is for GovCloud/private networks with IP-based access control via ALBAllowedCIDRs and security groups"
     Properties:
       Name: !Sub "${StackName}-webui-alb"
       Type: application
