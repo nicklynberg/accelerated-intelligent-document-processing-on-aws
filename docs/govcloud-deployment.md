@@ -94,8 +94,7 @@ aws cloudformation deploy \
   --region us-gov-west-1 \
   --s3-bucket {s3-bucket-govcloud} \
   --s3-prefix {your-s3-prefix} \
-  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
-  --parameter-overrides \
+  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND 
 ```
 
 With this deployment, interact with the system via:
@@ -223,6 +222,7 @@ curl -X POST {api-endpoint}/jobs \
   -d '{"fileName": "my-documents.zip"}'
 
 # Check job status (use jobId from the POST response)
+# Note: will return PENDING_UPLOAD status until the ZIP file is uploaded
 curl {api-endpoint}/jobs/{job-id} \
   -H "Authorization: Bearer $TOKEN"
 ```
