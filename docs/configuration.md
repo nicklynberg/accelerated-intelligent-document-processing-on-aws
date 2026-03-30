@@ -1,3 +1,7 @@
+---
+title: "Configuration and Customization"
+---
+
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 SPDX-License-Identifier: MIT-0
 
@@ -11,7 +15,7 @@ The GenAIIDP solution provides multiple configuration approaches to customize do
 
 The web interface allows real-time configuration updates without stack redeployment:
 
-- **Document Classes**: Define and modify document categories and their descriptions (using JSON Schema format)
+- **Document Classes**: Define and modify document categories and their descriptions (using JSON Schema format). Choose from **35+ pre-built standard classes** (Invoice, Receipt, W-2, Bank Statement, etc.) or create custom classes from scratch.
 - **Extraction Attributes**: Configure fields to extract for each document class (defined as JSON Schema properties)
 - **Few Shot Examples**: Upload and configure example documents to improve accuracy (supported in Pattern 2)
 - **Model Selection**: Choose between available Bedrock models for classification and extraction
@@ -20,21 +24,61 @@ The web interface allows real-time configuration updates without stack redeploym
 - **Evaluation Methods**: Set evaluation methods and thresholds for each attribute
 - **Summarization**: Configure model, prompts, parameters, and enable/disable document summarization via the `enabled` property
 
+### Configuration Versions
+
+The solution supports **multiple named configuration versions**, enabling you to maintain independent configuration snapshots for A/B testing, environment separation, and iterative prompt tuning — all without redeploying the stack. Each version stores a complete, self-contained configuration. The active version determines which configuration is used for new document processing.
+
+Key capabilities:
+- **Create, edit, and delete** configuration versions with unique names and descriptions
+- **Activate** any version to make it the default for new processing
+- **Compare** versions side-by-side to see differences (exportable as CSV/JSON)
+- **Track** which version was used for each processed document and test run
+- **Select** a specific version when uploading documents, running tests, or using the CLI
+
+#### Managed Configuration Versions
+
+The stack automatically deploys **managed configuration versions** for each pre-deployed test set (`fake-w2`, `docsplit`, `ocr-benchmark`, `realkie-fcc-verified`). These are marked with `managed: true` and have the following behavior:
+
+- **Overwritten on stack updates** — always reflect the latest defaults shipped with the solution
+- **Save disabled** — the Save button is disabled and an info banner explains the config is stack-managed
+- **Delete disabled** — managed versions cannot be deleted in the UI or via the API
+- **Editable copies** — use "Save as Version" to create a custom, editable copy
+- **Not importable** — managed configs are stored separately (`config_library/managed_config/`) and do not appear in the configuration import browser
+- **Test Studio integration** — when a test set is selected, the matching managed config version is auto-selected
+
+For comprehensive documentation, see [configuration-versions.md](configuration-versions.md).
+
 ### Configuration Management Features
 
-- **Save as Default**: Save your current configuration as the new default baseline. This replaces the existing default configuration and automatically clears custom overrides. **Warning**: Default configurations may be overwritten during solution upgrades - export your configuration first for backup.
+- **Save Changes**: Save your current configuration changes. The button is **enabled only when you have unsaved changes** (comparing your edits against the last saved configuration). After a successful save, a confirmation banner is displayed.
+- **Unsaved Changes Indicator**: Individual fields with unsaved edits display an orange dot next to the field label, and an info banner with a "Discard changes" button appears when the configuration form has unsaved edits.
+- **Browser Navigation Guard**: The browser warns before leaving the page when unsaved configuration changes exist (both on browser close/refresh and SPA navigation).
+- **Save as Default**: Save your current version's configuration as the new default baseline. This replaces the existing default configuration. **Warning**: Default configurations may be overwritten during solution upgrades - export your configuration first for backup.
+- **Restore Default (All)**: Reset the current version's configuration back to the default values, replacing all customizations.
+- **Refresh**: Reload the configuration from the server. Use this to sync your view with the latest saved configuration, discard unsaved local changes, or verify your configuration after external updates.
 - **Export Configuration**: Download your current configuration to local files in JSON or YAML format with customizable filenames. Use this to backup configurations before upgrades or share configurations between environments.
 - **Import Configuration**: Upload configuration files from your local machine OR import from the Configuration Library:
   - **From Local File**: Upload configuration files from your computer in JSON or YAML format with automatic format detection and validation
-  - **From Configuration Library** (NEW): Browse and import pre-configured document processing workflows from the solution's built-in configuration library
+  - **From Configuration Library**: Browse and import pre-configured document processing workflows from the solution's built-in configuration library
     - **Pattern-Filtered**: Only shows configurations compatible with your currently deployed pattern (Pattern 1, 2, or 3)
     - **Dual Format Support**: Automatically detects and imports both `config.yaml` and `config.json` formats
     - **README Preview**: View markdown-formatted documentation before importing to understand configuration purpose and features
     - **Format Indicators**: Visual badges show file format (YAML/JSON) and README availability
     - **Library Contents**: Includes sample configurations like lending-package-sample, bank-statement-sample, rvl-cdip, criteria-validation, and more
-- **Restore Default**: Reset all configuration settings back to the original default values, removing all customizations.
+  - **Important**: Importing a configuration **replaces** your existing custom configuration entirely. Any prior customizations not included in the imported file will be reset to defaults. Export your current configuration first if you want to preserve it.
 
 Configuration changes are validated and applied immediately, with rollback capability if issues arise. See [web-ui.md](web-ui.md) for details on using the administration interface.
+
+### Configuration Management via CLI
+
+The IDP CLI provides command-line tools for configuration management:
+
+- **`idp-cli config-create`**: Generate configuration templates from system defaults
+- **`idp-cli config-validate`**: Validate configuration files against schemas
+- **`idp-cli config-download`**: Download configuration from deployed stacks
+- **`idp-cli config-upload`**: Upload configuration to deployed stacks
+
+See [idp-cli.md](idp-cli.md#config-create) for complete command documentation.
 
 ## Custom Configuration Path
 
@@ -62,10 +106,81 @@ CustomConfigPath: "s3://my-bucket/custom-config/config.yaml"
 
 **Configuration File Requirements:**
 - Must be valid YAML format
-- Should include all required sections for your chosen pattern (ocr, classes, classification, extraction, etc.)
-- Follow the same structure as the default configuration files in the `config_library` directory
+- Only needs to include `notes`, `classes`, and any settings that differ from system defaults (see "System Defaults and Configuration Inheritance" below)
+- Follow the same structure as the configuration files in the `config_library` directory
 
 Leave the `CustomConfigPath` parameter empty (default) to use the standard configuration library included with the solution.
+
+## System Defaults and Configuration Inheritance
+
+The GenAI IDP Accelerator uses a **system defaults** architecture where configurations inherit from pattern-specific default files. This means user configurations only need to specify differences from the defaults, making them simpler and more maintainable.
+
+### How It Works
+
+1. **System defaults** are loaded first from `lib/idp_common_pkg/idp_common/config/system_defaults/`:
+   - `pattern-1.yaml` - BDA mode defaults (used when `use_bda: true`)
+   - `pattern-2.yaml` - Pipeline mode defaults (used when `use_bda: false`)
+
+2. **User configurations** are merged on top, overriding only the specified values
+
+3. **Result**: A complete configuration with user customizations applied to system defaults
+
+### Minimal Configuration Example
+
+A user configuration only needs:
+
+```yaml
+notes: "My document processing configuration"
+
+classes:
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: Invoice
+    type: object
+    x-aws-idp-document-type: Invoice
+    description: "A billing document"
+    properties:
+      invoice_number:
+        type: string
+        description: "Unique invoice identifier"
+```
+
+All other settings (OCR, classification, extraction, assessment, evaluation, summarization, discovery, agents) are inherited from the pattern's system defaults.
+
+### Override Example
+
+To override specific settings while keeping others at defaults:
+
+```yaml
+notes: "Configuration with custom classification method"
+
+# Override just the classification method
+classification:
+  classificationMethod: textbasedHolisticClassification
+
+# Override assessment to enable granular mode
+assessment:
+  granular:
+    enabled: true
+
+classes:
+  # ... your document classes
+```
+
+### Benefits
+
+- **Simpler configs** - Only specify what makes your use case unique
+- **Maintainable** - System default updates automatically apply to all configs
+- **Focused** - Easy to see what customizations are active
+- **Version-safe** - Defaults evolve with the solution while custom overrides remain stable
+
+### Configuration Library
+
+The `config_library/` directory contains example configurations demonstrating this inheritance pattern. Each config contains:
+- `notes:` - Description of the configuration
+- `classes:` - Document class definitions (JSON Schema format)
+- **Overrides** - Only settings that differ from system defaults
+
+See the [config_library README](../config_library/README.md) for available configurations and usage examples.
 
 ## Summarization Configuration
 
@@ -166,34 +281,27 @@ Key parameters that can be configured during CloudFormation deployment:
 - `ExecutionTimeThresholdMs`: Maximum acceptable execution time before alerting (default: 30000 ms)
 - `LogLevel`: Set logging level (DEBUG, INFO, WARN, ERROR)
 - `WAFAllowedIPv4Ranges`: IP restrictions for web UI access (default: allow all)
-- `CloudFrontPriceClass`: Set CloudFront price class for UI distribution
-- `CloudFrontAllowedGeos`: Optional geographic restrictions for UI access
+- `CloudFrontPriceClass`: Set CloudFront price class for UI distribution (CloudFront hosting only)
+- `CloudFrontAllowedGeos`: Optional geographic restrictions for UI access (CloudFront hosting only)
+- `WebUIHosting`: Select hosting mode — `CloudFront` (default) or `ALB` for VPC-based hosting (see [ALB Hosting](./alb-hosting.md))
 - `CustomConfigPath`: Optional S3 URI to a custom configuration file that overrides pattern presets. Leave blank to use selected pattern configuration. Example: s3://my-bucket/custom-config/config.yaml
 
 ### Integration and Tracing Parameters
 - `EnableXRayTracing`: Enable X-Ray tracing for Lambda functions and Step Functions (default: true). Provides distributed tracing capabilities for debugging and performance analysis.
-- `EnableMCP`: Enable Model Context Protocol (MCP) integration for external application access via AWS Bedrock AgentCore Gateway (default: true). See [mcp-integration.md](mcp-integration.md) for details.
+- `EnableMCP`: Enable Model Context Protocol (MCP) integration for external application access via AWS Bedrock AgentCore Gateway (default: true). See [mcp-server.md](mcp-server.md) for details.
 - `EnableECRImageScanning`: Enable automatic vulnerability scanning for Lambda container images in ECR for Patterns 1-3 (default: false). Recommended for production deployments but may impact deployment reliability. See [troubleshooting.md](troubleshooting.md) for guidance.
 
 ### Pattern Selection
 - `IDPPattern`: Select processing pattern:
-  - Pattern1: Packet or Media processing with Bedrock Data Automation (BDA)
-  - Pattern2: Packet processing with Textract and Bedrock
-  - Pattern3: Packet processing with Textract, SageMaker(UDOP), and Bedrock
+  - Unified: Supports both BDA and Pipeline processing modes via `use_bda` flag
 
 ### Pattern-Specific Parameters
-- **Pattern 1 (BDA)**
-  - `Pattern1BDAProjectArn`: Optional existing Bedrock Data Automation project ARN
-  - `Pattern1Configuration`: Configuration preset to use
+- **Configuration Preset**: `ConfigurationPreset` — Select from available presets (lending-package-sample, bank-statement-sample, etc.)
+- **Custom Model ARNs**: Optional custom fine-tuned classification/extraction model ARNs
 
-- **Pattern 2 (Textract + Bedrock)**
-  - `Pattern2Configuration`: Configuration preset (default, few_shot_example_with_multimodal_page_classification, medical_records_summarization)
-  - `Pattern2CustomClassificationModelARN`: Optional custom fine-tuned classification model (Coming Soon)
-  - `Pattern2CustomExtractionModelARN`: Optional custom fine-tuned extraction model (Coming Soon)
+> **Note**: The processing mode (BDA vs Pipeline) is controlled by the `use_bda` flag in the configuration, not by deployment parameters. See the [architecture docs](./architecture.md) for details.
 
 - **Pattern 3 (Textract + UDOP + Bedrock)**
-  - `Pattern3UDOPModelArtifactPath`: S3 path for UDOP model artifact
-  - `Pattern3Configuration`: Configuration preset to use
 
 ### Optional Features
 - `EvaluationBaselineBucketName`: Optional existing bucket for ground truth data
@@ -203,7 +311,7 @@ Key parameters that can be configured during CloudFormation deployment:
 - `BedrockGuardrailId`: Optional Bedrock Guardrail ID to apply
 - `BedrockGuardrailVersion`: Version of Bedrock Guardrail to use
 
-For details on specific patterns, see [pattern-1.md](pattern-1.md), [pattern-2.md](pattern-2.md), and [pattern-3.md](pattern-3.md).
+For details on processing modes, see [architecture.md](architecture.md). For legacy pattern-specific references, see [pattern-1.md](pattern-1.md) (BDA) and [pattern-2.md](pattern-2.md) (Pipeline).
 
 ## High Volume Processing
 

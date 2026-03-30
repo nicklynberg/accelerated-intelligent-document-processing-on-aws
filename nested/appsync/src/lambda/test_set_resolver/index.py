@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 import os
 import boto3
+import re
 from botocore.config import Config
 from idp_common.s3 import find_matching_files  # type: ignore
 from idp_common.dynamodb import DynamoDBClient  # type: ignore
@@ -13,6 +14,22 @@ MAX_ZIP_SIZE_BYTES = 1073741824  # 1 GB
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+
+def validate_test_set_name(name):
+    """Validate test set name: alphanumeric, spaces, hyphens, underscores only, max 50 chars"""
+    if not name or not isinstance(name, str):
+        return False
+    return re.match(r'^[a-zA-Z0-9\s_-]+$', name) and len(name) <= 50
+
+
+def validate_description(description):
+    """Validate description: max 200 chars only"""
+    if description is None or description == "":
+        return True  # Optional field
+    if not isinstance(description, str):
+        return False
+    return len(description) <= 200
 
 # Configure S3 client with S3v4 signature
 s3_config = Config(
@@ -54,6 +71,15 @@ def add_test_set_from_upload(args):
     
     # Extract test set name from filename (remove .zip extension)
     test_set_name = zip_filename.replace('.zip', '').replace('.ZIP', '')
+    
+    # Validate test set name
+    if not validate_test_set_name(test_set_name):
+        raise Exception("Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)")
+    
+    # Validate description
+    if description and not validate_description(description):
+        raise Exception("Description cannot exceed 200 characters")
+    
     test_set_id = f"{test_set_name.replace(' ', '-').lower()}"
     
     test_set_bucket = os.environ['TEST_SET_BUCKET']
@@ -83,6 +109,8 @@ def add_test_set_from_upload(args):
     item = {
         'PK': f'testset#{test_set_id}',
         'SK': 'metadata',
+        'ItemType': 'testset',
+        'InitialEventTime': now,
         'id': test_set_id,
         'name': test_set_name,
         'description': description,
@@ -110,6 +138,14 @@ def add_test_set(args):
     description = args.get('description', '')  # Optional field
     file_count = args['fileCount']
     
+    # Validate test set name
+    if not validate_test_set_name(test_set_name):
+        raise Exception("Test set name can only contain letters, numbers, spaces, hyphens, and underscores (max 50 characters)")
+    
+    # Validate description
+    if description and not validate_description(description):
+        raise Exception("Description cannot exceed 200 characters")
+    
     # Generate test set ID with name format, replace spaces with dashes
     test_set_id = f"{test_set_name.replace(' ', '-').lower()}"
     
@@ -119,6 +155,8 @@ def add_test_set(args):
     item = {
         'PK': f'testset#{test_set_id}',
         'SK': 'metadata',
+        'ItemType': 'testset',
+        'InitialEventTime': now,
         'id': test_set_id,
         'name': test_set_name,
         'description': description,
@@ -199,20 +237,61 @@ def delete_test_sets(args):
 def get_test_sets():
     logger.info("Retrieving all test sets and scanning for direct uploads")
     
-    # Get existing test sets from DynamoDB
-    items = db_client.scan_all(
-        filter_expression='begins_with(PK, :pk) AND SK = :sk',
-        expression_attribute_values={
-            ':pk': 'testset#',
-            ':sk': 'metadata'
+    # Use GSI to find testset PK/SK keys efficiently, then BatchGetItem for full records.
+    # This avoids scanning the entire TrackingTable (which includes all documents).
+    tracking_table = boto3.resource('dynamodb').Table(os.environ['TRACKING_TABLE'])
+    items = []
+    try:
+        from boto3.dynamodb.conditions import Key as DDBKey
+        # Step 1: GSI query to get testset keys (lightweight - only projected attrs)
+        gsi_items = []
+        query_kwargs = {
+            'IndexName': 'TypeDateIndex',
+            'KeyConditionExpression': DDBKey('ItemType').eq('testset'),
+            'ProjectionExpression': 'PK, SK',
         }
-    )
+        while True:
+            response = tracking_table.query(**query_kwargs)
+            gsi_items.extend(response.get('Items', []))
+            if 'LastEvaluatedKey' not in response:
+                break
+            query_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
+        
+        logger.info(f"GSI query found {len(gsi_items)} testset keys")
+        
+        if gsi_items:
+            # Step 2: BatchGetItem to fetch full records from base table
+            keys = [{'PK': item['PK'], 'SK': item['SK']} for item in gsi_items]
+            # DynamoDB BatchGetItem supports max 100 keys per call
+            for i in range(0, len(keys), 100):
+                batch_keys = keys[i:i+100]
+                batch_response = boto3.resource('dynamodb').batch_get_item(
+                    RequestItems={
+                        os.environ['TRACKING_TABLE']: {'Keys': batch_keys}
+                    }
+                )
+                items.extend(batch_response.get('Responses', {}).get(os.environ['TRACKING_TABLE'], []))
+            logger.info(f"BatchGetItem returned {len(items)} full testset records")
+    except Exception as e:
+        logger.warning(f"GSI+BatchGet failed, falling back to scan: {e}")
+        items = []
+    
+    # Fallback to scan only if GSI approach failed
+    if not items:
+        items = db_client.scan_all(
+            filter_expression='begins_with(PK, :pk) AND SK = :sk',
+            expression_attribute_values={
+                ':pk': 'testset#',
+                ':sk': 'metadata'
+            }
+        )
     
     existing_test_sets = {}
     result = []
     
     for item in items:
-        test_set_id = item['id']
+        # GSI projection may not include 'id' - derive from PK if needed
+        test_set_id = item.get('id') or item.get('PK', '').replace('testset#', '')
         existing_test_sets[test_set_id] = item
         result.append({
             'id': test_set_id,
@@ -334,8 +413,22 @@ def get_test_sets():
     return result
 
 def _is_valid_test_set_structure(s3_client, bucket, prefix):
-    """Check if prefix contains input/ and baseline/ folders"""
+    """Check if prefix contains input/ and baseline/ folders.
+    
+    Also checks for a .uploading marker file which indicates the CLI is still
+    uploading files. This prevents a race condition where the resolver auto-detects
+    and validates a test set before all files (especially baselines) are uploaded.
+    See: https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/193
+    """
     try:
+        # Check for upload-in-progress marker
+        try:
+            s3_client.head_object(Bucket=bucket, Key=f"{prefix}/.uploading")
+            logger.info(f"Skipping {prefix} - upload in progress (.uploading marker found)")
+            return False
+        except Exception:
+            pass  # No marker = not uploading, proceed with validation
+
         # Check for input/ folder
         input_response = s3_client.list_objects_v2(
             Bucket=bucket,
@@ -360,7 +453,12 @@ def _is_valid_test_set_structure(s3_client, bucket, prefix):
         return False
 
 def _validate_test_set_files(s3_client, bucket, prefix):
-    """Validate that input and baseline files match"""
+    """Validate that input and baseline files match.
+    
+    Each input file must have a corresponding baseline folder with the exact same name
+    (including extension). For example, input file 'doc.png' requires baseline folder 'doc.png/'.
+    Any file extension is supported, and mixed extensions within a test set are allowed.
+    """
     try:
         input_files = set()
         baseline_files = set()
@@ -374,7 +472,7 @@ def _validate_test_set_files(s3_client, bucket, prefix):
                     filename = key.split('/')[-1]
                     input_files.add(filename)
         
-        # Get baseline folder names
+        # Get baseline folder names (first folder after /baseline/)
         for page in paginator.paginate(Bucket=bucket, Prefix=f"{prefix}/baseline/"):
             for obj in page.get('Contents', []):
                 key = obj['Key']
@@ -382,12 +480,10 @@ def _validate_test_set_files(s3_client, bucket, prefix):
                     # Extract folder name after /baseline/
                     parts = key.split(f"{prefix}/baseline/", 1)
                     if len(parts) == 2 and '/' in parts[1]:
-                        path_parts = parts[1].split('/')
-                        # Look for .pdf file in path
-                        for part in path_parts:
-                            if part.endswith('.pdf'):
-                                baseline_files.add(part)
-                                break
+                        # First path component is the baseline folder name
+                        folder_name = parts[1].split('/')[0]
+                        if folder_name:
+                            baseline_files.add(folder_name)
         
         # Validate matching
         if len(input_files) == 0:
@@ -438,16 +534,19 @@ def _get_test_set_creation_time(s3_client, bucket, prefix):
 def _create_test_set_tracking_entry(test_set_id, name, file_count, status, error=None, created_at=None):
     """Create tracking table entry for direct upload test set"""
     try:
+        now = datetime.utcnow().isoformat() + 'Z'
         item = {
             'PK': f'testset#{test_set_id}',
             'SK': 'metadata',
+            'ItemType': 'testset',
+            'InitialEventTime': now,
             'id': test_set_id,
             'name': name,
             'description': '',  # Direct uploads don't have descriptions
             'filePattern': '',
             'fileCount': file_count,
             'status': status,
-            'createdAt': datetime.utcnow().isoformat() + 'Z'
+            'createdAt': now
         }
         
         if error:

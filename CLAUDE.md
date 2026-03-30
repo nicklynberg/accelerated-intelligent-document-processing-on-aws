@@ -29,7 +29,7 @@ python3 publish.py idp-1234567890 idp us-east-1 --verbose
 ```
 
 The build process:
-- Checks system dependencies (AWS CLI, SAM CLI, Docker, Python 3.11+, Node.js 22.12+)
+- Checks system dependencies (AWS CLI, SAM CLI, Docker, Python 3.12+, Node.js 22.12+)
 - Builds CloudFormation templates and assets using SAM
 - Pattern-2 functions are built as container images; Pattern-1 and Pattern-3 use ZIP-based Lambdas
 - Uploads artifacts to S3 bucket named `<cfn_bucket_basename>-<region>`
@@ -92,7 +92,7 @@ The IDP CLI is used for programmatic deployment and batch processing:
 
 ```bash
 # Install CLI
-cd idp_cli && pip install -e .
+make setup
 
 # Deploy a new stack
 idp-cli deploy \
@@ -177,7 +177,6 @@ The solution uses a modular architecture with the main template (`template.yaml`
    - OCR with Amazon Textract
    - Classification with UDOP model on SageMaker
    - Extraction with Bedrock
-   - Location: `patterns/pattern-3/`
 
 ### Document Processing Flow
 
@@ -309,9 +308,9 @@ Testing samples available in `samples/`:
 
 ## Validation Scripts
 
-- `scripts/validate_buildspec.py` - Validates CodeBuild buildspec files
-- `scripts/validate_service_role_permissions.py` - Verifies IAM service role permissions
-- `scripts/typecheck_pr_changes.py` - Type checks only changed files in PRs
+- `scripts/sdlc/validate_buildspec.py` - Validates CodeBuild buildspec files
+- `scripts/sdlc/validate_service_role_permissions.py` - Verifies IAM service role permissions
+- `scripts/sdlc/typecheck_pr_changes.py` - Type checks only changed files in PRs
 
 ## AWS Service Requirements
 

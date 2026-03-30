@@ -841,7 +841,7 @@ Resources:
     Type: AWS::Bedrock::DataSource
     Condition: IsS3DataSource
     Properties:
-      DataDeletionPolicy: DELETE
+      DataDeletionPolicy: RETAIN
       DataSourceConfiguration:
         Type: S3
         S3Configuration:
@@ -887,7 +887,7 @@ Resources:
     Type: AWS::Bedrock::DataSource
     Condition: IsWebDataSource
     Properties:
-      DataDeletionPolicy: DELETE
+      DataDeletionPolicy: RETAIN
       DataSourceConfiguration:
         Type: WEB
         WebConfiguration:

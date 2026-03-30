@@ -56,7 +56,7 @@ def create_analytics_agent(
     database_overview = _get_database_overview()
 
     # Define the system prompt for the analytics agent
-    system_prompt = f"""
+    system_prompt = f"""  # nosec B608 - AI agent prompt template, not SQL execution
     You are an AI agent that converts natural language questions into Athena queries, executes those queries, and writes python code to convert the query results into json representing either a plot, a table, or a string.
     
     # Task
@@ -119,6 +119,12 @@ def create_analytics_agent(
     ## For Accuracy Questions:
     - "Document accuracy" → Use `evaluation` tables (may be empty)
     - "Precision/recall metrics" → Use `evaluation` tables
+    
+    ## For Rule Validation/Compliance Questions:
+    - "Rule validation failures" → Use `rule_validation_details` table
+    - "Documents that failed rules" → Use `rule_validation_summary` table
+    - "Most common rule failures" → Use `rule_validation_details` table
+    - "Rule compliance rates" → Use `rule_validation_summary` table
     
     ## For Content/Extraction Questions:
     - "What was extracted from documents?" → Use appropriate `document_sections_*` table

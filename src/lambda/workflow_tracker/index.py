@@ -134,6 +134,11 @@ def update_document_completion(object_key: str, workflow_status: str, output_dat
                 data_to_save.append('sections')
                 logger.info(f"Found {len(sections_with_results)} sections with extraction results")
         
+        # Check if rule validation results are available
+        if hasattr(document, 'rule_validation_result') and document.rule_validation_result:
+            data_to_save.append('rule_validation_results')
+            logger.info("Found rule validation results")
+        
         if data_to_save:
             try:
                 logger.info(f"Saving reporting data ({', '.join(data_to_save)}) to {REPORTING_BUCKET} by calling Lambda {SAVE_REPORTING_FUNCTION_NAME}")

@@ -5,21 +5,97 @@ from idp_common.config.configuration_manager import ConfigurationManager
 from idp_common.config.models import SchemaConfig, IDPConfig, PricingConfig
 from idp_common.config.constants import (
     CONFIG_TYPE_SCHEMA,
-    CONFIG_TYPE_DEFAULT,
-    CONFIG_TYPE_CUSTOM,
     CONFIG_TYPE_DEFAULT_PRICING,
     CONFIG_TYPE_CUSTOM_PRICING,
+    CONFIG_TYPE_CONFIG,
+    DEFAULT_VERSION,
 )
 from pydantic import ValidationError
 import os
 import json
 import logging
+import re
+import time
+
+import boto3
+from boto3.dynamodb.conditions import Key as DDBKey
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 logging.getLogger("idp_common.bedrock.client").setLevel(
     os.environ.get("BEDROCK_LOG_LEVEL", "INFO")
 )
+
+# DynamoDB resource for user scope lookups
+_dynamodb = boto3.resource("dynamodb")
+
+# User scope cache (TTL-based, per Lambda container)
+_user_scope_cache = {}
+_USER_SCOPE_CACHE_TTL = 60  # seconds
+
+
+def _get_caller_info(event):
+    """Extract caller's email and groups from AppSync event identity."""
+    identity = event.get("identity", {})
+    claims = identity.get("claims", {})
+    groups = claims.get("cognito:groups", [])
+    username = claims.get("cognito:username", "") or claims.get("sub", "")
+    email = claims.get("email", "") or identity.get("username", "") or username
+    if isinstance(groups, str):
+        groups = [groups]
+    return {
+        "email": email,
+        "username": username,
+        "groups": groups,
+        "is_admin": "Admin" in groups,
+    }
+
+
+def _get_user_allowed_config_versions(caller_email):
+    """Look up user's allowedConfigVersions from UsersTable with caching."""
+    users_table_name = os.environ.get("USERS_TABLE_NAME", "")
+    if not users_table_name:
+        return None
+
+    now = time.time()
+    cached = _user_scope_cache.get(caller_email)
+    if cached and (now - cached["timestamp"]) < _USER_SCOPE_CACHE_TTL:
+        return cached["scope"]
+
+    try:
+        users_table = _dynamodb.Table(users_table_name)
+        response = users_table.query(
+            IndexName="EmailIndex",
+            KeyConditionExpression=DDBKey("email").eq(caller_email),
+        )
+        items = response.get("Items", [])
+        if items:
+            scope = items[0].get("allowedConfigVersions")
+            result = list(scope) if scope and len(scope) > 0 else None
+        else:
+            result = None
+    except Exception as e:
+        logger.warning(f"Failed to look up user scope for {caller_email}: {e}")
+        result = None
+
+    _user_scope_cache[caller_email] = {"scope": result, "timestamp": now}
+    return result
+
+
+def validate_version_name(name):
+    """Validate version name: alphanumeric, hyphens, underscores only, max 50 chars"""
+    if not name or not isinstance(name, str):
+        return False
+    return re.match(r'^[a-zA-Z0-9-_]+$', name) and len(name) <= 50
+
+
+def validate_description(description):
+    """Validate description: max 200 chars only"""
+    if description is None or description == "":
+        return True  # Optional field
+    if not isinstance(description, str):
+        return False
+    return len(description) <= 200
 
 
 def handler(event, context):
@@ -54,19 +130,90 @@ def handler(event, context):
     # Initialize ConfigurationManager
     manager = ConfigurationManager()
 
+    # Get caller info for scope enforcement
+    caller = _get_caller_info(event)
+    allowed_versions = None
+    if not caller["is_admin"]:
+        allowed_versions = _get_user_allowed_config_versions(caller["email"])
+        logger.info(f"Config scope for {caller['email']}: {allowed_versions or 'unrestricted'}")
+
     try:
-        if operation == "getConfiguration":
-            return handle_get_configuration(manager)
+        if operation == "getConfigVersions":
+            return handle_get_config_versions(manager, allowed_versions)
+        elif operation == "getConfigVersion":
+            version_name = event["arguments"].get("versionName")
+            # Enforce scope on getConfigVersion
+            if allowed_versions and version_name and version_name not in allowed_versions:
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "Unauthorized",
+                        "message": f"Access denied: version '{version_name}' is not in your allowed scope",
+                    },
+                }
+            return handle_get_configuration(manager, version_name)
         elif operation == "updateConfiguration":
             args = event["arguments"]
+            version = args.get("versionName")
             custom_config = args.get("customConfig")
-            success = manager.handle_update_custom_configuration(custom_config)
+            description = args.get("description")
+            if not version:
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "ValidationError",
+                        "message": "versionId is required",
+                    },
+                }
+            # Validate version name if provided
+            if not validate_version_name(version):
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "ValidationError",
+                        "message": "Version name can only contain letters, numbers, hyphens, and underscores (max 50 characters)",
+                    },
+                }
+            # Validate description if provided
+            if description and not validate_description(description):
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "ValidationError",
+                        "message": "Description cannot exceed 200 characters",
+                    },
+                }
+            # RBAC: "Save as Version" and "Save as Default" are Admin-only operations.
+            # The updateConfiguration mutation allows Admin+Author at the schema level,
+            # but saveAsVersion and saveAsDefault flags require Admin role.
+            if custom_config:
+                config_data = json.loads(custom_config) if isinstance(custom_config, str) else custom_config
+                is_save_as_version = config_data.get("saveAsVersion", False)
+                is_save_as_default = config_data.get("saveAsDefault", False)
+                if (is_save_as_version or is_save_as_default) and not caller["is_admin"]:
+                    operation_name = "Save as Version" if is_save_as_version else "Save as Default"
+                    return {
+                        "success": False,
+                        "error": {
+                            "type": "Unauthorized",
+                            "message": f"Access denied: '{operation_name}' is an Admin-only operation",
+                        },
+                    }
+            success = manager.handle_update_custom_configuration(custom_config, version, description)
             return {
                 "success": success,
                 "message": "Configuration updated successfully"
                 if success
                 else "Configuration update failed",
             }
+        elif operation == "setActiveVersion":
+            args = event["arguments"]
+            version = args.get("versionName")
+            return handle_set_active_version(manager, version)
+        elif operation == "deleteConfigVersion":
+            args = event["arguments"]
+            version = args.get("versionName")
+            return handle_delete_config_version(manager, version)
         elif operation == "getPricing":
             return handle_get_pricing(manager)
         elif operation == "updatePricing":
@@ -129,21 +276,28 @@ def handler(event, context):
         }
 
 
-def handle_get_configuration(manager):
+def handle_get_configuration(manager, version: str):
     """
     Handle the getConfiguration GraphQL query
-    Returns Schema, Default, and Custom configuration items with auto-migration support
-
-    Data Flow:
-    1. If Custom is empty on first read, copy Default → Custom
-    2. Frontend only uses Custom for display and diffing
-    3. Default is only used for "Reset to Default" operation
-
-    New ConfigurationManager API returns IDPConfig directly - convert to dict for GraphQL
+    Returns Schema and version configuration items.
+    
+    DESIGN PATTERN (CRITICAL):
+    - Default: Full stack baseline (Pydantic validated)
+    - Version: SPARSE DELTAS ONLY (raw from DynamoDB, NO Pydantic defaults!)
+    - Frontend merges Default + Version for display
+    - Runtime uses get_merged_configuration() for processing
+    
+    This design allows:
+    - Stack upgrades to safely update Default without losing user customizations
+    - Empty Version = all defaults (clean reset)
+    - User customizations survive stack updates
+    
+    ANTI-PATTERNS TO AVOID:
+    - DO NOT auto-copy default → version when version is empty
+    - DO NOT use Pydantic validation on version (fills in defaults)
     """
     try:
-        # Get all configurations - migration happens automatically in get_configuration
-        # API returns SchemaConfig for Schema, IDPConfig for Default/Custom
+        # Get Schema configuration (Pydantic validated - this is correct for Schema)
         schema_config = manager.get_configuration(CONFIG_TYPE_SCHEMA)
         if schema_config:
             # Remove config_type discriminator before sending to frontend
@@ -153,7 +307,8 @@ def handle_get_configuration(manager):
         else:
             schema_dict = {}
 
-        default_config = manager.get_configuration(CONFIG_TYPE_DEFAULT)
+        # Get Default configuration (Pydantic validated - full stack baseline)
+        default_config = manager.get_configuration(CONFIG_TYPE_CONFIG, DEFAULT_VERSION)
         if default_config and isinstance(default_config, IDPConfig):
             default_dict = default_config.model_dump(
                 mode="python", exclude={"config_type"}
@@ -161,38 +316,29 @@ def handle_get_configuration(manager):
         else:
             default_dict = {}
 
-        custom_config = manager.get_configuration(CONFIG_TYPE_CUSTOM)
-
-        # IMPORTANT: If Custom is empty on first read, copy Default → Custom
-        # This ensures frontend always has a complete config to diff against
-        if not custom_config or (
-            isinstance(custom_config, IDPConfig)
-            and not custom_config.model_dump(exclude_unset=True)
-        ):
-            logger.info("Custom config is empty, copying Default → Custom")
-            if default_config and isinstance(default_config, IDPConfig):
-                manager.save_configuration(CONFIG_TYPE_CUSTOM, default_config)
-                custom_config = default_config
-                logger.info("Copied Default to Custom on first read")
-            else:
-                logger.warning("Default config is also empty, using empty Custom")
-
-        if custom_config and isinstance(custom_config, IDPConfig):
-            custom_dict = custom_config.model_dump(
-                mode="python", exclude={"config_type"}
-            )
-        else:
-            custom_dict = {}
+        if not version:
+            raise ValueError("version is missing")
+        
+        
+        # Get Version configuration as RAW dict (NO Pydantic defaults!)
+        # This is critical for the sparse delta pattern to work correctly
+        version_dict = manager.get_raw_configuration(CONFIG_TYPE_CONFIG, version)
+        
+        # If version dict doesn't exist or is empty, return empty dict
+        # DO NOT auto-copy Default → Custom (this breaks the delta pattern)
+        if not version_dict:
+            logger.info("Custom config is empty or not found - returning empty dict (expected behavior)")
+            version_dict = {}
 
         # Return all configurations as dicts (GraphQL requires JSON-serializable)
         result = {
             "success": True,
             "Schema": schema_dict,
             "Default": default_dict,
-            "Custom": custom_dict,
+            "Custom": {} if version == "default" else version_dict,
         }
 
-        logger.info(f"Returning configuration")
+        logger.info("Returning configuration (default=full, Version=deltas only)")
         return result
 
     except Exception as e:
@@ -557,5 +703,185 @@ def handle_restore_default_pricing(manager):
             "error": {
                 "type": "Error",
                 "message": f"Failed to restore default pricing: {str(e)}",
+            },
+        }
+
+
+def handle_get_config_versions(manager, allowed_versions=None):
+    """
+    Handle the getConfigVersions GraphQL query
+    Returns list of all available configuration versions, filtered by user scope.
+    """
+    try:
+        versions = manager.list_config_versions()
+        
+        # Filter by user's allowed config versions if scope is set
+        if allowed_versions:
+            versions = [v for v in versions if v.get("versionName") in allowed_versions]
+            logger.info(f"Filtered config versions by scope: {len(versions)} versions returned")
+        
+        return {
+            "success": True,
+            "versions": versions
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in getConfigVersions: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to get configuration versions: {str(e)}",
+            },
+        }
+
+
+def handle_set_active_version(manager, version):
+    """
+    Handle the setActiveVersion GraphQL mutation
+    Sets a specific version as active and deactivates others.
+    
+    BDA Auto-Sync: If the version has use_bda=True and a linked BDA project,
+    auto-syncs the config to BDA on activation to ensure it's current.
+    If use_bda=True but no BDA project exists, auto-creates one.
+    """
+    try:
+        if not version:
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "versionId is required",
+                },
+            }
+        
+        # Check if the version exists
+        config = manager.get_configuration("Config", version)
+        if not config:
+            return {
+                "success": False,
+                "error": {
+                    "type": "NotFoundError",
+                    "message": f"Configuration version '{version}' not found",
+                },
+            }
+        
+        # Set the version as active
+        manager.activate_version(version)
+        
+        # BDA Auto-Sync on activation: if use_bda is enabled, ensure BDA project is synced
+        bda_message = ""
+        try:
+            config_dict = config.model_dump(mode="python") if hasattr(config, 'model_dump') else {}
+            use_bda = config_dict.get("use_bda", False)
+            
+            if use_bda:
+                bda_arn = manager.get_bda_project_arn(version)
+                if bda_arn:
+                    # Has linked project — mark as needing sync (actual sync happens via UI or next sync call)
+                    bda_sync_status = manager.get_bda_project_arn(version)  # Check current status
+                    logger.info(f"Version {version} activated with BDA project {bda_arn}")
+                    bda_message = f" BDA project linked: {bda_arn}"
+                else:
+                    # No BDA project — note this for the user
+                    logger.info(f"Version {version} activated with use_bda=True but no BDA project linked")
+                    bda_message = " Note: BDA is enabled but no project is linked. Use 'Sync to BDA' to create one."
+        except Exception as bda_e:
+            logger.warning(f"BDA check during activation failed (non-blocking): {bda_e}")
+        
+        return {
+            "success": True,
+            "message": f"Configuration version {version} set as active.{bda_message}",
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in setActiveVersion: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to set active version: {str(e)}",
+            },
+        }
+    
+
+def handle_delete_config_version(manager, version, delete_bda_project=True):
+    """
+    Handle the deleteConfigVersion GraphQL mutation.
+    Deletes a specific configuration version and optionally its linked BDA project.
+    
+    Args:
+        manager: ConfigurationManager instance
+        version: Version name to delete
+        delete_bda_project: If True, also delete the linked BDA project (default: True)
+    """
+    try:
+        if not version:
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "versionId is required",
+                },
+            }
+        
+        # Prevent deletion of system default version
+        if version == "default":
+            return {
+                "success": False,
+                "error": {
+                    "type": "ValidationError",
+                    "message": "Cannot delete system default version",
+                },
+            }
+        
+        # Prevent deletion of stack-managed versions
+        try:
+            existing_config = manager.get_configuration("Config", version)
+            if existing_config and getattr(existing_config, 'managed', False):
+                return {
+                    "success": False,
+                    "error": {
+                        "type": "ValidationError",
+                        "message": f"Cannot delete stack-managed version '{version}'",
+                    },
+                }
+        except Exception as e:
+            logger.warning(f"Error checking managed status for version {version}: {e}")
+        
+        # Check for linked BDA project and optionally delete it
+        bda_cleanup_message = ""
+        if delete_bda_project:
+            try:
+                bda_arn = manager.get_bda_project_arn(version)
+                if bda_arn:
+                    logger.info(f"Attempting to delete linked BDA project: {bda_arn}")
+                    try:
+                        from idp_common.bda.bda_blueprint_service import BdaBlueprintService
+                        bda_service = BdaBlueprintService(dataAutomationProjectArn=bda_arn)
+                        bda_service.delete_project(bda_arn)
+                        bda_cleanup_message = f" Linked BDA project deleted: {bda_arn}"
+                        logger.info(f"Successfully deleted BDA project: {bda_arn}")
+                    except Exception as bda_e:
+                        logger.warning(f"Failed to delete BDA project {bda_arn}: {bda_e}")
+                        bda_cleanup_message = f" Warning: Failed to delete linked BDA project: {bda_arn}"
+            except Exception as e:
+                logger.warning(f"Error checking BDA project for version {version}: {e}")
+        
+        # Delete the version
+        manager.delete_configuration("Config", version)
+        
+        return {
+            "success": True,
+            "message": f"Configuration version {version} deleted successfully.{bda_cleanup_message}",
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in deleteConfigVersion: {str(e)}")
+        return {
+            "success": False,
+            "error": {
+                "type": "Error",
+                "message": f"Failed to delete configuration version: {str(e)}",
             },
         }

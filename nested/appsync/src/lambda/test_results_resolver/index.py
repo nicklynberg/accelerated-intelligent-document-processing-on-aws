@@ -4,6 +4,7 @@
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -24,6 +25,15 @@ class DecimalEncoder(json.JSONEncoder):
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
+_SAFE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_\-./]+$')
+
+
+def _validate_sql_input(value, name):
+    """Validate that a value is safe for use in SQL queries."""
+    if not value or not _SAFE_ID_PATTERN.match(value):
+        raise ValueError(f"{name} contains invalid characters: {value}")
+    return value
+
 dynamodb = boto3.resource('dynamodb')
 
 def handler(event, context):
@@ -37,9 +47,19 @@ def handler(event, context):
     field_name = event['info']['fieldName']
     
     if field_name == 'getTestRuns':
-        time_period_hours = event.get('arguments', {}).get('timePeriodHours', 2)  # Default 2 hours
-        logger.info(f"Processing getTestRuns request with timePeriodHours: {time_period_hours}")
-        return get_test_runs(time_period_hours)
+        args = event.get('arguments', {})
+        start_date_time = args.get('startDateTime')
+        end_date_time = args.get('endDateTime')
+        time_period_hours = args.get('timePeriodHours', 2)
+        
+        if start_date_time and end_date_time:
+            start_iso, end_iso = start_date_time, end_date_time
+        else:
+            end_iso = datetime.utcnow().isoformat() + 'Z'
+            start_iso = (datetime.utcnow() - timedelta(hours=time_period_hours)).isoformat() + 'Z'
+        
+        logger.info(f"Processing getTestRuns request: {start_iso} → {end_iso}")
+        return get_test_runs(start_iso, end_iso)
     elif field_name == 'getTestRun':
         test_run_id = event['arguments']['testRunId']
         logger.info(f"Processing getTestRun request for test run: {test_run_id}")
@@ -74,6 +94,8 @@ def handle_cache_update_request(event, context):
                 'weightedOverallScores': aggregated_metrics.get('weighted_overall_scores', {}),
                 'averageConfidence': aggregated_metrics.get('average_confidence'),
                 'accuracyBreakdown': aggregated_metrics.get('accuracy_breakdown', {}),
+                'confusionMatrix': aggregated_metrics.get('confusion_matrix', {}),
+                'fieldMetrics': aggregated_metrics.get('field_metrics', {}),
                 'splitClassificationMetrics': aggregated_metrics.get('split_classification_metrics', {}),
                 'totalCost': aggregated_metrics.get('total_cost', 0),
                 'costBreakdown': aggregated_metrics.get('cost_breakdown', {})
@@ -193,6 +215,8 @@ def get_test_results(test_run_id):
         # Check if cached data needs recalculation
         cached_scores = cached_metrics.get('weightedOverallScores')
         if ('splitClassificationMetrics' not in cached_metrics or 
+            'confusionMatrix' not in cached_metrics or
+            'fieldMetrics' not in cached_metrics or
             isinstance(cached_scores, list)):
             logger.info(f"Cached metrics incomplete or outdated, recalculating for test run: {test_run_id}")
             # Force recalculation by falling through to aggregation logic
@@ -210,89 +234,79 @@ def get_test_results(test_run_id):
                 'weightedOverallScores': cached_metrics.get('weightedOverallScores', {}),
                 'averageConfidence': cached_metrics.get('averageConfidence'),
                 'accuracyBreakdown': cached_metrics.get('accuracyBreakdown', {}),
+                'confusionMatrix': cached_metrics.get('confusionMatrix', {}),
+                'fieldMetrics': cached_metrics.get('fieldMetrics', {}),
                 'splitClassificationMetrics': cached_metrics.get('splitClassificationMetrics', {}),
                 'totalCost': cached_metrics.get('totalCost', 0),
                 'costBreakdown': cached_metrics.get('costBreakdown', {}),
                 'createdAt': _format_datetime(metadata.get('CreatedAt')),
                 'completedAt': _format_datetime(metadata.get('CompletedAt')),
                 'context': metadata.get('Context'),
+                'configVersion': metadata.get('ConfigVersion'),
                 'config': _get_test_run_config(test_run_id)
             }
+    else:
+        raise ValueError(f"Test run {test_run_id} processing completed, evaluating results")
+  
+
+def _query_test_runs_from_gsi(table, start_iso, end_iso):
+    """Query test runs from TypeDateIndex GSI instead of scanning the full table.
     
-    # Calculate aggregated metrics
-    aggregated_metrics = _aggregate_test_run_metrics(test_run_id)
+    Uses GSI to find testrun keys efficiently, then BatchGetItem for full records
+    (GSI projection doesn't include all fields like Context, ConfigVersion, etc.).
+    Falls back to scan if GSI query returns no results (backfill may not be complete).
+    """
+    from boto3.dynamodb.conditions import Key
     
-    result = {
-        'testRunId': test_run_id,
-        'testSetId': metadata.get('TestSetId'),
-        'testSetName': metadata.get('TestSetName'),
-        'status': current_status,
-        'filesCount': metadata.get('FilesCount', 0),
-        'completedFiles': metadata.get('CompletedFiles', 0),
-        'failedFiles': metadata.get('FailedFiles', 0),
-        'overallAccuracy': aggregated_metrics.get('overall_accuracy'),
-        'weightedOverallScores': aggregated_metrics.get('weighted_overall_scores', {}),
-        'averageConfidence': aggregated_metrics.get('average_confidence'),
-        'accuracyBreakdown': aggregated_metrics.get('accuracy_breakdown', {}),
-        'splitClassificationMetrics': aggregated_metrics.get('split_classification_metrics', {}),
-        'totalCost': aggregated_metrics.get('total_cost', 0),
-        'costBreakdown': aggregated_metrics.get('cost_breakdown', {}),
-        'createdAt': _format_datetime(metadata.get('CreatedAt')),
-        'completedAt': _format_datetime(metadata.get('CompletedAt')),
-        'context': metadata.get('Context'),
-        'config': _get_test_run_config(test_run_id)
+    gsi_items = []
+    query_kwargs = {
+        'IndexName': 'TypeDateIndex',
+        'KeyConditionExpression': Key('ItemType').eq('testrun') & Key('InitialEventTime').between(start_iso, end_iso),
+        'ScanIndexForward': False,  # Newest first
+        'ProjectionExpression': 'PK, SK',
     }
-
-    # Cache only the static metrics (not status/counts)
+    
     try:
-        logger.info(f"Caching metrics for test run: {test_run_id}")
+        while True:
+            response = table.query(**query_kwargs)
+            gsi_items.extend(response.get('Items', []))
+            
+            if 'LastEvaluatedKey' not in response:
+                break
+            query_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
         
-        # Cache only static metrics
-        metrics_to_cache = {
-            'overallAccuracy': aggregated_metrics.get('overall_accuracy'),
-            'weightedOverallScores': aggregated_metrics.get('weighted_overall_scores', {}),
-            'averageConfidence': aggregated_metrics.get('average_confidence'),
-            'accuracyBreakdown': aggregated_metrics.get('accuracy_breakdown', {}),
-            'splitClassificationMetrics': aggregated_metrics.get('split_classification_metrics', {}),
-            'totalCost': aggregated_metrics.get('total_cost', 0),
-            'costBreakdown': aggregated_metrics.get('cost_breakdown', {})
-        }
+        logger.info(f"GSI query returned {len(gsi_items)} test run keys")
         
-        table.update_item(
-            Key={'PK': f'testrun#{test_run_id}', 'SK': 'metadata'},
-            UpdateExpression='SET testRunResult = :testRunResult',
-            ExpressionAttributeValues={':testRunResult': float_to_decimal(metrics_to_cache)}
-        )
-        logger.info(f"Successfully cached metrics for test run: {test_run_id}")
+        # If GSI returned results, fetch full records via BatchGetItem
+        if gsi_items:
+            items = []
+            keys = [{'PK': item['PK'], 'SK': item['SK']} for item in gsi_items]
+            table_name = table.table_name
+            # DynamoDB BatchGetItem supports max 100 keys per call
+            for i in range(0, len(keys), 100):
+                batch_keys = keys[i:i+100]
+                batch_response = boto3.resource('dynamodb').batch_get_item(
+                    RequestItems={table_name: {'Keys': batch_keys}}
+                )
+                items.extend(batch_response.get('Responses', {}).get(table_name, []))
+            logger.info(f"BatchGetItem returned {len(items)} full test run records")
+            return items
+        
+        # Fallback: GSI may not have ItemType yet (backfill pending).
+        # Try scan with CreatedAt filter as fallback.
+        logger.info("GSI returned 0 results, falling back to scan (backfill may be pending)")
     except Exception as e:
-        logger.warning(f"Failed to cache results for {test_run_id}: {e}")
+        logger.warning(f"GSI query failed, falling back to scan: {e}")
     
-    return result
-
-def get_test_runs(time_period_hours=2):
-    """Get list of test runs within specified time period"""
-    table = dynamodb.Table(os.environ['TRACKING_TABLE'])  # type: ignore[attr-defined]  # type: ignore[attr-defined]
-    
-    # Validate and sanitize time_period_hours
-    if time_period_hours is None or not isinstance(time_period_hours, (int, float)):
-        time_period_hours = 2  # Default to 2 hours
-    
-    # Calculate cutoff time
-    cutoff_time = datetime.utcnow() - timedelta(hours=time_period_hours)
-    cutoff_iso = cutoff_time.isoformat() + 'Z'
-    
-    logger.info(f"Fetching test runs created after: {cutoff_iso}")
-    logger.info(f"Current UTC time: {datetime.utcnow().isoformat()}Z")
-    logger.info(f"Time period hours: {time_period_hours}")
-    
-    # Handle pagination for DynamoDB scan
+    # Fallback scan
     items = []
     scan_kwargs = {
-        'FilterExpression': 'begins_with(PK, :pk) AND SK = :sk AND CreatedAt >= :cutoff',
+        'FilterExpression': 'begins_with(PK, :pk) AND SK = :sk AND CreatedAt >= :start AND CreatedAt <= :end',
         'ExpressionAttributeValues': {
             ':pk': 'testrun#',
             ':sk': 'metadata',
-            ':cutoff': cutoff_iso
+            ':start': start_iso,
+            ':end': end_iso
         }
     }
     
@@ -304,49 +318,46 @@ def get_test_runs(time_period_hours=2):
             break
         scan_kwargs['ExclusiveStartKey'] = response['LastEvaluatedKey']
     
-    logger.info(f"DynamoDB scan completed. Items found: {len(items)}")
-    if items:
-        logger.info(f"Sample item CreatedAt: {items[0].get('CreatedAt')}")
-    else:
-        logger.info("No items found in scan")
-    
+    logger.info(f"Fallback scan returned {len(items)} test runs")
+    return items
+
+
+def _build_test_run_list(items):
+    """Build sorted test run list from raw DynamoDB items."""
     test_runs = []
+
     for item in items:
-        # If completedAt is missing, call get_test_run_status to update it
-        status_result = None
-        if not item.get('CompletedAt'):
-            status_result = get_test_run_status(item['TestRunId'])
-            # Refresh item from database to get updated CompletedAt
-            updated_response = table.get_item(
-                Key={'PK': f'testrun#{item["TestRunId"]}', 'SK': 'metadata'}
-            )
-            if 'Item' in updated_response:
-                item = updated_response['Item']
-        
+        display_status = item.get('Status')
+        if display_status in ['COMPLETE', 'PARTIAL_COMPLETE'] and not item.get('testRunResult'):
+            display_status = 'EVALUATING'
+
         test_runs.append({
             'testRunId': item['TestRunId'],
             'testSetId': item.get('TestSetId'),
             'testSetName': item.get('TestSetName'),
-            'status': status_result.get('status') if status_result else item.get('Status'),
+            'status': display_status,
             'filesCount': item.get('FilesCount', 0),
-            'completedFiles': status_result.get('completedFiles') if status_result else item.get('CompletedFiles', 0),
-            'failedFiles': status_result.get('failedFiles') if status_result else item.get('FailedFiles', 0),
+            'completedFiles': item.get('CompletedFiles', 0),
+            'failedFiles': item.get('FailedFiles', 0),
             'createdAt': _format_datetime(item.get('CreatedAt')),
             'completedAt': _format_datetime(item.get('CompletedAt')),
-            'context': item.get('Context')
+            'context': item.get('Context'),
+            'configVersion': item.get('ConfigVersion')
         })
-    
-    # Sort by createdAt descending (most recent first)
-    # Handle None values and convert to datetime for proper sorting
-    def sort_key(test_run):
-        created_at = test_run.get('createdAt')
-        if not created_at:
-            return '1970-01-01T00:00:00Z'  # Very old date for None values
-        return created_at
-    
-    test_runs.sort(key=sort_key, reverse=True)
-    
+
+    test_runs.sort(key=lambda r: r.get('createdAt') or '1970-01-01T00:00:00Z', reverse=True)
     return test_runs
+
+
+def get_test_runs(start_iso, end_iso):
+    """Get list of test runs within a date range"""
+    table = dynamodb.Table(os.environ['TRACKING_TABLE'])  # type: ignore[attr-defined]
+
+    logger.info(f"Fetching test runs between: {start_iso} and {end_iso}")
+    items = _query_test_runs_from_gsi(table, start_iso, end_iso)
+    logger.info(f"Test runs found: {len(items)}")
+
+    return _build_test_run_list(items)
 
 def _calculate_completed_at(test_run_id, files, table):
     """Calculate completedAt timestamp from document CompletionTime"""
@@ -502,11 +513,16 @@ def get_test_run_status(test_run_id):
             except Exception as e:
                 logger.error(f"Failed to auto-update test run {test_run_id} status: {e}")
         
+        # Report EVALUATING to caller until cached metrics are available
+        display_status = overall_status
+        if display_status in ['COMPLETE', 'PARTIAL_COMPLETE'] and not item.get('testRunResult'):
+            display_status = 'EVALUATING'
+        
         progress = ((completed_files + total_failed_files) / files_count * 100) if files_count > 0 else 0
         
         result = {
             'testRunId': test_run_id,
-            'status': overall_status,
+            'status': display_status,
             'filesCount': files_count,
             'completedFiles': completed_files,
             'failedFiles': total_failed_files,
@@ -522,11 +538,59 @@ def get_test_run_status(test_run_id):
         return None
 
 def _aggregate_test_run_metrics(test_run_id):
-    """Aggregate metrics from Athena queries for all documents in test run"""
-    # Get evaluation metrics from Athena
-    evaluation_metrics = _get_evaluation_metrics_from_athena(test_run_id)
+    """Aggregate metrics using Stickler bulk evaluator (with Athena fallback)"""
     
-    # Get cost data from Athena
+    # Try Stickler-based aggregation via Lambda function
+    test_execution_aggregation_arn = os.environ.get('TEST_EXECUTION_AGGREGATION_FUNCTION_ARN')
+    
+    if test_execution_aggregation_arn:
+        try:
+            lambda_client = boto3.client('lambda')
+            
+            # Invoke the test execution aggregation function
+            response = lambda_client.invoke(
+                FunctionName=test_execution_aggregation_arn,
+                InvocationType='RequestResponse',
+                Payload=json.dumps({
+                    'test_run_id': test_run_id
+                })
+            )
+            
+            # Parse response
+            payload = json.loads(response['Payload'].read())
+            
+            if payload.get('statusCode') == 200:
+                stickler_metrics = json.loads(payload['body'])
+                
+                # If we got valid results, use them and get split metrics and confidence from Athena
+                if stickler_metrics.get('document_count', 0) > 0:
+                    logger.info(f"Using Stickler aggregation for test run {test_run_id}")
+                    
+                    # Get split metrics and confidence from Athena
+                    athena_metrics = _get_evaluation_metrics_from_athena(test_run_id)
+                    cost_data = _get_cost_data_from_athena(test_run_id)
+                    
+                    # Merge Stickler metrics with Athena split metrics and confidence
+                    return {
+                        **stickler_metrics,
+                        'average_confidence': athena_metrics.get('average_confidence'),
+                        'split_classification_metrics': athena_metrics.get('split_classification_metrics', {}),
+                        'total_cost': cost_data.get('total_cost', 0),
+                        'cost_breakdown': cost_data.get('cost_breakdown', {})
+                    }
+                else:
+                    logger.warning(f"Test execution aggregation returned empty metrics (document_count=0) for {test_run_id}, falling back to Athena")
+            else:
+                logger.warning(f"Test execution aggregation returned error: {payload}")
+                
+        except Exception as e:
+            logger.error(f"Test execution aggregation Lambda failed for {test_run_id}, falling back to Athena: {e}")
+    else:
+        logger.info(f"TEST_EXECUTION_AGGREGATION_FUNCTION_ARN not set, using Athena aggregation")
+    
+    # Fallback to Athena-based aggregation
+    logger.info(f"Using Athena aggregation for test run {test_run_id}")
+    evaluation_metrics = _get_evaluation_metrics_from_athena(test_run_id)
     cost_data = _get_cost_data_from_athena(test_run_id)
     
     return {
@@ -566,7 +630,7 @@ def _get_test_run_config(test_run_id):
     return convert_decimals(config)
 
 def _build_config_comparison(configs):
-    """Build configuration differences - compare Custom configs, fallback to Default"""
+    """Build configuration differences - compare actual Config structure"""
     if not configs or len(configs) < 2:
         return None
     
@@ -577,6 +641,13 @@ def _build_config_comparison(configs):
         for key in keys:
             if isinstance(current, dict) and key in current:
                 current = current[key]
+            elif isinstance(current, list) and key.isdigit():
+                # Handle array index access
+                index = int(key)
+                if 0 <= index < len(current):
+                    current = current[index]
+                else:
+                    return None
             else:
                 return None
         return current
@@ -584,66 +655,71 @@ def _build_config_comparison(configs):
     def get_all_paths(dictionary, prefix=""):
         """Get all nested paths from dictionary"""
         paths = []
+        ignored_fields = {'UpdatedAt', 'Description', 'CreatedAt', 'IsActive', 'Configuration', 'version_name', 'classes'}
+        
         for key, value in dictionary.items():
+            # Skip ignored metadata fields
+            if key in ignored_fields:
+                continue
+                
             current_path = f"{prefix}.{key}" if prefix else key
             if isinstance(value, dict):
                 paths.extend(get_all_paths(value, current_path))
+            elif isinstance(value, list):
+                # Handle arrays by creating indexed paths for each element
+                for i, item in enumerate(value):
+                    item_path = f"{current_path}.{i}"
+                    if isinstance(item, dict):
+                        paths.extend(get_all_paths(item, item_path))
+                    else:
+                        paths.append(item_path)
             else:
                 paths.append(current_path)
         return paths
     
     # Get all possible configuration paths from all configs
     all_paths = set()
-    default_config = {}
     
     for config_item in configs:
         config = config_item['config']
-        custom = config.get('Custom', {})
-        default = config.get('Default', {})
-        
-        all_paths.update(get_all_paths(custom))
-        all_paths.update(get_all_paths(default))
-        
-        # Use first config's default as reference
-        if not default_config:
-            default_config = default
+        actual_config = config.get('Config', {})
+        all_paths.update(get_all_paths(actual_config))
+    
+    # Sort paths for consistent ordering with configuration UI
+    sorted_paths = sorted(all_paths)
     
     differences = []
-    for path in all_paths:
+    for path in sorted_paths:
         values = {}
         has_differences = False
         first_value = None
         
-        # Get effective values for each test run
+        # Get values for each test run
         for config_item in configs:
             test_run_id = config_item['testRunId']
             config = config_item['config']
-            custom = config.get('Custom', {})
-            default = config.get('Default', {})
+            actual_config = config.get('Config', {})
             
-            # Get effective value (Custom overrides Default)
-            value = get_nested_value(custom, path)
+            value = get_nested_value(actual_config, path)
+            
+            # Always include the value, even if None (missing field)
             if value is None:
-                value = get_nested_value(default, path)
+                str_value = '<missing>'
+            elif isinstance(value, str):
+                str_value = value.strip()
+            else:
+                str_value = str(value).strip()
             
-            if value is not None:
-                # Normalize the value for comparison
-                if isinstance(value, str):
-                    # Strip whitespace and normalize string values
-                    str_value = value.strip()
-                else:
-                    str_value = str(value).strip()
-                
-                values[test_run_id] = str_value
-                
-                # Check for differences using normalized values
-                if first_value is None:
-                    first_value = str_value
-                elif first_value != str_value:
-                    has_differences = True
+            values[test_run_id] = str_value
+            
+            # Check for differences using normalized values
+            if first_value is None:
+                first_value = str_value
+            elif first_value != str_value:
+                has_differences = True
         
-        # Only include if there are differences and at least 2 values
-        if has_differences and len(values) >= 2:
+        # Include if there are differences (including missing vs present)
+        if has_differences:
             differences.append({
                 'setting': path,
                 'values': values
@@ -714,24 +790,19 @@ def _execute_athena_query(query, database):
         return []
 
 def _get_evaluation_metrics_from_athena(test_run_id):
-    """Get evaluation metrics from Athena document_evaluations table"""
+    """Get split classification metrics and confidence from Athena"""
     database = os.environ.get('ATHENA_DATABASE')
     if not database:
         logger.warning("ATHENA_DATABASE environment variable not set")
         return {}
     
-    # Get aggregated metrics directly from document_evaluations table
+    _validate_sql_input(test_run_id, 'test_run_id')
+    _validate_sql_input(database, 'database')
+
+    # Get only split classification metrics from Athena
+    # Other metrics (accuracy, precision, recall, etc.) come from Stickler aggregation
     query = f"""
     SELECT 
-        AVG(CAST(accuracy AS DOUBLE)) as avg_accuracy,
-        AVG(CAST(precision AS DOUBLE)) as avg_precision,
-        AVG(CAST(recall AS DOUBLE)) as avg_recall,
-        AVG(CAST(f1_score AS DOUBLE)) as avg_f1_score,
-        AVG(CAST(false_alarm_rate AS DOUBLE)) as avg_false_alarm_rate,
-        AVG(CAST(false_discovery_rate AS DOUBLE)) as avg_false_discovery_rate,
-        AVG(CAST(page_level_accuracy AS DOUBLE)) as avg_page_level_accuracy,
-        AVG(CAST(split_accuracy_without_order AS DOUBLE)) as avg_split_accuracy_without_order,
-        AVG(CAST(split_accuracy_with_order AS DOUBLE)) as avg_split_accuracy_with_order,
         SUM(CAST(total_pages AS INT)) as total_pages,
         SUM(CAST(total_splits AS INT)) as total_splits,
         SUM(CAST(correctly_classified_pages AS INT)) as correctly_classified_pages,
@@ -739,7 +810,7 @@ def _get_evaluation_metrics_from_athena(test_run_id):
         SUM(CAST(correctly_split_with_order AS INT)) as correctly_split_with_order
     FROM "{database}"."document_evaluations" 
     WHERE document_id LIKE '{test_run_id}%'
-    """
+    """  # nosec B608 - validated by _validate_sql_input()
     
     results = _execute_athena_query(query, database)
     
@@ -748,46 +819,38 @@ def _get_evaluation_metrics_from_athena(test_run_id):
     
     result = results[0]
     
-    # Get weighted overall scores per document
-    weighted_scores_query = f"""
-    SELECT document_id, weighted_overall_score
-    FROM "{database}"."document_evaluations" 
-    WHERE document_id LIKE '{test_run_id}%' AND weighted_overall_score IS NOT NULL
-    """
-    
-    weighted_results = _execute_athena_query(weighted_scores_query, database)
-    weighted_overall_scores = {r['document_id']: r['weighted_overall_score'] for r in weighted_results}
-    
     # Get confidence data from attribute_evaluations table
     confidence_query = f"""
     SELECT AVG(CAST(confidence AS DOUBLE)) as avg_confidence
     FROM "{database}"."attribute_evaluations" 
     WHERE document_id LIKE '{test_run_id}%' AND confidence IS NOT NULL AND confidence != ''
-    """
+    """  # nosec B608 - validated by _validate_sql_input()
     
     confidence_results = _execute_athena_query(confidence_query, database)
     avg_confidence = confidence_results[0]['avg_confidence'] if confidence_results and confidence_results[0]['avg_confidence'] is not None else None
     
+    # Calculate split accuracies from summed counts
+    total_pages = result.get('total_pages', 0)
+    total_splits = result.get('total_splits', 0)
+    correctly_classified_pages = result.get('correctly_classified_pages', 0)
+    correctly_split_without_order = result.get('correctly_split_without_order', 0)
+    correctly_split_with_order = result.get('correctly_split_with_order', 0)
+    
+    page_level_accuracy = correctly_classified_pages / total_pages if total_pages > 0 else None
+    split_accuracy_without_order = correctly_split_without_order / total_splits if total_splits > 0 else None
+    split_accuracy_with_order = correctly_split_with_order / total_splits if total_splits > 0 else None
+    
     return {
-        'overall_accuracy': result.get('avg_accuracy'),
-        'weighted_overall_scores': weighted_overall_scores,
         'average_confidence': avg_confidence,
-        'accuracy_breakdown': {
-            'precision': result.get('avg_precision'),
-            'recall': result.get('avg_recall'),
-            'f1_score': result.get('avg_f1_score'),
-            'false_alarm_rate': result.get('avg_false_alarm_rate'),
-            'false_discovery_rate': result.get('avg_false_discovery_rate')
-        },
         'split_classification_metrics': {
-            'page_level_accuracy': result.get('avg_page_level_accuracy'),
-            'split_accuracy_without_order': result.get('avg_split_accuracy_without_order'),
-            'split_accuracy_with_order': result.get('avg_split_accuracy_with_order'),
-            'total_pages': result.get('total_pages', 0),
-            'total_splits': result.get('total_splits', 0),
-            'correctly_classified_pages': result.get('correctly_classified_pages', 0),
-            'correctly_split_without_order': result.get('correctly_split_without_order', 0),
-            'correctly_split_with_order': result.get('correctly_split_with_order', 0)
+            'page_level_accuracy': page_level_accuracy,
+            'split_accuracy_without_order': split_accuracy_without_order,
+            'split_accuracy_with_order': split_accuracy_with_order,
+            'total_pages': total_pages,
+            'total_splits': total_splits,
+            'correctly_classified_pages': correctly_classified_pages,
+            'correctly_split_without_order': correctly_split_without_order,
+            'correctly_split_with_order': correctly_split_with_order
         }
     }
 
@@ -798,6 +861,9 @@ def _get_cost_data_from_athena(test_run_id):
         logger.warning("ATHENA_DATABASE environment variable not set")
         return {'total_cost': 0, 'cost_breakdown': {}}
     
+    _validate_sql_input(test_run_id, 'test_run_id')
+    _validate_sql_input(database, 'database')
+
     query = f"""
     SELECT 
         context,
@@ -809,7 +875,7 @@ def _get_cost_data_from_athena(test_run_id):
     FROM "{database}"."metering" 
     WHERE document_id LIKE '{test_run_id}/%'
     GROUP BY context, service_api, unit
-    """
+    """  # nosec B608 - validated by _validate_sql_input()
     
     results = _execute_athena_query(query, database)
     

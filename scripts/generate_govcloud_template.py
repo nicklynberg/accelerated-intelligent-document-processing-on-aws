@@ -51,8 +51,13 @@ class GovCloudTemplateGenerator:
             'GraphQLApi',  # Core API resource
             'GraphQLApiLogGroup',  # API logging
             'AppSyncCwlRole',  # CloudWatch logging role
-            # Note: All resolvers, datasources, and resolver Lambda functions are now in nested/appsync/
-            # and will be removed by deleting APPSYNCSTACK. No need to list them individually.
+            # Note: Most resolvers, datasources, and resolver Lambda functions are in nested/appsync/
+            # and will be removed by deleting APPSYNCSTACK. However, some AppSync resources remain in
+            # the main template and must be explicitly listed here:
+            'CalculateCapacityDataSource',  # AppSync data source - references GraphQLApi
+            'CalculateCapacityResolver',  # AppSync resolver - references GraphQLApi
+            'CalculateCapacityResolverFunction',  # Lambda bridge for AppSync resolver
+            'CalculateCapacityResolverFunctionLogGroup',  # Log group for resolver function
         }
         
         self.auth_resources = {
@@ -64,6 +69,8 @@ class GovCloudTemplateGenerator:
             'CognitoAuthorizedRole',
             'AdminUser',
             'AdminGroup',
+            'AuthorGroup',  # RBAC author group - depends on UserPool
+            'ViewerGroup',  # RBAC viewer group - depends on UserPool
             'ReviewerGroup',  # HITL reviewer group - depends on UserPool
             'AdminUserToGroupAttachment',
             'GetDomain',  # This depends on Cognito UserPoolDomain - remove it
@@ -98,7 +105,12 @@ class GovCloudTemplateGenerator:
             'AgentCoreGatewayManagerLogGroup',
             'AgentCoreGatewayExecutionRole',
             'AgentCoreGateway',
-            'ExternalAppClient'
+            'ExternalAppClient',
+            'AgentCoreMCPHandlerFunction',
+            'AgentCoreMCPHandlerLogGroup',
+            # MCP Connector Cognito resources (depend on UserPool which is removed)
+            'MCPConnectorClient',
+            'MCPResourceServer'
         }
         
         self.hitl_resources = {
@@ -131,7 +143,10 @@ class GovCloudTemplateGenerator:
             'CompleteSectionReviewResolver',
             'SkipAllSectionsReviewResolver',
             'ClaimReviewResolver',
-            'ReleaseReviewResolver'
+            'ReleaseReviewResolver',
+            # RBAC resolvers - depend on GraphQLApi, APPSYNCSTACK, and UserManagementDataSource
+            'GetMyProfileResolver',
+            'UpdateUserResolver'
         }
         
         # Knowledge Base resources (not supported in GovCloud due to S3 Vectors service unavailability)
@@ -179,7 +194,11 @@ class GovCloudTemplateGenerator:
             'MCPTokenURL',
             'MCPAuthorizationURL',
             'DynamoDBAgentTableName',
-            'DynamoDBAgentTableConsoleURL'
+            'DynamoDBAgentTableConsoleURL',
+            'ExternalMCPAgentsSecretConsoleURL',
+            # MCP Connector outputs (depend on removed MCPConnectorClient/UserPool)
+            'MCPConnectorClientId',
+            'MCPConnectorClientSecret'
         }
 
     def setup_logging(self):
@@ -332,8 +351,6 @@ class GovCloudTemplateGenerator:
             'ShouldCreateDocumentKnowledgeBase',
             'ShouldUseDocumentKnowledgeBase',
             'IsHITLEnabled',
-            'IsPattern1HITLEnabled',
-            'IsPattern2HITLEnabled',
             'ShouldCreatePrivateWorkteam',
             'ShouldUseExistingPrivateWorkteam'
         }
@@ -365,7 +382,7 @@ class GovCloudTemplateGenerator:
         return template
 
     def remove_parameters(self, template: Dict[str, Any]) -> Dict[str, Any]:
-        """Remove parameters related to unsupported services and restrict IDPPattern to Pattern-2"""
+        """Remove parameters related to unsupported services"""
         parameters = template.get('Parameters', {})
         original_count = len(parameters)
         
@@ -375,17 +392,8 @@ class GovCloudTemplateGenerator:
                 del parameters[param_name]
                 removed_parameters.append(param_name)
         
-        # Modify IDPPattern parameter to only allow Pattern-2 as the default
-        if 'IDPPattern' in parameters:
-            parameters['IDPPattern'] = {
-                'Type': 'String',
-                'Default': 'Pattern2 - Packet processing with Textract and Bedrock',
-                'Description': 'Document processing pattern (GovCloud version supports Pattern-2 only)',
-                'AllowedValues': [
-                    'Pattern2 - Packet processing with Textract and Bedrock'
-                ]
-            }
-            self.logger.info("Modified IDPPattern parameter to only support Pattern-2")
+        # Note: IDPPattern parameter no longer exists in the unified template
+        # (hardcoded to "Unified" in UpdateSettingsValues). No modification needed.
         
         # Set EnableMCP default to false for GovCloud (MCP integration depends on Cognito/AgentCore)
         if 'EnableMCP' in parameters:
@@ -437,8 +445,6 @@ class GovCloudTemplateGenerator:
             'ShouldCreateDocumentKnowledgeBase',
             'ShouldUseDocumentKnowledgeBase',
             'IsHITLEnabled',
-            'IsPattern1HITLEnabled',
-            'IsPattern2HITLEnabled',
             'ShouldCreatePrivateWorkteam',
             'ShouldUseExistingPrivateWorkteam'
         }
@@ -776,8 +782,15 @@ class GovCloudTemplateGenerator:
                 # Update policies list
                 func_def['Properties']['Policies'] = cleaned_policies
         
-        # Clean nested stack parameters comprehensively (all patterns need AppSync params removed)
-        pattern_stacks = ['PATTERN1STACK', 'PATTERN2STACK', 'PATTERN3STACK']
+        # Clean ALB hosting nested stack parameters - remove WebUIBucket reference (removed resource)
+        if 'ALBHOSTINGSTACK' in resources:
+            alb_stack_params = resources['ALBHOSTINGSTACK'].get('Properties', {}).get('Parameters', {})
+            if 'WebUIBucketName' in alb_stack_params:
+                alb_stack_params['WebUIBucketName'] = ''
+                self.logger.debug("Replaced WebUIBucketName with empty string in ALBHOSTINGSTACK (WebUIBucket removed)")
+        
+        # Clean nested stack parameters comprehensively (unified pattern stack)
+        pattern_stacks = ['PATTERNSTACK']
         for stack_name in pattern_stacks:
             if stack_name in resources:
                 stack_params = resources[stack_name].get('Properties', {}).get('Parameters', {})
@@ -949,53 +962,25 @@ class GovCloudTemplateGenerator:
         mappings = template.get('Mappings', {})
         parameters = template.get('Parameters', {})
         
-        # Add GovCloud entries to Pattern1ConfigurationMap
-        if 'Pattern1ConfigurationMap' in mappings:
-            mappings['Pattern1ConfigurationMap']['lending-package-sample-govcloud'] = {
+        # Update unified ConfigurationMap (replaces old Pattern1/Pattern2 configuration maps)
+        if 'ConfigurationMap' in mappings:
+            mappings['ConfigurationMap']['lending-package-sample-govcloud'] = {
                 'ConfigPath': 'lending-package-sample-govcloud'
             }
-            # Update default to use GovCloud config
-            mappings['Pattern1ConfigurationMap']['default'] = {
-                'ConfigPath': 'lending-package-sample-govcloud'
-            }
-            self.logger.debug("Added lending-package-sample-govcloud to Pattern1ConfigurationMap")
+            self.logger.debug("Added lending-package-sample-govcloud to ConfigurationMap")
         
-        # Add GovCloud entries to Pattern2ConfigurationMap  
-        if 'Pattern2ConfigurationMap' in mappings:
-            mappings['Pattern2ConfigurationMap']['lending-package-sample-govcloud'] = {
-                'ConfigPath': 'lending-package-sample-govcloud'
-            }
-            # Update default to use GovCloud config
-            mappings['Pattern2ConfigurationMap']['default'] = {
-                'ConfigPath': 'lending-package-sample-govcloud'
-            }
-            self.logger.debug("Added lending-package-sample-govcloud to Pattern2ConfigurationMap")
-        
-        # Update Pattern1Configuration parameter
-        if 'Pattern1Configuration' in parameters:
+        # Update unified ConfigurationPreset parameter (replaces old Pattern1/Pattern2Configuration)
+        if 'ConfigurationPreset' in parameters:
             # Change default to GovCloud config
-            parameters['Pattern1Configuration']['Default'] = 'lending-package-sample-govcloud'
+            parameters['ConfigurationPreset']['Default'] = 'lending-package-sample-govcloud'
             
             # Add GovCloud config to allowed values if not present
-            allowed_values = parameters['Pattern1Configuration'].get('AllowedValues', [])
+            allowed_values = parameters['ConfigurationPreset'].get('AllowedValues', [])
             if 'lending-package-sample-govcloud' not in allowed_values:
                 allowed_values.insert(0, 'lending-package-sample-govcloud')
-                parameters['Pattern1Configuration']['AllowedValues'] = allowed_values
+                parameters['ConfigurationPreset']['AllowedValues'] = allowed_values
             
-            self.logger.info("Updated Pattern1Configuration default to 'lending-package-sample-govcloud'")
-        
-        # Update Pattern2Configuration parameter
-        if 'Pattern2Configuration' in parameters:
-            # Change default to GovCloud config
-            parameters['Pattern2Configuration']['Default'] = 'lending-package-sample-govcloud'
-            
-            # Add GovCloud config to allowed values if not present
-            allowed_values = parameters['Pattern2Configuration'].get('AllowedValues', [])
-            if 'lending-package-sample-govcloud' not in allowed_values:
-                allowed_values.insert(0, 'lending-package-sample-govcloud')
-                parameters['Pattern2Configuration']['AllowedValues'] = allowed_values
-            
-            self.logger.info("Updated Pattern2Configuration default to 'lending-package-sample-govcloud'")
+            self.logger.info("Updated ConfigurationPreset default to 'lending-package-sample-govcloud'")
         
         return template
 
@@ -1026,11 +1011,9 @@ class GovCloudTemplateGenerator:
         if missing_core:
             issues.append(f"Missing core resources: {', '.join(missing_core)}")
         
-        # Check that pattern nested stacks are still present
-        pattern_stacks = {'PATTERN1STACK', 'PATTERN2STACK', 'PATTERN3STACK'}
-        present_patterns = pattern_stacks & set(resources.keys())
-        if not present_patterns:
-            issues.append("No pattern stacks found - at least one pattern should be present")
+        # Check that unified pattern nested stack is still present
+        if 'PATTERNSTACK' not in resources:
+            issues.append("Missing PATTERNSTACK - unified pattern nested stack should be present")
         
         if issues:
             self.logger.error("Basic template validation failed:")
@@ -1172,6 +1155,9 @@ Examples:
     
     # Always skip validation in publish.py since we validate the GovCloud template separately
     publish_args.append('--no-validate')
+    
+    # Skip cfn-lint since it will fail on GovCloud-incompatible resources in main template
+    publish_args.extend(['--lint', 'off'])
     
     # Add any unknown arguments
     publish_args.extend(unknown)
