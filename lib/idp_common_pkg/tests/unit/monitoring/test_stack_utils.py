@@ -19,7 +19,7 @@ from idp_common.monitoring.stack_utils import (
 
 
 # ---------------------------------------------------------------------------
-# Reset module-level boto3 client cache between tests (M-1 fix)
+# Reset module-level boto3 client cache between tests
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def reset_cf_client():

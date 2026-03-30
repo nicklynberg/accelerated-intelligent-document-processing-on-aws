@@ -34,7 +34,7 @@ import boto3
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Module-level lazy boto3 client cache (M-1: avoids creating a new client per call)
+# Module-level lazy boto3 client cache
 # ---------------------------------------------------------------------------
 _cf_client: Optional[Any] = None
 
@@ -79,16 +79,25 @@ def extract_stack_name_from_arn(execution_arn: str) -> str:
 
     try:
         # ARN format: arn:aws:states:<region>:<account>:execution:<state-machine-name>:<exec-id>
-        parts = execution_arn.split(":")
-        if len(parts) < 8:
+        # A valid Step Functions execution ARN has at least 8 colon-separated fields.
+        # Use rsplit(maxsplit=2) so that execution IDs containing colons are handled
+        # correctly (the state-machine name is always the second-to-last component).
+        if execution_arn.count(":") < 7:
+            # Too few fields — definitely not a valid execution ARN
+            return ""
+        parts = execution_arn.rsplit(":", maxsplit=2)
+        # Expected: ["arn:aws:states:...:execution", "<state-machine-name>", "<exec-id>"]
+        if len(parts) < 3:
             return ""
 
-        state_machine_name: str = parts[6]
+        state_machine_name: str = parts[-2]
 
-        # Strip known workflow suffixes to recover the stack name
+        # Strip known workflow suffixes to recover the stack name.
+        # Use endswith() so that a suffix appearing in the middle of the name
+        # is not incorrectly stripped.
         for suffix in _STATE_MACHINE_SUFFIXES:
-            if suffix in state_machine_name:
-                return state_machine_name.replace(suffix, "")
+            if state_machine_name.endswith(suffix):
+                return state_machine_name[: -len(suffix)]
 
         # Fallback: remove the last hyphen-delimited word
         # e.g. "MYSTACK-SomeNewSuffix" → "MYSTACK"

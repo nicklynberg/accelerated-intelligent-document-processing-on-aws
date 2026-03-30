@@ -38,17 +38,18 @@ import boto3
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Module-level lazy boto3 client cache (M-1: avoids creating a new client per call)
+# Module-level lazy boto3 client cache, keyed by region so that callers passing
+# an explicit region always get the correct client, even if a default-region
+# client was already initialised first.
 # ---------------------------------------------------------------------------
-_sf_client: Optional[Any] = None
+_sf_clients: Dict[Optional[str], Any] = {}
 
 
 def _get_sf_client(region: Optional[str] = None) -> Any:
-    """Return (and lazily create) a module-level Step Functions boto3 client."""
-    global _sf_client
-    if _sf_client is None:
-        _sf_client = boto3.client("stepfunctions", region_name=region)
-    return _sf_client
+    """Return (and lazily create) a per-region Step Functions boto3 client."""
+    if region not in _sf_clients:
+        _sf_clients[region] = boto3.client("stepfunctions", region_name=region)
+    return _sf_clients[region]
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +172,10 @@ def get_execution_data(
         result["events"] = events
 
     except sf.exceptions.ExecutionDoesNotExist:
+        # Use a distinct status so callers can tell "not found" from a
+        # transient API error (which leaves status as "UNKNOWN").
         logger.warning("Execution not found: %s", execution_arn)
+        result["status"] = "NOT_FOUND"
     except Exception as exc:  # noqa: BLE001
         logger.warning("Failed to get execution data for %s: %s", execution_arn, exc)
 
@@ -214,7 +218,16 @@ def analyze_execution_timeline(
         }``
     """
     exec_data = get_execution_data(execution_arn, region=region)
-    events: List[Dict[str, Any]] = exec_data.get("events", [])[:max_events]
+    all_events: List[Dict[str, Any]] = exec_data.get("events", [])
+    if len(all_events) > max_events:
+        logger.warning(
+            "Execution %s has %d events; truncating to %d for timeline analysis. "
+            "Increase max_events to avoid missing failure details.",
+            execution_arn,
+            len(all_events),
+            max_events,
+        )
+    events = all_events[:max_events]
 
     timeline: Dict[str, Any] = {
         "execution_arn": execution_arn,
@@ -236,38 +249,51 @@ def analyze_execution_timeline(
             state_name = event.get("stateEnteredEventDetails", {}).get("name", "")
             if state_name:
                 state_starts[state_name] = timestamp
+            continue
 
-        elif event_type in (
-            "TaskStateExited",
-            "TaskFailed",
-            "TaskTimedOut",
-            "ExecutionFailed",
-        ):
+        # --- State-completion and failure events that produce a timeline entry ---
+        if event_type == "TaskStateExited":
             state_name = event.get("stateExitedEventDetails", {}).get("name", "")
-            if not state_name and event_type == "ExecutionFailed":
+            is_failure = False
+            status = "SUCCEEDED"
+
+        elif event_type in ("TaskFailed", "TaskTimedOut"):
+            # Task-level failures do not carry stateExitedEventDetails — look
+            # back to the most recently entered state to get the name.
+            state_name = list(state_starts.keys())[-1] if state_starts else "Unknown"
+            is_failure = True
+            status = "FAILED"
+
+        elif event_type == "ExecutionFailed":
+            state_name = event.get("stateExitedEventDetails", {}).get("name", "")
+            if not state_name:
                 # Attribute failure to the last known entered state
                 state_name = (
                     list(state_starts.keys())[-1] if state_starts else "Unknown"
                 )
+            is_failure = True
+            status = "FAILED"
 
-            is_failure = "Failed" in event_type or "TimedOut" in event_type
-            status = "FAILED" if is_failure else "SUCCEEDED"
-            start = state_starts.get(state_name, "")
-            duration_ms = _compute_duration_ms(start, timestamp)
+        else:
+            # Ignore all other event types (ExecutionStarted, LambdaScheduled, etc.)
+            continue
 
-            states.append(
-                {
-                    "name": state_name,
-                    "status": status,
-                    "start_time": start,
-                    "end_time": timestamp,
-                    "duration_ms": round(duration_ms, 1),
-                    "is_failure": is_failure,
-                }
-            )
+        start = state_starts.get(state_name, "")
+        duration_ms = _compute_duration_ms(start, timestamp)
 
-            if is_failure and not timeline["failed_state"]:
-                timeline["failed_state"] = state_name
+        states.append(
+            {
+                "name": state_name,
+                "status": status,
+                "start_time": start,
+                "end_time": timestamp,
+                "duration_ms": round(duration_ms, 1),
+                "is_failure": is_failure,
+            }
+        )
+
+        if is_failure and not timeline["failed_state"]:
+            timeline["failed_state"] = state_name
 
     timeline["states"] = states
     timeline["failure_details"] = extract_failure_details(events)

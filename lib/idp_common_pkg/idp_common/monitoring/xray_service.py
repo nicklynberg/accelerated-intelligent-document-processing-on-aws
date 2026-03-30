@@ -43,9 +43,10 @@ logger = logging.getLogger(__name__)
 _DEFAULT_XRAY_LOOKBACK_HOURS: int = 24
 
 # ---------------------------------------------------------------------------
-# Module-level lazy boto3 client cache (M-1: avoids creating a new client per call)
+# Module-level lazy boto3 client/resource cache
 # ---------------------------------------------------------------------------
 _xray_client: Optional[Any] = None
+_dynamodb_resource: Optional[Any] = None
 
 
 def _get_xray_client() -> Any:
@@ -54,6 +55,21 @@ def _get_xray_client() -> Any:
     if _xray_client is None:
         _xray_client = boto3.client("xray")
     return _xray_client
+
+
+def _get_dynamodb_resource() -> Any:
+    """Return (and lazily create) a module-level DynamoDB boto3 resource."""
+    global _dynamodb_resource
+    if _dynamodb_resource is None:
+        _dynamodb_resource = boto3.resource("dynamodb")
+    return _dynamodb_resource
+
+
+# Named constant for the tracking table sort key to avoid a magic string
+# literal scattered through the code.  The tracking table uses a single-item
+# partition design where the document metadata record is stored with a sentinel
+# sort key value.
+_TRACKING_TABLE_SK: str = "none"
 
 
 # ---------------------------------------------------------------------------
@@ -258,9 +274,11 @@ def _get_trace_id_from_dynamodb(document_id: str) -> Optional[str]:
         return None
 
     try:
-        dynamodb = boto3.resource("dynamodb")
+        dynamodb = _get_dynamodb_resource()
         table = dynamodb.Table(table_name)  # type: ignore[attr-defined]
-        response = table.get_item(Key={"PK": f"doc#{document_id}", "SK": "none"})
+        response = table.get_item(
+            Key={"PK": f"doc#{document_id}", "SK": _TRACKING_TABLE_SK}
+        )
         if "Item" in response:
             trace_id = response["Item"].get("TraceId")
             if trace_id:
@@ -292,7 +310,7 @@ def _get_trace_id_from_xray_annotations(
         )
         traces = response.get("TraceSummaries", [])
         if traces:
-            # M-3: Sort by ResponseTime descending to get the most recent trace
+            # Sort by ResponseTime descending to get the most recent trace
             # (covers the case where a document has been reprocessed/retried)
             traces_sorted = sorted(
                 traces,

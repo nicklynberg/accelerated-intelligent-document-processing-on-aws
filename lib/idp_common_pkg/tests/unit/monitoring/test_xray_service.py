@@ -12,22 +12,23 @@ import idp_common.monitoring.xray_service as xray_module
 import pytest
 from idp_common.monitoring.xray_service import (
     analyze_trace,
+    extract_lambda_request_ids,
     get_subsegment_details,
     get_trace_for_document,
 )
 
 
 # ---------------------------------------------------------------------------
-# Reset module-level boto3 client cache between tests (M-1 fix)
-# Each test that patches boto3 needs a clean slate so the cached client
-# from a previous test doesn't leak through.
+# Reset module-level boto3 client/resource cache between tests
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def reset_xray_client():
-    """Reset the module-level _xray_client singleton before every test."""
+    """Reset the module-level _xray_client and _dynamodb_resource singletons."""
     xray_module._xray_client = None
+    xray_module._dynamodb_resource = None
     yield
     xray_module._xray_client = None
+    xray_module._dynamodb_resource = None
 
 
 # ---------------------------------------------------------------------------
@@ -324,3 +325,132 @@ class TestGetSubsegmentDetails:
             result = get_subsegment_details(_TRACE_ID)
 
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# extract_lambda_request_ids
+# ---------------------------------------------------------------------------
+
+
+class TestExtractLambdaRequestIds:
+    def _make_lambda_segment(
+        self,
+        name: str = "my-fn",
+        origin: str = "AWS::Lambda",
+        request_id: str = "req-abc123",
+        resource_arn: str = "",
+    ) -> dict:
+        seg = {
+            "name": name,
+            "origin": origin,
+            "aws": {"request_id": request_id},
+        }
+        if resource_arn:
+            seg["resource_arn"] = resource_arn
+        return seg
+
+    def _make_trace_response(self, segments: list) -> dict:
+        """Wrap raw segment dicts in the batch_get_traces response shape."""
+        return {
+            "Traces": [
+                {"Segments": [{"Document": json.dumps(seg)} for seg in segments]}
+            ]
+        }
+
+    def test_returns_function_name_to_request_id_mapping(self):
+        seg = self._make_lambda_segment(name="classify-fn", request_id="req-001")
+        mock_xray = MagicMock()
+        mock_xray.batch_get_traces.return_value = self._make_trace_response([seg])
+
+        with patch("idp_common.monitoring.xray_service.boto3") as mock_boto3:
+            mock_boto3.client.return_value = mock_xray
+            result = extract_lambda_request_ids(_TRACE_ID)
+
+        assert result == {"classify-fn": "req-001"}
+
+    def test_uses_resource_arn_name_when_present(self):
+        """When resource_arn is present the function name is taken from the ARN."""
+        seg = self._make_lambda_segment(
+            name="arn-name-ignored",
+            origin="AWS::Lambda",
+            request_id="req-arn",
+            resource_arn="arn:aws:lambda:us-east-1:123:function:real-fn-name",
+        )
+        mock_xray = MagicMock()
+        mock_xray.batch_get_traces.return_value = self._make_trace_response([seg])
+
+        with patch("idp_common.monitoring.xray_service.boto3") as mock_boto3:
+            mock_boto3.client.return_value = mock_xray
+            result = extract_lambda_request_ids(_TRACE_ID)
+
+        assert "real-fn-name" in result
+        assert result["real-fn-name"] == "req-arn"
+
+    def test_handles_aws_lambda_function_origin(self):
+        """AWS::Lambda::Function origin must also be captured."""
+        seg = self._make_lambda_segment(
+            name="fn-function-origin",
+            origin="AWS::Lambda::Function",
+            request_id="req-func",
+        )
+        mock_xray = MagicMock()
+        mock_xray.batch_get_traces.return_value = self._make_trace_response([seg])
+
+        with patch("idp_common.monitoring.xray_service.boto3") as mock_boto3:
+            mock_boto3.client.return_value = mock_xray
+            result = extract_lambda_request_ids(_TRACE_ID)
+
+        assert "fn-function-origin" in result
+        assert result["fn-function-origin"] == "req-func"
+
+    def test_recursively_finds_lambda_in_subsegments(self):
+        """Lambda segments nested inside another segment must be found."""
+        root = {
+            "name": "step-functions",
+            "origin": "AWS::StepFunctions",
+            "aws": {},
+            "subsegments": [
+                self._make_lambda_segment(name="nested-fn", request_id="req-nested")
+            ],
+        }
+        mock_xray = MagicMock()
+        mock_xray.batch_get_traces.return_value = self._make_trace_response([root])
+
+        with patch("idp_common.monitoring.xray_service.boto3") as mock_boto3:
+            mock_boto3.client.return_value = mock_xray
+            result = extract_lambda_request_ids(_TRACE_ID)
+
+        assert "nested-fn" in result
+        assert result["nested-fn"] == "req-nested"
+
+    def test_skips_entries_with_missing_request_id(self):
+        """Segments with an empty request_id must not appear in the result."""
+        seg = self._make_lambda_segment(name="fn-no-rid", request_id="")
+        mock_xray = MagicMock()
+        mock_xray.batch_get_traces.return_value = self._make_trace_response([seg])
+
+        with patch("idp_common.monitoring.xray_service.boto3") as mock_boto3:
+            mock_boto3.client.return_value = mock_xray
+            result = extract_lambda_request_ids(_TRACE_ID)
+
+        assert result == {}
+
+    def test_returns_empty_dict_when_no_trace_found(self):
+        mock_xray = MagicMock()
+        mock_xray.batch_get_traces.return_value = {"Traces": []}
+
+        with patch("idp_common.monitoring.xray_service.boto3") as mock_boto3:
+            mock_boto3.client.return_value = mock_xray
+            result = extract_lambda_request_ids(_TRACE_ID)
+
+        assert result == {}
+
+    def test_returns_empty_dict_when_api_raises(self):
+        mock_xray = MagicMock()
+        mock_xray.batch_get_traces.side_effect = Exception("X-Ray error")
+
+        with patch("idp_common.monitoring.xray_service.boto3") as mock_boto3:
+            mock_boto3.client.return_value = mock_xray
+            result = extract_lambda_request_ids(_TRACE_ID)
+
+        assert result == {}

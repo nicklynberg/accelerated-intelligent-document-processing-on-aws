@@ -19,14 +19,15 @@ from idp_common.monitoring.stepfunctions_service import (
 
 
 # ---------------------------------------------------------------------------
-# Reset module-level boto3 client cache between tests (M-1 fix)
+# Reset module-level boto3 client cache between tests.
+# _sf_clients is a dict keyed by region; clear it between tests.
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def reset_sf_client():
-    """Reset the module-level _sf_client singleton before every test."""
-    sf_module._sf_client = None
+    """Reset the module-level _sf_clients dict before every test."""
+    sf_module._sf_clients.clear()
     yield
-    sf_module._sf_client = None
+    sf_module._sf_clients.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +247,22 @@ class TestGetExecutionData:
             mock_boto3.client.return_value = sf
             result = get_execution_data(_EXEC_ARN)
 
+        # ExecutionDoesNotExist → NOT_FOUND (not UNKNOWN, which is for API errors)
+        assert result["status"] == "NOT_FOUND"
+        assert result["events"] == []
+
+    def test_generic_api_error_returns_unknown_status(self):
+        """A transient API error must leave status as UNKNOWN, not NOT_FOUND."""
+        sf = MagicMock()
+        sf.exceptions.ExecutionDoesNotExist = type(
+            "ExecutionDoesNotExist", (Exception,), {}
+        )
+        sf.describe_execution.side_effect = Exception("Service unavailable")
+
+        with patch("idp_common.monitoring.stepfunctions_service.boto3") as mock_boto3:
+            mock_boto3.client.return_value = sf
+            result = get_execution_data(_EXEC_ARN)
+
         assert result["status"] == "UNKNOWN"
         assert result["events"] == []
 
@@ -300,6 +317,38 @@ class TestAnalyzeExecutionTimeline:
 
         assert timeline["states"] == []
         assert timeline["failed_state"] == ""
+
+    def test_task_failed_event_records_state_name_from_prior_entered(self):
+        """
+        TaskFailed does not carry stateExitedEventDetails, so the state
+        name must be inferred from the last TaskStateEntered event.
+        """
+        events = _make_events(include_failure=True, failure_type="TaskFailed")
+        sf = _make_sf_client(status="FAILED", events=events)
+        with patch("idp_common.monitoring.stepfunctions_service.boto3") as mock_boto3:
+            mock_boto3.client.return_value = sf
+            timeline = analyze_execution_timeline(_EXEC_ARN)
+
+        # The last entered state before TaskFailed is ExtractDocument
+        assert timeline["failed_state"] == "ExtractDocument"
+        failed_entries = [s for s in timeline["states"] if s["is_failure"]]
+        assert len(failed_entries) == 1
+        assert failed_entries[0]["name"] == "ExtractDocument"
+        assert failed_entries[0]["name"] != ""  # must not be empty string
+
+    def test_task_timed_out_event_records_state_name(self):
+        """
+        TaskTimedOut does not carry stateExitedEventDetails either.
+        """
+        events = _make_events(include_failure=True, failure_type="TaskTimedOut")
+        sf = _make_sf_client(status="FAILED", events=events)
+        with patch("idp_common.monitoring.stepfunctions_service.boto3") as mock_boto3:
+            mock_boto3.client.return_value = sf
+            timeline = analyze_execution_timeline(_EXEC_ARN)
+
+        assert timeline["failed_state"] == "ExtractDocument"
+        failed_entries = [s for s in timeline["states"] if s["is_failure"]]
+        assert failed_entries[0]["name"] == "ExtractDocument"
 
 
 # ---------------------------------------------------------------------------

@@ -204,3 +204,22 @@ def get_setting(key: str, default: str = "") -> str:
 def get_cloudwatch_log_groups() -> List[str]:
     """Return the CloudWatch log group list from the shared default cache."""
     return _default_cache.get_cloudwatch_log_groups()
+
+
+def reset_default_cache(
+    ttl_seconds: int = 300,
+    ssm_client: Optional[Any] = None,
+) -> None:
+    """
+    Replace the module-level singleton with a fresh :class:`SettingsCache`.
+
+    **For testing only.**  Call this in test fixtures or ``teardown`` to
+    prevent state leakage between test cases that exercise the module-level
+    helpers (:func:`get_setting`, :func:`get_cloudwatch_log_groups`).
+
+    Args:
+        ttl_seconds: TTL for the new cache (default: 300).
+        ssm_client:  Optional pre-built SSM mock client to inject.
+    """
+    global _default_cache
+    _default_cache = SettingsCache(ttl_seconds=ttl_seconds, ssm_client=ssm_client)

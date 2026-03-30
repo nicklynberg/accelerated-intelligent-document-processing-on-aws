@@ -246,11 +246,18 @@ class MonitoringKPIs:
     active_config_count: int = 0
 
     def compute_derived(self) -> None:
-        """Recompute failure_rate and avg_cost_per_document from raw counts."""
+        """Recompute failure_rate and avg_cost_per_document from raw counts.
+
+        avg_cost_per_document is always (re-)assigned inside the
+        ``total_documents > 0`` branch so that a subsequent call with
+        ``total_cost = 0`` correctly resets it to 0.0 rather than leaving
+        a stale non-zero value from a previous computation.
+        """
         if self.total_documents > 0:
             self.failure_rate = self.failed_documents / self.total_documents
-            if self.total_cost > 0:
-                self.avg_cost_per_document = self.total_cost / self.total_documents
+            self.avg_cost_per_document = (
+                self.total_cost / self.total_documents if self.total_cost > 0 else 0.0
+            )
         else:
             self.failure_rate = 0.0
             self.avg_cost_per_document = 0.0
