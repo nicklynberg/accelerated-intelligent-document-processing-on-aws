@@ -13,7 +13,7 @@ neutral evaluation configuration that can be translated to Stickler's format.
 
 import copy
 import logging
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from idp_common.config.schema_constants import (
     EVALUATION_METHOD_EXACT,
@@ -222,6 +222,102 @@ class SticklerConfigMapper:
                 logger.warning(f"Could not resolve $ref: {ref_path}")
                 return {}
         return {}
+
+    @classmethod
+    def _remove_empty_object_properties(
+        cls, schema: Dict[str, Any], field_path: str = ""
+    ) -> List[str]:
+        """
+        Recursively remove properties that are objects with empty properties.
+
+        Stickler's ModelFactory requires at least one field to create a Pydantic model.
+        Empty object properties (e.g., "AccidentInformation": {"type": "object", "properties": {}})
+        cause validation errors and provide no evaluation value anyway.
+
+        Args:
+            schema: Schema to process (modified in-place)
+            field_path: Current path for logging
+
+        Returns:
+            List of removed property paths for logging
+        """
+        removed: List[str] = []
+
+        if not isinstance(schema, dict):
+            return removed
+
+        if SCHEMA_PROPERTIES in schema:
+            props_to_remove = []
+
+            for prop_name, prop_schema in schema[SCHEMA_PROPERTIES].items():
+                prop_path = f"{field_path}.{prop_name}" if field_path else prop_name
+
+                if not isinstance(prop_schema, dict):
+                    continue
+
+                # Check if this is an empty object (type=object with empty or missing properties)
+                prop_type = prop_schema.get(SCHEMA_TYPE)
+                prop_properties = prop_schema.get(SCHEMA_PROPERTIES)
+
+                if prop_type == TYPE_OBJECT:
+                    # Empty if properties is {} or missing entirely for a plain object
+                    if isinstance(prop_properties, dict) and len(prop_properties) == 0:
+                        props_to_remove.append(prop_name)
+                        removed.append(prop_path)
+                        logger.info(
+                            f"Removing empty object property '{prop_path}' - "
+                            f"Stickler requires at least one field in nested objects"
+                        )
+                    elif prop_properties is not None:
+                        # Recurse into non-empty objects
+                        removed.extend(
+                            cls._remove_empty_object_properties(prop_schema, prop_path)
+                        )
+
+                # Also recurse into arrays
+                elif prop_type == TYPE_ARRAY and SCHEMA_ITEMS in prop_schema:
+                    removed.extend(
+                        cls._remove_empty_object_properties(
+                            prop_schema[SCHEMA_ITEMS], f"{prop_path}[]"
+                        )
+                    )
+
+            # Remove empty object properties
+            for prop_name in props_to_remove:
+                del schema[SCHEMA_PROPERTIES][prop_name]
+
+        # Check array items at this level too
+        if SCHEMA_ITEMS in schema:
+            removed.extend(
+                cls._remove_empty_object_properties(
+                    schema[SCHEMA_ITEMS], f"{field_path}[]"
+                )
+            )
+
+        # Process $defs as well
+        if "$defs" in schema:
+            for def_name, def_schema in list(schema["$defs"].items()):
+                # Check if the definition itself is an empty object
+                if (
+                    isinstance(def_schema, dict)
+                    and def_schema.get(SCHEMA_TYPE) == TYPE_OBJECT
+                    and isinstance(def_schema.get(SCHEMA_PROPERTIES), dict)
+                    and len(def_schema.get(SCHEMA_PROPERTIES, {})) == 0
+                ):
+                    logger.info(
+                        f"Removing empty $defs entry '{def_name}' - "
+                        f"Stickler requires at least one field in nested objects"
+                    )
+                    del schema["$defs"][def_name]
+                    removed.append(f"$defs.{def_name}")
+                else:
+                    removed.extend(
+                        cls._remove_empty_object_properties(
+                            def_schema, f"$defs.{def_name}"
+                        )
+                    )
+
+        return removed
 
     @classmethod
     def _inline_refs(
@@ -650,6 +746,18 @@ class SticklerConfigMapper:
             num_defs = len(defs)
             schema = cls._inline_refs(schema, defs, field_path=model_name)
             logger.info(f"Inlined {num_defs} $defs references for model '{model_name}'")
+
+        # Remove empty object properties AFTER inlining refs but BEFORE translating extensions
+        # This prevents Stickler's ModelFactory from failing on nested objects with no fields
+        # (e.g., "AccidentInformation": {"type": "object", "properties": {}})
+        removed_properties = cls._remove_empty_object_properties(
+            schema, field_path=model_name
+        )
+        if removed_properties:
+            logger.info(
+                f"Removed {len(removed_properties)} empty object properties for model '{model_name}': "
+                f"{removed_properties}"
+            )
 
         # Translate IDP extensions to Stickler extensions throughout the schema
         cls._translate_extensions_in_schema(schema)

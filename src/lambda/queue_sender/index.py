@@ -39,11 +39,40 @@ def handler(event, context):
     if output_bucket == '':
         raise Exception("OUTPUT_BUCKET environment variable not set")
     
-    # Create document object
+    # Create document object - config version will be read from S3 metadata automatically
     current_time = datetime.now(timezone.utc).isoformat()
     document = Document.from_s3_event(event, output_bucket)
     document.status = Status.QUEUED
     document.queued_time = current_time
+    
+    # If no config version found in metadata or filename, get active config version
+    if not document.config_version:
+        try:
+            import boto3
+            config_table = boto3.resource('dynamodb').Table(os.environ['CONFIG_TABLE'])
+            scan_response = config_table.scan(
+                FilterExpression="begins_with(Configuration, :config_prefix) AND IsActive = :active",
+                ExpressionAttributeValues={
+                    ":config_prefix": "Config#",
+                    ":active": True
+                }
+            )
+            items = scan_response.get('Items', [])
+            if items:
+                # Extract version from Config#v1 format
+                config_key = items[0]['Configuration']
+                if '#' in config_key:
+                    _, version = config_key.split('#', 1)
+                    document.config_version = version
+                    logger.info(f"Using active config version {version} for {object_key}")
+                else:
+                    document.config_version = None
+            else:
+                document.config_version = None
+                logger.warning(f"No active config version found for {object_key}")
+        except Exception as e:
+            logger.warning(f"Could not retrieve active config version: {e}")
+            document.config_version = None
     
     # Capture X-Ray trace ID for error analysis
     current_segment = xray_recorder.current_segment()
@@ -54,14 +83,14 @@ def handler(event, context):
 
     # Calculate expiry date
     expires_after = int((datetime.now(timezone.utc) + timedelta(days=retentionDays)).timestamp())
-
+    
     # Create document in DynamoDB via document service
     logger.info(f"Creating document via document service: {document.input_key}")
     
     # Create document in document service with TTL
     created_key = document_service.create_document(document, expires_after=expires_after)
     logger.info(f"Document created with key: {created_key}")
-    
+
     # Send serialized document to SQS queue
     doc_json = document.to_json()
     message = {

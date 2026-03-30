@@ -5,28 +5,37 @@ SPDX-License-Identifier: MIT-0
 
 **Questions?** [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws)
 
+📖 **[Browse the Documentation Site](https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/)** — searchable, with sidebar navigation
+
 ## Table of Contents
 
-- [Introduction](#introduction)
-- [Alternative Implementations](#alternative-implementations)
-- [Key Features](#key-features)
-- [Architecture Overview](#architecture-overview)
-- [Quick Start](#quick-start)
-  - [Processing Your First Document](#processing-your-first-document)
-- [Updating an Existing Deployment](#updating-an-existing-deployment)
-- [Detailed Documentation](#detailed-documentation)
-  - [Core Documentation](#core-documentation)
-  - [Processing Patterns](#processing-patterns)
-  - [Python Development](#python-development)
-  - [Planning & Operations](#planning--operations)
-- [Contributing](#contributing)
-- [License](#license)
+- [Gen AI Intelligent Document Processing (GenAIIDP)](#gen-ai-intelligent-document-processing-genaiidp)
+  - [Table of Contents](#table-of-contents)
+  - [Introduction](#introduction)
+  - [Alternative Implementations](#alternative-implementations)
+  - [Key Features](#key-features)
+  - [Architecture Overview](#architecture-overview)
+  - [Quick Start](#quick-start)
+    - [Processing Your First Document](#processing-your-first-document)
+      - [Method 1: Web UI (Interactive)](#method-1-web-ui-interactive)
+      - [Method 2: Direct S3 Upload (Simple)](#method-2-direct-s3-upload-simple)
+      - [Method 3: IDP CLI (Batch/Programmatic)](#method-3-idp-cli-batchprogrammatic)
+  - [Updating an Existing Deployment](#updating-an-existing-deployment)
+  - [Detailed Documentation](#detailed-documentation)
+    - [Core Documentation](#core-documentation)
+    - [Processing Modes](#processing-modes)
+    - [Python Development](#python-development)
+    - [Planning \& Operations](#planning--operations)
+  - [Contributing](#contributing)
+  - [License](#license)
 
 ## Introduction
 
 A scalable, serverless solution for automated document processing and information extraction using AWS services. This system combines OCR capabilities with generative AI to convert unstructured documents into structured data at scale.
 
-https://github.com/user-attachments/assets/272b543b-e506-48ce-acc1-361422d22322
+
+https://github.com/user-attachments/assets/fc2652b5-a9cc-42d7-9975-887c8320a2f5
+
 
 Concierge support for customization, deployment, and integration of production use cases is available through [AWS Professional Services](https://aws.amazon.com/professional-services/).
 
@@ -49,8 +58,8 @@ Concierge support for customization, deployment, and integration of production u
 - **Cost Optimization**: Pay-per-use pricing model with built-in controls
 - **Comprehensive Monitoring**: Rich CloudWatch dashboard with detailed metrics and logs
 - **Web User Interface**: Modern UI for inspecting document workflow status and results
-- **Human-in-the-Loop (HITL)**: Built-in review system for human validation workflows (Pattern 1 & Pattern 2)
-  - **Note**: When deploying multiple patterns with HITL, reuse existing private workteam ARN due to AWS account limits
+- **Configuration Versioning**: Support for multiple configuration versions with version-specific processing and test comparison
+- **Human-in-the-Loop (HITL)**: Built-in review system for human validation workflows
 - **AI-Powered Evaluation**: Framework to assess accuracy against baseline data
 - **Extraction Confidence Assessment**: LLM-powered assessment of extraction confidence with multimodal document analysis
 - **Document Knowledge Base Query**: Ask questions about your processed documents
@@ -59,14 +68,13 @@ Concierge support for customization, deployment, and integration of production u
 
 ## Architecture Overview
 
-![Architecture Diagram](./images/IDP.drawio.png)
+![Architecture Diagram](./images/IDP.UnifiedPatterns.drawio.png)
 
 The solution uses a modular architecture with nested CloudFormation stacks to support multiple document processing patterns while maintaining common infrastructure for queueing, tracking, and monitoring.
 
-Current patterns include:
-- Pattern 1: Packet or Media processing with Bedrock Data Automation (BDA)
-- Pattern 2: OCR → Bedrock Classification (page-level or holistic) → Bedrock Extraction
-- Pattern 3: OCR → UDOP Classification (SageMaker) → Bedrock Extraction
+The unified pattern supports two processing modes, controlled by the `use_bda` configuration flag:
+- **Pipeline mode** (default): OCR → Bedrock Classification (page-level or holistic) → Bedrock Extraction → Assessment → Rule Validation → Summarization
+- **BDA mode**: End-to-end processing with Bedrock Data Automation (BDA) → Rule Validation → Summarization
 
 ## Quick Start
 
@@ -93,8 +101,7 @@ After deployment, choose the processing method that fits your use case:
 1. Open the Web UI URL from CloudFormation stack Outputs
 2. Log in and click "Upload Document"
 3. Upload a sample document:
-   - For Patterns 1 & 2: [samples/lending_package.pdf](./samples/lending_package.pdf)
-   - For Pattern 3: [samples/rvl_cdip_package.pdf](./samples/rvl_cdip_package.pdf)
+   - [samples/lending_package.pdf](./samples/lending_package.pdf)
 4. Monitor processing and view results in the dashboard
 
 #### Method 2: Direct S3 Upload (Simple)
@@ -109,7 +116,7 @@ For batch processing, automation, or evaluation workflows:
 
 ```bash
 # Install CLI
-cd idp_cli && pip install -e .
+cd lib/idp_cli_pkg && pip install -e .
 
 # Process documents
 idp-cli run-inference \
@@ -153,17 +160,19 @@ To update an existing GenAIIDP stack to a new version:
 7. For detailed instructions, see the [Deployment Guide](./docs/deployment.md#updating-an-existing-stack)
 
 For testing, use these sample files:
-   - For Patterns 1 (BDA) and Pattern 2: Use [samples/lending_package.pdf](./samples/lending_package.pdf)
-   - For Pattern 3 (UDOP): Use [samples/rvl_cdip_package.pdf](./samples/rvl_cdip_package.pdf)
+   - Use [samples/lending_package.pdf](./samples/lending_package.pdf) for both Pipeline and BDA modes
 
 For detailed deployment and testing instructions, see the [Deployment Guide](./docs/deployment.md).
 
 
 ## Detailed Documentation
 
+> 📖 **[Browse all documentation on the GenAIIDP Docs Site](https://aws-solutions-library-samples.github.io/accelerated-intelligent-document-processing-on-aws/)** — full-text search, sidebar navigation, and organized by topic.
+
 ### Core Documentation
 
 - [Architecture](./docs/architecture.md) - Detailed component architecture and data flow
+- [Demo Videos](./docs/demo-videos.md) - Comprehensive collection of feature demonstration videos
 - [Deployment](./docs/deployment.md) - Build, publish, deploy, and test instructions
 - [IDP CLI](./docs/idp-cli.md) - Command line interface for batch processing and evaluation workflows
 - [Web UI](./docs/web-ui.md) - Web interface features and usage
@@ -176,6 +185,7 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 - [Extraction](./docs/extraction.md) - Customizing information extraction
 - [Human-in-the-Loop Review](./docs/human-review.md) - Human review workflows with built-in review system
 - [Assessment](./docs/assessment.md) - Extraction confidence evaluation using LLMs
+- [Rule Validation](./docs/rule-validation.md) - Business rule validation and compliance checking
 - [Evaluation Framework](./docs/evaluation.md) - Accuracy assessment system with analytics database and reporting
 - [Knowledge Base](./docs/knowledge-base.md) - Document knowledge base query feature
 - [Monitoring](./docs/monitoring.md) - Monitoring and logging capabilities
@@ -184,11 +194,11 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 - [Reporting Database](./docs/reporting-database.md) - Analytics database for evaluation metrics and metering data
 - [Troubleshooting](./docs/troubleshooting.md) - Troubleshooting and performance guides
 
-### Processing Patterns
+### Processing Modes
 
-- [Pattern 1: BDA](./docs/pattern-1.md) - Packet or Media processing with Bedrock Data Automation (BDA)
-- [Pattern 2: Textract + Bedrock](./docs/pattern-2.md) - OCR with Textract and generative AI with Bedrock
-- [Pattern 3: Textract + UDOP + Bedrock](./docs/pattern-3.md) - OCR with Textract, UDOP Classification, and Bedrock extraction
+- [Architecture](./docs/architecture.md) - Unified pattern with BDA and Pipeline processing modes
+- [BDA Mode Reference](./docs/pattern-1.md) - Bedrock Data Automation (BDA) concepts and behavior
+- [Pipeline Mode Reference](./docs/pattern-2.md) - Textract + Bedrock classification and extraction
 - [Few-Shot Examples](./docs/few-shot-examples.md) - Implementing few-shot examples for improved accuracy
 
 ### Python Development
@@ -198,6 +208,7 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 
 ### Planning & Operations
 
+- [Capacity Planning](./docs/capacity-planning.md) - Comprehensive capacity planning, performance optimization, and resource scaling guidance
 - [Well-Architected Framework Assessment](./docs/well-architected.md) - Analysis based on AWS Well-Architected Framework
 - [AWS Services & IAM Roles](./docs/aws-services-and-roles.md) - AWS services used and IAM role requirements
 - [Cost Calculator](./docs/cost-calculator.md) - Framework for estimating solution costs
