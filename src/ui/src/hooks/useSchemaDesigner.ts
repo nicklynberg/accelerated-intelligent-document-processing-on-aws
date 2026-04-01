@@ -71,6 +71,22 @@ interface UseSchemaDesignerReturn {
   clearAllClasses: () => void;
 }
 
+/**
+ * Extract a human-readable name from a JSON Schema $id field.
+ * If $id is a URL (e.g., "https://schema.example.com/BankCheck"), returns the last path segment ("BankCheck").
+ * If $id is already a simple name, returns it as-is.
+ * Returns undefined if $id is falsy.
+ */
+const extractNameFromId = (id: string | undefined): string | undefined => {
+  if (!id) return undefined;
+  // If it looks like a URL, extract the last path segment
+  if (id.includes('://') || id.startsWith('/')) {
+    const segments = id.split('/').filter(Boolean);
+    return segments.length > 0 ? segments[segments.length - 1] : id;
+  }
+  return id;
+};
+
 const extractInlineObjectsToClasses = (
   properties: Record<string, JsonSchemaProperty>,
   extractedClasses: Map<string, SchemaClass>,
@@ -195,7 +211,11 @@ const convertJsonSchemaToClasses = (jsonSchema: JsonSchemaProperty | JsonSchemaP
       // Convert root schema to document type class
       const docTypeClass: SchemaClass = {
         id: `class-${timestamp}-doc-${schemaIndex}`,
-        name: (schema.$id as string) || (schema[X_AWS_IDP_DOCUMENT_TYPE] as string) || `DocumentType${schemaIndex + 1}`,
+        name:
+          (schema.title as string) ||
+          extractNameFromId(schema.$id as string) ||
+          (schema[X_AWS_IDP_DOCUMENT_TYPE] as string) ||
+          `DocumentType${schemaIndex + 1}`,
         description: schema.description,
         [X_AWS_IDP_DOCUMENT_TYPE]: true,
         attributes: {
@@ -263,7 +283,7 @@ const convertJsonSchemaToClasses = (jsonSchema: JsonSchemaProperty | JsonSchemaP
   const mainClassId = `class-${timestamp}`;
   const mainClass: SchemaClass = {
     id: mainClassId,
-    name: jsonSchema.$id || 'MainClass',
+    name: (jsonSchema.title as string) || extractNameFromId(jsonSchema.$id as string) || 'MainClass',
     description: jsonSchema.description,
     [X_AWS_IDP_DOCUMENT_TYPE]: true, // Mark as document type for backward compat
     attributes: {

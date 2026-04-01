@@ -94,6 +94,18 @@ discovery:
       - "type": a short label for the document type (e.g., "W2 Form", "Letter", "Invoice")
       Return ONLY a JSON array, no other text:
       [{"start": 1, "end": 2, "type": "Letter"}, {"start": 3, "end": 3, "type": "Invoice"}]
+  multi_document:
+    embedding_model_id: us.cohere.embed-v4:0
+    analysis_model_id: us.anthropic.claude-sonnet-4-6
+    temperature: "0.0"
+    max_tokens: "10000"
+    max_documents: 500
+    min_cluster_size: 2
+    num_sample_documents: 3
+    max_sample_size: 5
+    max_concurrent_embeddings: 5
+    max_concurrent_clusters: 3
+    system_prompt: ""
   without_ground_truth:
     model_id: us.amazon.nova-pro-v1:0
     system_prompt: >-

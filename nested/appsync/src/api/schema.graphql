@@ -255,6 +255,13 @@ type DiscoveryJobListItem @aws_cognito_user_pools @aws_iam {
   discoveredClassName: String
   statusMessage: String
   pageRange: String
+  # Multi-document discovery fields
+  jobType: String
+  currentStep: String
+  totalDocuments: Int
+  clustersFound: Int
+  discoveredClasses: String
+  reflectionReport: String
 }
 
 input CreateDocumentInput {
@@ -426,6 +433,34 @@ type DiscoveryJob @aws_cognito_user_pools @aws_iam {
   errorMessage: String
   discoveredClassName: String
   statusMessage: String
+  # Multi-document discovery fields
+  jobType: String
+  currentStep: String
+  totalDocuments: Int
+  clustersFound: Int
+  discoveredClasses: String
+  reflectionReport: String
+}
+
+type MultiDocDiscoveryJob @aws_cognito_user_pools @aws_iam {
+  jobId: ID!
+  status: String!
+  configVersion: String
+  currentStep: String
+  totalDocuments: Int
+  clustersFound: Int
+  discoveredClasses: String
+  reflectionReport: String
+  errorMessage: String
+  createdAt: String
+  updatedAt: String
+}
+
+type DiscoveredClassSummary @aws_cognito_user_pools @aws_iam {
+  clusterId: Int
+  classification: String
+  documentCount: Int
+  error: String
 }
 
 type Agent @aws_cognito_user_pools @aws_iam {
@@ -614,6 +649,12 @@ type Mutation {
     errorMessage: String
     discoveredClassName: String
     statusMessage: String
+    jobType: String
+    currentStep: String
+    totalDocuments: Int
+    clustersFound: Int
+    discoveredClasses: String
+    reflectionReport: String
   ): DiscoveryJob @aws_iam
 
   # Admin-only operations
@@ -658,6 +699,7 @@ type Mutation {
     version: String
     pageRanges: [String]
     pageLabels: [String]
+    skipJobCreation: Boolean
   ): DisPresignedUrlResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])
   autoDetectSections(
@@ -665,6 +707,20 @@ type Mutation {
     bucket: String!
     version: String
   ): String
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  startMultiDocDiscovery(
+    s3Bucket: String
+    s3Prefix: String
+    configVersion: String!
+    zipFileName: String
+    zipFileSize: Int
+  ): MultiDocDiscoveryJob
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  uploadMultiDocDiscoveryZip(
+    fileName: String!
+    fileSize: Int!
+    configVersion: String!
+  ): TestSetUploadResponse
     @aws_auth(cognito_groups: ["Admin", "Author"])
   copyToBaseline(objectKey: String!): CopyToBaselineResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])

@@ -7,11 +7,30 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **Multi-Document Discovery** — New capability to automatically discover document classes from a collection of documents. Instead of manually defining document schemas one at a time, users point to a folder of mixed documents and the system automatically identifies document types, clusters similar documents, generates JSON Schemas with field definitions for each type, and saves them to a configuration version — ready for immediate use in the processing pipeline.
+  - **Pipeline Architecture**: Five-step Step Functions workflow (Prepare → Embed → Cluster → Analyze → Save) running as container-based Lambda functions (Docker images via ECR/CodeBuild) for heavy ML dependencies (sentence-transformers, scikit-learn, UMAP).
+    - **Prepare**: Validates input, extracts zip uploads, lists S3 documents
+    - **Embed**: Generates multi-modal embeddings (text + image) using Amazon Bedrock Titan Embed models
+    - **Cluster**: Applies UMAP dimensionality reduction + HDBSCAN clustering to group similar documents
+    - **Analyze**: Parallel Map state invokes Bedrock LLM per cluster to generate class names and JSON Schemas
+    - **Save**: Merges discovered classes into the target configuration version with a quality review (reflection) report
+  - **Two Input Modes**: S3 path (select bucket + prefix) or zip upload (presigned URL upload flow)
+  - **Dedicated UI Tab**: New "Multi-Document" tab on the Discovery page with job submission form (config version selector, bucket selector, S3 prefix input, zip upload), jobs table with search/filter/sort/pagination, and detailed job results page
+  - **Job Details Page**: Shows pipeline progress indicators, discovered classes with expandable JSON schemas, "View in Configuration →" deep-links to the Document Schema tab for the correct config version, and a Quality Review Report rendered as formatted markdown (GFM)
+  - **Real-Time Status Updates**: Each pipeline step pushes live status to the UI via AppSync GraphQL subscriptions (not polling). Lambda handlers call the `updateDiscoveryJobStatus` mutation using SigV4 IAM auth, triggering `onDiscoveryJobStatusChange` subscriptions for instant UI updates. New shared utility `appsync_status.py` handles signed AppSync calls with graceful error handling (failures don't block the pipeline).
+  - **Configuration Integration**: Discovered classes are saved directly to the selected config version's `classes` array in DynamoDB, immediately available for document processing without manual schema creation
+  - **Publish Pipeline**: Automated Docker image builds via CodeBuild with content-hash-based rebuild triggers, source zip packaging for multi-doc discovery Lambda code
+  - **Security**: `updateDiscoveryJobStatus` mutation is `@aws_iam` only (backend Lambda IAM auth), each Lambda function has scoped `appsync:GraphQL` IAM permissions, SigV4-signed requests with no hardcoded credentials
+  - See `docs/discovery.md` for full documentation
+
+### Fixed
+
+- **"View Config" from Discovery shows wrong config version** — Fixed race condition where clicking "View in Configuration →" from a discovery job showed classes from the 'default' config version instead of the job's version. Root cause: `selectedVersion` was initialized as `null`, causing `useConfiguration('default')` to fire before URL params were read. Fix: initialize `selectedVersion` synchronously from URL hash params at mount time.
+
+- **Publish pipeline missing multi-doc discovery Docker build trigger** — Added `<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>` to template token replacements and `package_multi_doc_discovery_source()` to create/upload the source zip for CodeBuild, ensuring Docker images are rebuilt when handler code changes.
 - **Wildcard pattern support for delete-documents** — `idp-cli delete-documents` and `client.batch.delete_documents()` now accept a `--pattern` / `pattern` parameter for fnmatch-style wildcard matching (e.g. `"batch-123/*.pdf"`, `"*invoice*"`). Combines with `--status-filter` to delete e.g. all failed invoices across batches.
 
 - **Chandra OCR Lambda Hook Sample** — New `GENAIIDP-chandra-ocr-hook` sample in `samples/lambda-hook-inference/` that integrates [Datalab Chandra OCR 2](https://github.com/datalab-to/chandra) with the LambdaHook feature for high-quality OCR. Supports 90+ languages, math, tables, forms, and handwriting. Uses the Datalab hosted async API (`/api/v1/convert`) with configurable output format (markdown/json/html) and conversion mode (fast/balanced/accurate). Includes standalone SAM template, local test script, and deployment instructions. See `docs/lambda-hook-inference.md` — Chandra OCR Integration section.
-
-### Fixed
 
 - **`delete-documents` fails with DynamoDB errors** — Fixed two bugs in `get_documents_by_batch()`: (1) passing empty `ExpressionAttributeNames={}` when no status filter caused `ValidationException`, and (2) using low-level DynamoDB client type descriptors (`{"S": "..."}`) with the high-level Table resource caused `begins_with` operand type mismatch. Rewrote to use the high-level `Table.scan()` API with `boto3.dynamodb.conditions.Attr`.
 

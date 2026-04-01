@@ -19,7 +19,8 @@ import DocumentDetails from '../document-details';
 import DocumentsQueryLayout from '../document-kb-query-layout';
 import DocumentsAgentsLayout from '../document-agents-layout/DocumentsAgentsLayout';
 import UploadDocumentPanel from '../upload-document';
-import DiscoveryPanel from '../discovery/DiscoveryPanel';
+import DiscoveryPage from '../discovery/DiscoveryPage';
+import DiscoveryJobDetails from '../discovery/DiscoveryJobDetails';
 import UserManagementLayout from '../user-management/UserManagementLayout';
 import { appLayoutLabels } from '../common/labels';
 
@@ -135,7 +136,8 @@ const GenAIIDPLayout = ({ children }: GenAIIDPLayoutProps): React.JSX.Element =>
               <Route path="pricing" element={<PricingLayout />} />
               <Route path="capacity-planning" element={<CapacityPlanningLayout />} />
               <Route path="upload" element={<UploadDocumentPanel />} />
-              <Route path="discovery" element={<DiscoveryPanel />} />
+              <Route path="discovery" element={<DiscoveryPage />} />
+              <Route path="discovery/job/:jobId" element={<DiscoveryJobDetails />} />
               <Route path="users" element={<UserManagementLayout />} />
               <Route path="*" element={<DocumentDetails />} />
             </Routes>

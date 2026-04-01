@@ -2,53 +2,69 @@
 
 ## Current Work Focus
 
-### Publish/Headless Consolidation (March 22, 2026)
+### Multi-Document Discovery Pipeline — Final Bug Fix (March 28, 2026)
 
-**Problem**: Deployment logic was fragmented across 3 disconnected tools:
-- `publish.py` (1500-line standalone script) — build and upload artifacts
-- `scripts/generate_govcloud_template.py` (700-line standalone script) — headless template generation
-- `idp-cli deploy --from-code` — called publish.py via subprocess with hardcoded bucket/prefix
+**Status**: Pipeline runs end-to-end successfully. Fixing last bug: save_to_config fails due to argument mismatch.
 
-**Solution**: Consolidated all logic into `idp-cli` and `idp_sdk`:
+#### What's Working (Fully):
+- ✅ Container-based Lambda via nested stack (Option D) — fully deployed
+- ✅ Embed → Cluster → Analyze → Save pipeline completes end-to-end
+- ✅ 293 documents processed, 9 clusters discovered
+- ✅ All 9 clusters analyzed with Claude Sonnet 4.6 via Strands agent
+- ✅ Beautiful JSON Schemas generated with proper `x-aws-idp-*` extensions
+- ✅ Reflection report generated successfully
+- ✅ Embedding model: `amazon.titan-embed-image-v1` (deployed), `us.cohere.embed-v4:0` (in code for next deploy)
 
-#### 1. New SDK Modules
-- **`idp_sdk._core.publish`** — `IDPPublisher` class (moved from root `publish.py`)
-- **`idp_sdk._core.template_transform`** — `HeadlessTemplateTransformer` (extracted from generate_govcloud_template.py)
-- **`idp_sdk.operations.publish`** — `PublishOperation` with `build()`, `transform_template_headless()`, `print_deployment_urls()`
-- **`idp_sdk.models.publish`** — `PublishResult`, `TemplateTransformResult` Pydantic models
-- **`IDPClient.publish`** — 11th operation namespace registered on the client
+#### Discovered Document Classes (test-forcejpeg execution):
+| Cluster | Classification | Docs |
+|---------|---------------|------|
+| 0 | BankCheck | 52 |
+| 1 | DemocraticDesignatingPetition | 51 |
+| 2 | RealEstateTransactionAnalysisReport | 59 |
+| 3 | CaliforniaCommercialLeaseAgreement | 52 |
+| 4 | StaffShiftSchedule | 18 |
+| 5 | Glossary | 31 |
+| 6 | BankStatement | 11 |
+| 7 | MedicalEquipmentInspectionChecklist | 11 |
+| 8 | DeliveryNote | 8 |
 
-#### 2. New `idp-cli publish` Command
-Full parity with publish.py plus headless:
-```
-idp-cli publish [--source-dir .] --region us-east-1 \
-    [--bucket-basename my-bucket] [--prefix my-prefix] \
-    [--headless] [--public] [--max-workers 4] \
-    [--clean-build] [--no-validate] [--verbose] [--lint/--no-lint]
-```
+#### Bug Fixed (March 28, 2026):
+**Bug 5: save_to_config argument mismatch** (FIXED in code, deploying)
+- `multi_document_discovery.py` called `_merge_and_save_class(dc.json_schema, config_version)` with 2 args
+- `ClassesDiscovery._merge_and_save_class(self, new_class)` only takes 1 arg (config_version already in `self.version`)
+- Also: caller expected return value but method returns `None`
+- **Fix**: Removed extra `config_version` arg, get class_name from `dc.classification` instead of return value
 
-#### 3. Enhanced `idp-cli deploy`
-New options: `--headless`, `--bucket-basename`, `--prefix`, `--public`, `--build-max-workers`, `--clean-build`, `--no-validate-template`
-- `--headless` without `--from-code`: downloads pre-built template, transforms to headless, uploads, deploys
-- `--headless` with `--from-code`: builds from source + generates headless template + deploys
-- Removed `--generate-template-only` (use `idp-cli publish` instead)
+#### Previous Bugs Fixed (March 26, 2026):
+1. **Wrong embedding model**: Changed from `cohere.embed-english-v3` to `amazon.titan-embed-image-v1`
+2. **Broken config loading**: Changed `get_configuration()` to `get_merged_configuration()`
+3. **Image too large**: Added `MAX_IMAGE_DIMENSION = 2048` + `thumbnail()` resizing
+4. **Missing IAM permission**: Added `bedrock:InvokeModelWithResponseStream` for Strands agent
 
-#### 4. Backward Compatibility Wrappers
-- **`publish.py`** → 50-line wrapper, re-exports `IDPPublisher` from SDK, deprecation notice
-- **`scripts/generate_govcloud_template.py`** → Wrapper delegating to SDK, deprecation notice
-- Both maintain identical CLI interfaces for existing CI/CD pipelines
+### Deploy Workflow for Multi-Doc Discovery Updates:
+1. Edit source files locally
+2. `zip` source → upload to S3 (`multi-doc-discovery-source.zip`)
+3. Trigger CodeBuild (`DockerBuildProject-SCHmXl057IyX`)
+4. Update all 4 Lambda functions (`aws lambda update-function-code --image-uri ...`)
+5. Test via Step Functions execution
 
-### Key Design Decisions
-- `deploy` is focused on deploying — template generation belongs in `publish`
-- `--bucket` renamed to `--bucket-basename` (SDK appends region automatically)
-- `--source-dir` defaults to `.` for convenience
-- SDK calls `IDPPublisher.run()` directly (no subprocess) — catches `SystemExit`
-- `publish.py` wrapper adds `lib/` paths to sys.path for standalone use
+### Key Resources:
+- **State Machine**: `MultiDocDiscoveryStateMachine-dDZLuXlnPr36`
+- **ECR Repo**: `idp-clustering-multidocdiscoverystack-zk22bzb3zu9f-ecrrepository-9p8uh42dbiem`
+- **CodeBuild**: `DockerBuildProject-SCHmXl057IyX`
+- **Source zip**: `s3://idp-accelerator-artifacts-912625584728-us-west-2/idp-cli/0.5.4.dev1/multi-doc-discovery-source.zip`
+- **Discovery bucket**: `idp-clustering-discoverybucket-qw7bnpqtmdn9`
+- **Test data**: `test-multi-doc-discovery/` prefix (293 OCR benchmark PNGs)
+- **Nested stack**: `IDP-Clustering-MULTIDOCDISCOVERYSTACK-ZK22BZB3ZU9F`
 
-### Follow-up Tasks
-- Make `publish.py` work without venv activation (self-contained or `uv run` shim)
-- Update docs (headless-deployment.md, idp-cli.md, idp-sdk.md, deployment.md)
-- Update CHANGELOG.md
+### Lambda Functions (in nested stack):
+- Embed: `IDP-Clustering-MULTIDOCDI-MultiDocDiscoveryEmbedFu-38US140aTztm`
+- Cluster: `IDP-Clustering-MULTIDOCDI-MultiDocDiscoveryCluster-O45y2NnfL4xF`
+- Analyze: `IDP-Clustering-MULTIDOCDI-MultiDocDiscoveryAnalyze-LhuQNvUB0KG6`
+- Save: `IDP-Clustering-MULTIDOCDI-MultiDocDiscoverySaveFun-DTKnS535Ymon`
+
+### Log Groups (custom names from nested stack):
+- Save: `IDP-Clustering-MULTIDOCDISCOVERYSTACK-ZK22BZB3ZU9F-MultiDocDiscoverySaveFunctionLogGroup-r7zdVUGJHhpK`
 
 ---
 
@@ -60,11 +76,13 @@ New options: `--headless`, `--bucket-basename`, `--prefix`, `--public`, `--build
 - Routing via `use_bda` flag in configuration
 - Full config per version stored in DynamoDB
 
-### RBAC Architecture (March 9, 2026)
-- 3-layer enforcement: AppSync auth directives → Lambda resolver filtering → UI adaptation
-- 4 Cognito groups: Admin, Author, Reviewer, Viewer
-- Server-side document filtering for Reviewer role
-- Config-version scoping data model ready (Phase 2)
+### Multi-Document Discovery (March 25-28, 2026)
+- Container-based Lambda via nested stack (`nested/multi-doc-discovery/`)
+- 4 Lambda functions: Embed, Cluster, Analyze, Save
+- Docker image built via CodeBuild, pushed to ECR
+- Dependencies: scikit-learn, scipy, numpy, strands-agents (exceeds 250MB layer limit)
+- Embedding model: `us.cohere.embed-v4:0` (in code, deploying)
+- Analysis model: `us.anthropic.claude-sonnet-4-6` (via Strands agents with ConverseStream)
 
 ### SDK Architecture (March 22, 2026)
 - 11 operation namespaces: stack, batch, document, config, discovery, manifest, testing, search, evaluation, assessment, **publish**

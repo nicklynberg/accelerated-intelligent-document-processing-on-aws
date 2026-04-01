@@ -91,7 +91,10 @@ Parameters:
   
   DiscoveryBucketName:
     Type: String
-  
+
+  MultiDocDiscoveryStateMachineArn:
+    Type: String
+
   # SQS Queues
   DocumentQueueUrl:
     Type: String
@@ -1695,6 +1698,7 @@ Resources:
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTableName
           DISCOVERY_QUEUE_URL: !Ref DiscoveryQueueUrl
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
+          MULTI_DOC_DISCOVERY_STATE_MACHINE_ARN: !Ref MultiDocDiscoveryStateMachineArn
       LoggingConfig:
         LogGroup: !Ref DiscoveryUploadResolverFunctionLogGroup
       Policies:
@@ -1725,6 +1729,12 @@ Resources:
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+            # Step Functions permission for multi-document discovery
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource:
+                - !Ref MultiDocDiscoveryStateMachineArn
 
 
   ##########################################################################
@@ -1765,6 +1775,30 @@ Resources:
       DataSourceName: !GetAtt DiscoveryUploadResolverDataSource.Name
       TypeName: Mutation
       FieldName: autoDetectSections
+
+  ##########################################################################
+  # StartMultiDocDiscoveryResolver
+  ##########################################################################
+  StartMultiDocDiscoveryResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt DiscoveryUploadResolverDataSource.Name
+      TypeName: Mutation
+      FieldName: startMultiDocDiscovery
+
+  ##########################################################################
+  # UploadMultiDocDiscoveryZipResolver
+  ##########################################################################
+  UploadMultiDocDiscoveryZipResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt DiscoveryUploadResolverDataSource.Name
+      TypeName: Mutation
+      FieldName: uploadMultiDocDiscoveryZip
 
   ##########################################################################
   # Discovery Jobs List Resolver
@@ -1812,9 +1846,9 @@ Resources:
       DataSourceName: !GetAtt DiscoveryTableDataSource.Name
       RequestMappingTemplate: |-
         ## Validate status is one of the allowed values
-        #set($validStatuses = ["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED", "OPTIMIZATION_IN_PROGRESS", "OPTIMIZATION_COMPLETED", "OPTIMIZATION_FAILED"])
+        #set($validStatuses = ["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED", "OPTIMIZATION_IN_PROGRESS", "OPTIMIZATION_COMPLETED", "OPTIMIZATION_FAILED", "QUEUED", "PREPARING", "EMBEDDING", "CLUSTERING", "ANALYZING"])
         #if(!$validStatuses.contains($ctx.args.status))
-          $util.error("Invalid status value. Status must be one of: PENDING, IN_PROGRESS, COMPLETED, FAILED, OPTIMIZATION_IN_PROGRESS, OPTIMIZATION_COMPLETED, OPTIMIZATION_FAILED", "ValidationException")
+          $util.error("Invalid status value", "ValidationException")
         #end
 
         #set($expNames = {})
@@ -1844,6 +1878,43 @@ Resources:
           $util.qr($expNames.put("#statusMessage", "statusMessage"))
           $util.qr($expValues.put(":statusMessage", $util.dynamodb.toDynamoDB($ctx.args.statusMessage)))
           #set($updateExpression = "${updateExpression}, #statusMessage = :statusMessage")
+        #end
+
+        ## Multi-document discovery fields (optional)
+        #if($ctx.args.jobType)
+          $util.qr($expNames.put("#jobType", "jobType"))
+          $util.qr($expValues.put(":jobType", $util.dynamodb.toDynamoDB($ctx.args.jobType)))
+          #set($updateExpression = "${updateExpression}, #jobType = :jobType")
+        #end
+
+        #if($ctx.args.currentStep)
+          $util.qr($expNames.put("#currentStep", "currentStep"))
+          $util.qr($expValues.put(":currentStep", $util.dynamodb.toDynamoDB($ctx.args.currentStep)))
+          #set($updateExpression = "${updateExpression}, #currentStep = :currentStep")
+        #end
+
+        #if($ctx.args.totalDocuments)
+          $util.qr($expNames.put("#totalDocuments", "totalDocuments"))
+          $util.qr($expValues.put(":totalDocuments", $util.dynamodb.toDynamoDB($ctx.args.totalDocuments)))
+          #set($updateExpression = "${updateExpression}, #totalDocuments = :totalDocuments")
+        #end
+
+        #if($ctx.args.clustersFound)
+          $util.qr($expNames.put("#clustersFound", "clustersFound"))
+          $util.qr($expValues.put(":clustersFound", $util.dynamodb.toDynamoDB($ctx.args.clustersFound)))
+          #set($updateExpression = "${updateExpression}, #clustersFound = :clustersFound")
+        #end
+
+        #if($ctx.args.discoveredClasses)
+          $util.qr($expNames.put("#discoveredClasses", "discoveredClasses"))
+          $util.qr($expValues.put(":discoveredClasses", $util.dynamodb.toDynamoDB($ctx.args.discoveredClasses)))
+          #set($updateExpression = "${updateExpression}, #discoveredClasses = :discoveredClasses")
+        #end
+
+        #if($ctx.args.reflectionReport)
+          $util.qr($expNames.put("#reflectionReport", "reflectionReport"))
+          $util.qr($expValues.put(":reflectionReport", $util.dynamodb.toDynamoDB($ctx.args.reflectionReport)))
+          #set($updateExpression = "${updateExpression}, #reflectionReport = :reflectionReport")
         #end
 
         ## Set updatedAt to current timestamp
