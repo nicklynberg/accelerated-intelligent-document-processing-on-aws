@@ -49,7 +49,7 @@ Concierge support for customization, deployment, and integration of production u
 
 - **Serverless Architecture**: Built entirely on AWS serverless technologies including Lambda, Step Functions, SQS, and DynamoDB
 - **Modular, pluggable patterns**: Pre-built processing patterns using state-of-the-art models and AWS services
-- **Command Line Interface**: Programmatic batch processing with evaluation framework and analytics integration
+- **Command Line Interface**: Programmatic batch processing with evaluation framework, analytics integration, and interactive Agent Chat
 - **Advanced Classification**: Support for page-level and holistic document packet classification
 - **Few Shot Example Support**: Improve accuracy through example-based prompting
 - **Custom Business Logic Integration**: Inject custom prompt generation logic via Lambda functions for specialized document processing
@@ -174,7 +174,7 @@ For detailed deployment and testing instructions, see the [Deployment Guide](./d
 - [Architecture](./docs/architecture.md) - Detailed component architecture and data flow
 - [Demo Videos](./docs/demo-videos.md) - Comprehensive collection of feature demonstration videos
 - [Deployment](./docs/deployment.md) - Build, publish, deploy, and test instructions
-- [IDP CLI](./docs/idp-cli.md) - Command line interface for batch processing and evaluation workflows
+- [IDP CLI](./docs/idp-cli.md) - Command line interface for batch processing, evaluation workflows, and interactive Agent Chat
 - [Web UI](./docs/web-ui.md) - Web interface features and usage
 - [Agent Analysis](./docs/agent-analysis.md) - Natural language analytics and data visualization feature
 - [Custom MCP Agent](./docs/custom-MCP-agent.md) - Integrating external MCP servers for custom tools and capabilities

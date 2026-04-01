@@ -5,6 +5,7 @@
 
 from .assessment import AssessmentOperation
 from .batch import BatchOperation
+from .chat import ChatOperation
 from .config import ConfigOperation
 from .discovery import DiscoveryOperation
 from .document import DocumentOperation
@@ -18,6 +19,7 @@ from .testing import TestingOperation
 __all__ = [
     "AssessmentOperation",
     "BatchOperation",
+    "ChatOperation",
     "ConfigOperation",
     "DiscoveryOperation",
     "DocumentOperation",

@@ -11,7 +11,7 @@ import logging
 import os
 import sys
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 _SETUP_HELP = """\
 Error: Required packages not found.
@@ -40,13 +40,14 @@ try:
 except ImportError:
     # Dependencies not installed — main() will print a helpful message and exit.
     # Define minimal stubs so the module can still be imported for entry point resolution.
-    click = None  # type: ignore
-    IDPClient = None  # type: ignore
-    Console = None  # type: ignore
-    Live = None  # type: ignore
-    Table = None  # type: ignore
-    display = None  # type: ignore
-    boto3 = None  # type: ignore
+    if not TYPE_CHECKING:
+        click = None
+        IDPClient = None
+        Console = None
+        Live = None
+        Table = None
+        display = None
+        boto3 = None
 
 # Configure logging
 logging.basicConfig(
@@ -5263,6 +5264,59 @@ def publish(
         logger.error(f"Error during publish: {e}", exc_info=True)
         console.print(f"[red]✗ Error: {e}[/red]")
         sys.exit(1)
+
+
+@cli.command()
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option("--region", default=None, help="AWS region")
+@click.option(
+    "--prompt",
+    default=None,
+    help="Single-shot prompt (non-interactive mode)",
+)
+@click.option(
+    "--enable-code-intelligence",
+    is_flag=True,
+    default=False,
+    help="Enable Code Intelligence Agent (uses external third-party services)",
+)
+def chat(
+    stack_name: str,
+    region: Optional[str],
+    prompt: Optional[str],
+    enable_code_intelligence: bool,
+):
+    """Interactive Agent Companion Chat from the terminal.
+
+    Provides access to the full multi-agent orchestrator including
+    Analytics, Error Analyzer, and other agents.
+
+    \b
+    Examples:
+      # Interactive mode
+      idp-cli chat --stack-name IDP
+
+      # Single-shot mode
+      idp-cli chat --stack-name IDP --prompt "How many documents were processed today?"
+
+      # With Code Intelligence (external services)
+      idp-cli chat --stack-name IDP --enable-code-intelligence
+    """
+    try:
+        from .chat import run_chat
+    except ImportError:
+        console.print(
+            "[red]✗ Chat requires idp_common[agents] to be installed.\n"
+            "  Run: pip install -e 'lib/idp_common_pkg[agents]'[/red]"
+        )
+        sys.exit(1)
+
+    run_chat(
+        stack_name=stack_name,
+        region=region,
+        prompt=prompt,
+        enable_code_intelligence=enable_code_intelligence,
+    )
 
 
 def main():

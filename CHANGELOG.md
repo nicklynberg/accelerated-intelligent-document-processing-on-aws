@@ -7,6 +7,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **IDP CLI `chat` Command & SDK `ChatOperation`** — Interactive Agent Companion Chat from the terminal and programmatic SDK access. Runs the same multi-agent orchestrator as the Web UI locally, with real-time streaming and multi-turn conversation support. Includes Analytics Agent, Error Analyzer Agent, and optionally Code Intelligence Agent (`--enable-code-intelligence`). Available as `idp-cli chat --stack-name <stack>` for interactive use, `--prompt` flag for single-shot scripting, and `client.chat.send_message()` in the Python SDK. See `docs/idp-cli.md#chat`.
+
 - **Multi-Document Discovery** — New capability to automatically discover document classes from a collection of documents. Instead of manually defining document schemas one at a time, users point to a folder of mixed documents and the system automatically identifies document types, clusters similar documents, generates JSON Schemas with field definitions for each type, and saves them to a configuration version — ready for immediate use in the processing pipeline. Available from the Web UI, CLI (`idp-cli discover-multidoc`), and SDK (`client.discovery.run_multi_doc()`).
   - **Web UI**: New "Multi-Document" tab on the Discovery page with job submission form (config version selector, bucket selector, S3 prefix input, zip upload), jobs table with search/filter/sort/pagination, and detailed job results page with pipeline progress, expandable JSON schemas, config deep-links, and Quality Review Report
   - **CLI**: `idp-cli discover-multidoc --dir ./samples/ -o ./schemas/` with Rich progress bars, results table, and reflection report

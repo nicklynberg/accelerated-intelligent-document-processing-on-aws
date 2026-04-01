@@ -53,6 +53,8 @@ from .models import (
     BatchRerunResult,
     BatchResult,
     BatchStatus,
+    # Chat models
+    ChatResponse,
     # Config models
     ConfigActivateResult,
     ConfigCreateResult,
@@ -143,6 +145,8 @@ __all__ = [
     "BatchReprocessResult",
     "BatchDownloadResult",
     "BatchDeletionResult",
+    # Chat models
+    "ChatResponse",
     # Document models
     "DocumentStatus",
     "DocumentUploadResult",

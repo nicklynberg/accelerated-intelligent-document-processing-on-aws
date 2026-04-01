@@ -22,6 +22,7 @@ from .batch import (
     BatchResult,
     BatchStatus,
 )
+from .chat import ChatResponse
 from .config import (
     ConfigActivateResult,
     ConfigCreateResult,
@@ -109,6 +110,8 @@ __all__ = [
     "BatchInfo",
     "BatchListResult",
     "BatchRerunResult",
+    # Chat models
+    "ChatResponse",
     "BatchReprocessResult",
     "BatchDownloadResult",
     "BatchDeletionResult",

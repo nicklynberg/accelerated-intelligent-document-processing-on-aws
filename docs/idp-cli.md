@@ -14,7 +14,8 @@ A command-line tool for batch document processing with the GenAI IDP Accelerator
 📁 **Flexible Input** - Support for local files and S3 references  
 🔍 **Comprehensive Status** - Track queued, running, completed, and failed documents  
 📈 **Batch Analytics** - Success rates, durations, and detailed error reporting  
-🎯 **Evaluation Framework** - Validate accuracy against baselines with detailed metrics
+🎯 **Evaluation Framework** - Validate accuracy against baselines with detailed metrics  
+💬 **Agent Chat** - Interactive Agent Companion Chat from the terminal with Analytics, Error Analyzer, and more
 
 Demo:
 
@@ -49,6 +50,7 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
   - [config-list](#config-list)
   - [config-activate](#config-activate)
   - [config-delete](#config-delete)
+  - [chat](#chat)
 - [Complete Evaluation Workflow](#complete-evaluation-workflow)
   - [Step 1: Deploy Your Stack](#step-1-deploy-your-stack)
   - [Step 2: Initial Processing from Local Directory](#step-2-initial-processing-from-local-directory)
@@ -2222,6 +2224,81 @@ idp-cli config-sync-bda --stack-name my-stack --direction bda-to-idp --mode merg
 # Sync specific config version
 idp-cli config-sync-bda --stack-name my-stack --config-version v2
 ```
+
+---
+
+### `chat`
+
+Interactive Agent Companion Chat from the terminal. Provides access to the full multi-agent orchestrator including Analytics, Error Analyzer, Code Intelligence, and any configured External MCP Agents.
+
+The chat command runs the same orchestrator as the Web UI's Agent Companion Chat, but locally in your terminal — with real-time streaming and multi-turn conversation support.
+
+**Usage:**
+```bash
+idp-cli chat [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--region`: AWS region (optional)
+- `--prompt`: Single-shot prompt — sends one message, prints the response, and exits. Useful for scripts and CI/CD.
+- `--enable-code-intelligence`: Enable the Code Intelligence Agent (disabled by default because it uses external third-party services)
+
+**Examples:**
+
+```bash
+# Interactive mode — multi-turn conversation
+idp-cli chat --stack-name my-stack
+
+# Single-shot mode — for scripts and automation
+idp-cli chat --stack-name my-stack --prompt "What is the avg accuracy for the last test run?"
+
+# With Code Intelligence enabled
+idp-cli chat --stack-name my-stack --enable-code-intelligence
+
+# Pipe output in scripts
+idp-cli chat --stack-name my-stack --prompt "How many documents failed today?" 2>/dev/null
+```
+
+**Interactive session example:**
+```
+IDP Agent Chat
+Stack: my-stack
+
+✓ Ready  Agents: Analytics Agent · Error Analyzer Agent · Code Intelligence Agent
+Type /quit to exit
+
+You: What is the avg accuracy for test run Fake-W2-Tax-Forms-20260320?
+⟶ Analytics Agent
+The average accuracy for test run Fake-W2-Tax-Forms-20260320 is 0.867 (86.7%) across 95 documents.
+
+You: Break that down by document type
+⟶ Analytics Agent
+...
+
+You: /quit
+Goodbye.
+```
+
+**SDK usage:**
+```python
+from idp_sdk import IDPClient
+
+client = IDPClient(stack_name="my-stack")
+
+# Single message
+resp = client.chat.send_message("How many documents were processed today?")
+print(resp.response)
+
+# Multi-turn conversation
+resp2 = client.chat.send_message("Break down by type", session_id=resp.session_id)
+print(resp2.response)
+```
+
+**Prerequisites:**
+- Requires `idp_common[agents]` to be installed: `pip install -e 'lib/idp_common_pkg[agents]'`
+- Requires Amazon Bedrock model access (Claude or Nova models)
+- Stack must be deployed with Agent Companion Chat resources (DynamoDB tables, Athena database)
 
 ---
 

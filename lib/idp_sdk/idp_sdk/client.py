@@ -142,6 +142,7 @@ class IDPClient:
             StackOperation,
             TestingOperation,
         )
+        from idp_sdk.operations.chat import ChatOperation
 
         self.stack = StackOperation(self)
         self.batch = BatchOperation(self)
@@ -154,6 +155,7 @@ class IDPClient:
         self.evaluation = EvaluationOperation(self)
         self.assessment = AssessmentOperation(self)
         self.publish = PublishOperation(self)
+        self.chat = ChatOperation(self)
 
     @property
     def stack_name(self) -> Optional[str]:
