@@ -9,9 +9,13 @@ SPDX-License-Identifier: MIT-0
 
 The Discovery module is an intelligent document analysis system that automatically identifies document structures, field types, and organizational patterns to generate document processing configurations. Discovery works identically in both processing modes of the [unified pattern](architecture.md) — **BDA mode** (`use_bda: true`) and **Pipeline mode** (`use_bda: false`). When BDA mode is active, discovery also automates BDA blueprint creation and management.
 
-Demo video (4m)
+Demo video (Single Doc Discovery) (4m)
 
 https://github.com/user-attachments/assets/9c3923fb-f4ff-43cd-a563-44c7c6132921
+
+Demo video (Multiple Doc Discovery) (4m)
+
+https://github.com/user-attachments/assets/b0bc5df0-cd8f-472c-98c6-299ac3a9bd43
 
 
 ## Table of Contents
