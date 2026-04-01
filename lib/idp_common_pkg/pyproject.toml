@@ -17,6 +17,7 @@ exclude = [
 # Include YAML and MD files for system defaults configuration
 [tool.setuptools.package-data]
 "idp_common.config.system_defaults" = ["*.yaml", "*.md"]
+"idp_common.discovery.prompts" = ["*.jinja2"]
 
 [project]
 name = "idp_common"
@@ -111,6 +112,17 @@ agents = [
   "strands-agents==1.14.0; python_version>='3.10'",
   "strands-agents-tools==0.2.22; python_version>='3.10'",
   "bedrock-agentcore>=0.1.1; python_version>='3.10'",    # Specifically for the code interpreter tool
+]
+
+# Multi-document discovery dependencies (clustering + agent analysis)
+multi_document_discovery = [
+  "scikit-learn>=1.5.0",       # KMeans clustering and silhouette analysis
+  "scipy>=1.14.0",             # KDTree for nearest-neighbor search
+  "numpy==1.26.4",             # Embedding matrices and vector operations
+  "Pillow==12.1.1",            # Image processing for document rendering
+  "pypdfium2>=5.5.0",          # PDF page rendering
+  "jinja2>=3.1.0",             # Prompt template rendering
+  "strands-agents==1.14.0; python_version>='3.10'",  # Agentic schema generation
 ]
 
 # Code intelligence module dependencies

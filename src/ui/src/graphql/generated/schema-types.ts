@@ -197,12 +197,25 @@ export type DisPresignedUrlResponse = {
   usePostMethod: Scalars['String']['output'];
 };
 
+export type DiscoveredClassSummary = {
+  classification?: Maybe<Scalars['String']['output']>;
+  clusterId?: Maybe<Scalars['Int']['output']>;
+  documentCount?: Maybe<Scalars['Int']['output']>;
+  error?: Maybe<Scalars['String']['output']>;
+};
+
 export type DiscoveryJob = {
+  clustersFound?: Maybe<Scalars['Int']['output']>;
+  currentStep?: Maybe<Scalars['String']['output']>;
   discoveredClassName?: Maybe<Scalars['String']['output']>;
+  discoveredClasses?: Maybe<Scalars['String']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
   jobId: Scalars['ID']['output'];
+  jobType?: Maybe<Scalars['String']['output']>;
+  reflectionReport?: Maybe<Scalars['String']['output']>;
   status: Scalars['String']['output'];
   statusMessage?: Maybe<Scalars['String']['output']>;
+  totalDocuments?: Maybe<Scalars['Int']['output']>;
 };
 
 export type DiscoveryJobList = {
@@ -211,15 +224,21 @@ export type DiscoveryJobList = {
 };
 
 export type DiscoveryJobListItem = {
+  clustersFound?: Maybe<Scalars['Int']['output']>;
   createdAt?: Maybe<Scalars['String']['output']>;
+  currentStep?: Maybe<Scalars['String']['output']>;
   discoveredClassName?: Maybe<Scalars['String']['output']>;
+  discoveredClasses?: Maybe<Scalars['String']['output']>;
   documentKey?: Maybe<Scalars['String']['output']>;
   errorMessage?: Maybe<Scalars['String']['output']>;
   groundTruthKey?: Maybe<Scalars['String']['output']>;
   jobId: Scalars['ID']['output'];
+  jobType?: Maybe<Scalars['String']['output']>;
   pageRange?: Maybe<Scalars['String']['output']>;
+  reflectionReport?: Maybe<Scalars['String']['output']>;
   status: Scalars['String']['output'];
   statusMessage?: Maybe<Scalars['String']['output']>;
+  totalDocuments?: Maybe<Scalars['Int']['output']>;
   updatedAt?: Maybe<Scalars['String']['output']>;
   version?: Maybe<Scalars['String']['output']>;
 };
@@ -349,6 +368,20 @@ export type ModifiedSectionInput = {
   sectionId: Scalars['String']['input'];
 };
 
+export type MultiDocDiscoveryJob = {
+  clustersFound?: Maybe<Scalars['Int']['output']>;
+  configVersion?: Maybe<Scalars['String']['output']>;
+  createdAt?: Maybe<Scalars['String']['output']>;
+  currentStep?: Maybe<Scalars['String']['output']>;
+  discoveredClasses?: Maybe<Scalars['String']['output']>;
+  errorMessage?: Maybe<Scalars['String']['output']>;
+  jobId: Scalars['ID']['output'];
+  reflectionReport?: Maybe<Scalars['String']['output']>;
+  status: Scalars['String']['output'];
+  totalDocuments?: Maybe<Scalars['Int']['output']>;
+  updatedAt?: Maybe<Scalars['String']['output']>;
+};
+
 export type Mutation = {
   abortWorkflow: AbortWorkflowResponse;
   addTestSet?: Maybe<TestSet>;
@@ -374,6 +407,7 @@ export type Mutation = {
   sendAgentChatMessage?: Maybe<AgentChatMessage>;
   setActiveVersion?: Maybe<UpdateConfigurationResponse>;
   skipAllSectionsReview?: Maybe<Document>;
+  startMultiDocDiscovery?: Maybe<MultiDocDiscoveryJob>;
   startTestRun?: Maybe<TestRun>;
   syncBdaIdp?: Maybe<SyncBdaIdpResponse>;
   updateAgentChatMessage?: Maybe<AgentChatMessage>;
@@ -388,6 +422,7 @@ export type Mutation = {
   updateUser?: Maybe<User>;
   uploadDiscoveryDocument: DisPresignedUrlResponse;
   uploadDocument: PresignedUrlResponse;
+  uploadMultiDocDiscoveryZip?: Maybe<TestSetUploadResponse>;
 };
 
 
@@ -523,6 +558,15 @@ export type MutationSkipAllSectionsReviewArgs = {
 };
 
 
+export type MutationStartMultiDocDiscoveryArgs = {
+  configVersion: Scalars['String']['input'];
+  s3Bucket?: InputMaybe<Scalars['String']['input']>;
+  s3Prefix?: InputMaybe<Scalars['String']['input']>;
+  zipFileName?: InputMaybe<Scalars['String']['input']>;
+  zipFileSize?: InputMaybe<Scalars['Int']['input']>;
+};
+
+
 export type MutationStartTestRunArgs = {
   input: TestRunInput;
 };
@@ -565,11 +609,17 @@ export type MutationUpdateConfigurationArgs = {
 
 
 export type MutationUpdateDiscoveryJobStatusArgs = {
+  clustersFound?: InputMaybe<Scalars['Int']['input']>;
+  currentStep?: InputMaybe<Scalars['String']['input']>;
   discoveredClassName?: InputMaybe<Scalars['String']['input']>;
+  discoveredClasses?: InputMaybe<Scalars['String']['input']>;
   errorMessage?: InputMaybe<Scalars['String']['input']>;
   jobId: Scalars['ID']['input'];
+  jobType?: InputMaybe<Scalars['String']['input']>;
+  reflectionReport?: InputMaybe<Scalars['String']['input']>;
   status: Scalars['String']['input'];
   statusMessage?: InputMaybe<Scalars['String']['input']>;
+  totalDocuments?: InputMaybe<Scalars['Int']['input']>;
 };
 
 
@@ -607,6 +657,7 @@ export type MutationUploadDiscoveryDocumentArgs = {
   pageLabels?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   pageRanges?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   prefix?: InputMaybe<Scalars['String']['input']>;
+  skipJobCreation?: InputMaybe<Scalars['Boolean']['input']>;
   version?: InputMaybe<Scalars['String']['input']>;
 };
 
@@ -617,6 +668,13 @@ export type MutationUploadDocumentArgs = {
   fileName: Scalars['String']['input'];
   prefix?: InputMaybe<Scalars['String']['input']>;
   version?: InputMaybe<Scalars['String']['input']>;
+};
+
+
+export type MutationUploadMultiDocDiscoveryZipArgs = {
+  configVersion: Scalars['String']['input'];
+  fileName: Scalars['String']['input'];
+  fileSize: Scalars['Int']['input'];
 };
 
 export type Page = {

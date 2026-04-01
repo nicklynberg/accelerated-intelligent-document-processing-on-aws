@@ -26,6 +26,7 @@ notebooks/examples/data
 .dsr/
 *tmp-dev-assets*
 scratch/
+.mcp.json
 
 # Node.js / npm
 node_modules/

@@ -5,5 +5,11 @@ subscription OnDiscoveryJobStatusChange($jobId: ID!) {
     errorMessage
     discoveredClassName
     statusMessage
+    jobType
+    currentStep
+    totalDocuments
+    clustersFound
+    discoveredClasses
+    reflectionReport
   }
 }

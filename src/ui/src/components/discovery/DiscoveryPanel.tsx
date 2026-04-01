@@ -22,6 +22,7 @@ import {
   Select,
   ExpandableSection,
   Badge,
+  Link,
   TextFilter,
   Tiles,
   Pagination,
@@ -36,6 +37,8 @@ import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { getJsonValidationError } from '../common/utilities';
 import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
 import type { ConfigVersion } from '../test-studio/utils/configVersionUtils';
+import { useNavigate } from 'react-router-dom';
+import { DISCOVERY_JOB_PATH } from '../../routes/constants';
 import PdfPageSelector from './PdfPageSelector';
 import type { PageRange } from './PdfPageSelector';
 
@@ -87,6 +90,7 @@ const formatElapsed = (startIso: string | undefined): string => {
 };
 
 const DiscoveryPanel = (): React.JSX.Element => {
+  const navigate = useNavigate();
   const { settings } = useSettingsContext();
   const { versions, loading: versionsLoading, getVersionOptions } = useConfigurationVersions();
   const [documentFile, setDocumentFile] = useState<File | null>(null);
@@ -112,6 +116,8 @@ const DiscoveryPanel = (): React.JSX.Element => {
     { value: 'all', label: 'All time' },
   ];
   const [selectedTimeRange, setSelectedTimeRange] = useState<SelectProps.Option>(TIME_RANGE_OPTIONS[2]); // Default: 2 days
+  const [sortingColumn, setSortingColumn] = useState<{ sortingField: string }>({ sortingField: 'createdAt' });
+  const [sortingDescending, setSortingDescending] = useState(true);
   const [selectedJobs, setSelectedJobs] = useState<DiscoveryJob[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [pageRanges, setPageRanges] = useState<PageRange[]>([]);
@@ -156,8 +162,10 @@ const DiscoveryPanel = (): React.JSX.Element => {
     try {
       const response = await client.graphql({ query: listDiscoveryJobs });
       type ListJobsResp = Record<string, Record<string, Record<string, DiscoveryJob[]>>>;
-      const jobs = (response as unknown as ListJobsResp).data.listDiscoveryJobs?.DiscoveryJobs || [];
-      setDiscoveryJobs(jobs);
+      const allJobs = (response as unknown as ListJobsResp).data.listDiscoveryJobs?.DiscoveryJobs || [];
+      // Filter out multi-document jobs — those belong to the MultiDocDiscoveryPanel
+      const singleDocJobs = allJobs.filter((j: any) => j.jobType !== 'multi-document');
+      setDiscoveryJobs(singleDocJobs);
     } catch (err) {
       console.error('Error loading discovery jobs:', err);
       setError(`Failed to load discovery jobs: ${(err as Error).message}`);
@@ -208,18 +216,12 @@ const DiscoveryPanel = (): React.JSX.Element => {
     loadDiscoveryJobs();
   }, []);
 
-  // Timer for elapsed time display + fallback poll every 10s when there are active jobs
-  // The poll catches subscription updates missed during rapid subscription teardown/recreation
+  // Timer for elapsed time display on active jobs (subscriptions handle status updates)
   useEffect(() => {
     const hasActiveJobs = discoveryJobs.some((j) => j.status === 'PENDING' || j.status === 'IN_PROGRESS' || j.status === 'OPTIMIZATION_IN_PROGRESS');
     if (hasActiveJobs && !tickRef.current) {
       tickRef.current = setInterval(() => {
         setTick((t) => t + 1);
-        // Fallback poll every other tick (10s) to catch missed subscription updates
-        setTick((t) => {
-          if (t % 2 === 0) loadDiscoveryJobs();
-          return t + 1;
-        });
       }, 5000);
     } else if (!hasActiveJobs && tickRef.current) {
       clearInterval(tickRef.current);
@@ -664,11 +666,24 @@ const DiscoveryPanel = (): React.JSX.Element => {
     return stripped || fileName;
   };
 
-  // Sort jobs by createdAt descending (newest first), then filter by search text
+  // Sort jobs by the selected column
   const sortedJobs = [...discoveryJobs].sort((a, b) => {
-    const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return dateB - dateA;
+    const field = sortingColumn.sortingField as keyof DiscoveryJob;
+    const valA = a[field];
+    const valB = b[field];
+
+    // Handle date fields
+    if (field === 'createdAt' || field === 'updatedAt') {
+      const dateA = valA ? new Date(valA as string).getTime() : 0;
+      const dateB = valB ? new Date(valB as string).getTime() : 0;
+      return sortingDescending ? dateB - dateA : dateA - dateB;
+    }
+
+    // Handle string fields
+    const strA = (valA as string) || '';
+    const strB = (valB as string) || '';
+    const cmp = strA.localeCompare(strB);
+    return sortingDescending ? -cmp : cmp;
   });
 
   // Compute time range cutoff
@@ -708,14 +723,18 @@ const DiscoveryPanel = (): React.JSX.Element => {
       header: 'Document',
       cell: (item: DiscoveryJob) => {
         const name = getOriginalFileName(item.documentKey);
-        if (item.pageRange) {
-          return (
-            <Box>
-              {name} <Badge color="blue">pp {item.pageRange}</Badge>
-            </Box>
-          );
-        }
-        return name;
+        const content = item.pageRange ? (
+          <span>
+            {name} <Badge color="blue">pp {item.pageRange}</Badge>
+          </span>
+        ) : (
+          name
+        );
+        return (
+          <Link onFollow={() => navigate(`${DISCOVERY_JOB_PATH}/${item.jobId}`)}>
+            {content}
+          </Link>
+        );
       },
       sortingField: 'documentKey',
     },
@@ -776,6 +795,14 @@ const DiscoveryPanel = (): React.JSX.Element => {
       header: 'Result',
       cell: (item: DiscoveryJob) => renderResultCell(item),
       minWidth: 250,
+    },
+    {
+      id: 'jobId',
+      header: 'Job ID',
+      cell: (item: DiscoveryJob) => (
+        <Box fontSize="body-s" color="text-body-secondary">{item.jobId.substring(0, 12)}...</Box>
+      ),
+      width: 140,
     },
   ];
 
@@ -911,7 +938,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
                         bucket: settings.DiscoveryBucket as string,
                         groundTruthFileName: '',
                         version: selectedVersion?.value,
-                        // No pageRanges — just upload, don't create jobs
+                        skipJobCreation: true, // Only need presigned URL — don't create discovery jobs
                       },
                     });
                     const uploadResult = uploadResp.data.uploadDiscoveryDocument;
@@ -1005,8 +1032,14 @@ const DiscoveryPanel = (): React.JSX.Element => {
         items={paginatedJobs}
         loading={isLoadingJobs}
         loadingText="Loading discovery jobs..."
-        sortingDisabled
         resizableColumns
+        sortingColumn={sortingColumn}
+        sortingDescending={sortingDescending}
+        onSortingChange={({ detail }) => {
+          setSortingColumn(detail.sortingColumn as { sortingField: string });
+          setSortingDescending(detail.isDescending ?? false);
+          setCurrentPage(1);
+        }}
         selectionType="multi"
         selectedItems={selectedJobs}
         onSelectionChange={({ detail }) => setSelectedJobs(detail.selectedItems as DiscoveryJob[])}
@@ -1100,6 +1133,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
                     { id: 'createdAt', label: 'Created' },
                     { id: 'elapsed', label: 'Duration' },
                     { id: 'result', label: 'Result' },
+                    { id: 'jobId', label: 'Job ID' },
                   ],
                 },
               ],

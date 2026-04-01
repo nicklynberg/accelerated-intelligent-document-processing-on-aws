@@ -772,6 +772,7 @@ STDERR:
             # SAM package uses this to generate correct ImageUri references in the template
             if directory in [
                 "patterns/unified",
+                "nested/multi-doc-discovery",
             ]:
                 placeholder_ecr = (
                     f"{self.account_id}.dkr.ecr.{self.region}.amazonaws.com/placeholder"
@@ -1272,6 +1273,91 @@ STDERR:
 
         return zipfile_name
 
+    def package_multi_doc_discovery_source(self):
+        """Package multi-doc discovery source code for CodeBuild to build Docker image.
+
+        CodeBuild downloads this zip and uses the inline buildspec to create a Docker
+        image containing lib/idp_common_pkg and src/lambda/multi_doc_discovery/*.py.
+        """
+        self.console.print(
+            "[bold cyan]📦 Packaging multi-doc discovery source for Docker builds[/bold cyan]"
+        )
+
+        zipfile_name = "multi-doc-discovery-source.zip"
+        zipfile_path = os.path.join(".aws-sam", zipfile_name)
+
+        # Always recreate to ensure latest code is included
+        os.makedirs(".aws-sam", exist_ok=True)
+        self.console.print(
+            f"[cyan]Creating multi-doc discovery source zip: {zipfile_name}[/cyan]"
+        )
+
+        with zipfile.ZipFile(zipfile_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            # Add lib/idp_common_pkg
+            for root, dirs, files in os.walk("lib/idp_common_pkg"):
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if d
+                    not in {
+                        "__pycache__",
+                        ".pytest_cache",
+                        "dist",
+                        "build",
+                        "*.egg-info",
+                    }
+                ]
+                for file in files:
+                    if file.endswith((".pyc", ".pyo")):
+                        continue
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, ".")
+                    zipf.write(file_path, arcname)
+
+            # Add src/lambda/multi_doc_discovery/*.py
+            for root, dirs, files in os.walk("src/lambda/multi_doc_discovery"):
+                dirs[:] = [d for d in dirs if d not in {"__pycache__", ".pytest_cache"}]
+                for file in files:
+                    if file.endswith((".pyc", ".pyo")):
+                        continue
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, ".")
+                    zipf.write(file_path, arcname)
+
+        self.console.print(
+            f"[green]✅ Created multi-doc discovery source zip ({os.path.getsize(zipfile_path) / 1024 / 1024:.2f} MB)[/green]"
+        )
+
+        # Upload to S3
+        s3_key = f"{self.prefix_and_version}/{zipfile_name}"
+        try:
+            self.s3_client.head_object(Bucket=self.bucket, Key=s3_key)
+            self.console.print(
+                f"[green]Multi-doc discovery source already in S3: {zipfile_name}[/green]"
+            )
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "404":
+                self.console.print(
+                    f"[cyan]Uploading multi-doc discovery source to S3: {s3_key}[/cyan]"
+                )
+                try:
+                    self.s3_client.upload_file(zipfile_path, self.bucket, s3_key)
+                    self.console.print(
+                        "[green]✅ Uploaded multi-doc discovery source to S3[/green]"
+                    )
+                except ClientError as upload_error:
+                    self.console.print(
+                        f"[red]❌ Error uploading multi-doc discovery source: {upload_error}[/red]"
+                    )
+                    sys.exit(1)
+            else:
+                self.console.print(
+                    f"[red]❌ Error checking S3 for multi-doc discovery source: {e}[/red]"
+                )
+                sys.exit(1)
+
+        return zipfile_name
+
     def _upload_template_to_s3(self, template_path, s3_key, description):
         """Helper method to upload template to S3 with error handling"""
         self.console.print(f"[cyan]Uploading {description} to S3: {s3_key}[/cyan]")
@@ -1433,6 +1519,9 @@ STDERR:
                     "<IDP_COMMON_AGENTS_LAYER_ZIP>": self._layer_arns.get(
                         "agents", {}
                     ).get("zip_name", "idp-common-agents.zip"),
+                    "<IDP_COMMON_MULTI_DOC_DISCOVERY_LAYER_ZIP>": self._layer_arns.get(
+                        "multi_document_discovery", {}
+                    ).get("zip_name", "idp-common-multi_document_discovery.zip"),
                     "<HASH_TOKEN>": self.get_directory_checksum("./lib")[:16],
                     "<LAMBDA_HASH_TOKEN>": self.get_directory_checksum(
                         "./src/lambda/agentcore_gateway_manager"
@@ -1465,6 +1554,9 @@ STDERR:
                     )[:16],
                     "<w2_dataset_deployer_HASH_TOKEN>": self.get_directory_checksum(
                         "src/lambda/w2_dataset_deployer"
+                    )[:16],
+                    "<MULTI_DOC_DISCOVERY_BUILD_HASH_TOKEN>": self.get_directory_checksum(
+                        "src/lambda/multi_doc_discovery"
                     )[:16],
                 }
 
@@ -1770,6 +1862,12 @@ STDERR:
             ],
             "nested/alb-hosting": [
                 "nested/alb-hosting/template.yaml",
+            ],
+            "nested/multi-doc-discovery": [
+                LIB_DEPENDENCY,
+                "nested/multi-doc-discovery/docker_build_lambda",
+                "nested/multi-doc-discovery/template.yaml",
+                "src/lambda/multi_doc_discovery",
             ],
             # Unified pattern (combines BDA + Pipeline)
             "patterns/unified": [
@@ -2354,7 +2452,13 @@ STDERR:
         )
 
         # Map each layer name to its zip file
-        expected_layers = ["base", "evaluation", "reporting", "agents"]
+        expected_layers = [
+            "base",
+            "evaluation",
+            "reporting",
+            "agents",
+            "multi_document_discovery",
+        ]
         for layer_name in expected_layers:
             # Find the zip for this layer (format: idp-common-{name}-{source_hash}.zip)
             # Match based on current source hash to ensure we use up-to-date layers
@@ -2448,7 +2552,13 @@ STDERR:
             return True  # Need rebuild
 
         # We have at least some layer zips, check we have all 4
-        expected_layers = ["base", "evaluation", "reporting", "agents"]
+        expected_layers = [
+            "base",
+            "evaluation",
+            "reporting",
+            "agents",
+            "multi_document_discovery",
+        ]
         for layer_name in expected_layers:
             found = any(f"idp-common-{layer_name}-" in z for z in layer_zips)
             if not found:
@@ -2481,6 +2591,7 @@ STDERR:
             ],  # Separate layer for stickler (includes numpy)
             "reporting": ["reporting"],
             "agents": ["agents"],
+            "multi_document_discovery": ["multi_document_discovery"],
         }
 
         built_layers = {}
@@ -2869,6 +2980,13 @@ STDERR:
             step_start = time.time()
             unified_source_zipfile = self.package_unified_source()
             timing_breakdown["Package unified source"] = time.time() - step_start
+
+            # Package multi-doc discovery source for CodeBuild Docker builds
+            step_start = time.time()
+            self.package_multi_doc_discovery_source()
+            timing_breakdown["Package multi-doc discovery source"] = (
+                time.time() - step_start
+            )
 
             # Build main template
             step_start = time.time()

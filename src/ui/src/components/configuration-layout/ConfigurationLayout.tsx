@@ -24,6 +24,7 @@ import Editor, { type OnMount } from '@monaco-editor/react';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import yaml from 'js-yaml';
 import ReactMarkdown from 'react-markdown';
+import { useLocation } from 'react-router-dom';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
 import useConfiguration from '../../hooks/use-configuration';
@@ -138,10 +139,20 @@ const isNumericValue = (val: unknown): boolean => {
   return false;
 };
 
+// Read URL version param synchronously — used to initialize state on mount
+// so the very first useConfiguration() call targets the correct version
+const getInitialVersionFromUrl = (): string | null => {
+  const hash = window.location.hash;
+  const urlParams = new URLSearchParams(hash.split('?')[1] || '');
+  return urlParams.get('version');
+};
+
 const ConfigurationLayout = (): React.JSX.Element => {
   // Version selection state - declare first
+  // Initialize from URL to avoid a race where 'default' config is fetched before the URL version
   const [selectedVersionsForCompare, setSelectedVersionsForCompare] = useState<string[]>([]);
-  const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
+  const [selectedVersion, setSelectedVersion] = useState<string | null>(getInitialVersionFromUrl);
+  const location = useLocation();
   const [versionsTableExpanded, setVersionsTableExpanded] = useState(false);
 
   // Import as new version state
@@ -194,19 +205,31 @@ const ConfigurationLayout = (): React.JSX.Element => {
   }, [currentVersion?.description, currentVersionName]);
 
   // Handle URL query parameter for version selection
+  // Re-runs when location changes (SPA navigation) or when versions load
   useEffect(() => {
     // For hash routing, get parameters from the hash part
     const hash = window.location.hash;
     const urlParams = new URLSearchParams(hash.split('?')[1] || '');
     const versionParam = urlParams.get('version');
+    const tabParam = urlParams.get('tab');
 
-    if (versionParam && versions.length > 0 && !selectedVersion) {
+    // Apply version from URL if it differs from current selection (or no selection yet)
+    if (versionParam && versions.length > 0 && versionParam !== selectedVersion) {
       const versionExists = versions.some((v) => v.versionName === versionParam);
       if (versionExists) {
         setSelectedVersion(versionParam);
+        // Immediately fetch the correct version's config to avoid briefly showing the default
+        fetchConfiguration(versionParam);
       }
     }
-  }, [versions, selectedVersion]);
+
+    // Support deep-linking to a specific tab (e.g., extraction-schema for Document Schema)
+    if (tabParam) {
+      setConfigBuilderActiveTab(tabParam);
+      // Store in ref so the mergedConfig useEffect can respect it
+      urlTabParamRef.current = tabParam;
+    }
+  }, [versions, selectedVersion, location]);
 
   const {
     schema,
@@ -478,6 +501,8 @@ const ConfigurationLayout = (): React.JSX.Element => {
   const [syncFromBdaMode, setSyncFromBdaMode] = useState<string>('replace'); // 'replace' or 'merge'
 
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  // Track URL tab param to prevent mergedConfig useEffect from overriding it
+  const urlTabParamRef = useRef<string | null>(null);
 
   // Compute whether there are unsaved changes by comparing formValues with mergedConfig
   const hasUnsavedChanges = useMemo(() => {
@@ -574,8 +599,16 @@ const ConfigurationLayout = (): React.JSX.Element => {
       setExtractionSchema(null);
       setRuleSchema(null);
 
-      // Switch to configuration tab when version changes to avoid stale schema display
-      setConfigBuilderActiveTab('configuration');
+      // Switch to configuration tab when version changes — unless a URL tab param was specified
+      // Check URL directly each time to handle async version loading (multiple mergedConfig updates)
+      const currentHash = window.location.hash;
+      const currentUrlParams = new URLSearchParams(currentHash.split('?')[1] || '');
+      const currentTabParam = currentUrlParams.get('tab');
+      if (currentTabParam) {
+        setConfigBuilderActiveTab(currentTabParam);
+      } else {
+        setConfigBuilderActiveTab('configuration');
+      }
 
       const formData = JSON.parse(JSON.stringify(mergedConfig));
       setFormValues(formData);
@@ -2425,6 +2458,7 @@ const ConfigurationLayout = (): React.JSX.Element => {
             {viewMode === 'form' && (
               <SpaceBetween size="l">
                 <ConfigBuilder
+                  key={currentVersionName}
                   schema={{
                     ...schema,
                     properties: Object.fromEntries(Object.entries(schema?.properties || {}).filter(([key]) => key !== 'classes')),

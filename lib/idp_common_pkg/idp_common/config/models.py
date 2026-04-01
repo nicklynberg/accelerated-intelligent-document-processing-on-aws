@@ -1010,6 +1010,94 @@ class DiscoveryModelConfig(BaseModel):
         return int(v)
 
 
+class MultiDocumentDiscoveryConfig(BaseModel):
+    """Multi-document discovery configuration for batch clustering.
+
+    Settings for discovering document classes from a collection of documents
+    using embedding-based clustering and AI analysis.
+    """
+
+    embedding_model_id: str = Field(
+        default="us.cohere.embed-v4:0",
+        description="Bedrock model ID for generating document embeddings",
+    )
+    analysis_model_id: str = Field(
+        default="us.anthropic.claude-sonnet-4-6",
+        description="Bedrock model ID for analyzing document clusters",
+    )
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Temperature for cluster analysis model",
+    )
+    max_tokens: int = Field(
+        default=10000,
+        gt=0,
+        description="Maximum output tokens for cluster analysis. "
+        "Ensure this does not exceed the selected model's limit.",
+    )
+    max_documents: int = Field(
+        default=500,
+        gt=0,
+        description="Maximum documents to process in a single discovery run",
+    )
+    min_cluster_size: int = Field(
+        default=2,
+        gt=0,
+        description="Minimum documents required to form a cluster",
+    )
+    num_sample_documents: int = Field(
+        default=3,
+        gt=0,
+        description="Number of sample documents selected per cluster for analysis",
+    )
+    max_sample_size: int = Field(
+        default=5,
+        gt=0,
+        description="Maximum sample size for cluster analysis",
+    )
+    max_concurrent_embeddings: int = Field(
+        default=5,
+        gt=0,
+        description="Maximum concurrent embedding API requests",
+    )
+    max_concurrent_clusters: int = Field(
+        default=3,
+        gt=0,
+        description="Maximum concurrent cluster analysis requests",
+    )
+    system_prompt: str = Field(
+        default="",
+        description="System prompt for the cluster analysis agent (leave empty to use built-in Jinja2 template)",
+    )
+
+    @field_validator("temperature", mode="before")
+    @classmethod
+    def parse_float(cls, v: Any) -> float:
+        """Parse float from string or number"""
+        if isinstance(v, str):
+            return float(v) if v else 0.0
+        return float(v)
+
+    @field_validator(
+        "max_tokens",
+        "max_documents",
+        "min_cluster_size",
+        "num_sample_documents",
+        "max_sample_size",
+        "max_concurrent_embeddings",
+        "max_concurrent_clusters",
+        mode="before",
+    )
+    @classmethod
+    def parse_int(cls, v: Any) -> int:
+        """Parse int from string or number"""
+        if isinstance(v, str):
+            return int(v) if v else 0
+        return int(v)
+
+
 class DiscoveryConfig(BaseModel):
     """Discovery configuration"""
 
@@ -1024,6 +1112,10 @@ class DiscoveryConfig(BaseModel):
     auto_split: DiscoveryModelConfig = Field(
         default_factory=DiscoveryModelConfig,
         description="Configuration for auto-detecting document section boundaries in multi-page packages",
+    )
+    multi_document: MultiDocumentDiscoveryConfig = Field(
+        default_factory=MultiDocumentDiscoveryConfig,
+        description="Configuration for multi-document batch discovery using embedding clustering",
     )
 
 

@@ -1,1 +1,1 @@
-# Discovery tests package
+# Discovery unit tests

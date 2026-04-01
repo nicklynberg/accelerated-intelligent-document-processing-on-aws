@@ -1487,6 +1487,80 @@ Resources:
                     description: Sample JSON format for discovery output
                     default: "{\n  \"document_class\": \"Form-1040\",\n  \"document_description\": \"Brief summary of the document\",\n  \"groups\": [\n    {\n      \"name\": \"PersonalInformation\",\n      \"description\": \"Personal information of Tax payer\",\n      \"attributeType\": \"group\",\n      \"groupType\": \"normal\",\n      \"groupAttributes\": [\n        {\n          \"name\": \"FirstName\",\n          \"dataType\": \"string\",\n          \"description\": \"First Name of Taxpayer\"\n        },\n        {\n          \"name\": \"Age\",\n          \"dataType\": \"number\",\n          \"description\": \"Age of Taxpayer\"\n        }\n      ]\n    }\n  ]\n}"
                     order: 0
+              multi_document:
+                order: 4
+                type: object
+                sectionLabel: Multi-Document Discovery (Batch Clustering)
+                description: Configuration for discovering document classes from a collection of documents using embedding-based clustering
+                properties:
+                  embedding_model_id:
+                    type: string
+                    description: Bedrock model ID for generating document embeddings
+                    default: "us.cohere.embed-v4:0"
+                    order: 0
+                  analysis_model_id:
+                    type: string
+                    description: Bedrock model ID for analyzing document clusters
+                    default: "us.anthropic.claude-sonnet-4-6"
+                    enum:
+                      - "us.amazon.nova-lite-v1:0"
+                      - "us.amazon.nova-pro-v1:0"
+                      - "us.amazon.nova-premier-v1:0"
+                      - "us.amazon.nova-2-lite-v1:0"
+                      - "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+                      - "us.anthropic.claude-sonnet-4-20250514-v1:0"
+                      - "us.anthropic.claude-sonnet-4-6"
+                      - "us.anthropic.claude-opus-4-20250514-v1:0"
+                      - "us.anthropic.claude-opus-4-6-v1:1m"
+                    order: 1
+                  temperature:
+                    type: number
+                    description: Temperature for cluster analysis model
+                    default: 0.0
+                    minimum: 0
+                    maximum: 1
+                    order: 2
+                  max_tokens:
+                    type: number
+                    description: Maximum output tokens for cluster analysis
+                    default: 10000
+                    order: 3
+                  max_documents:
+                    type: number
+                    description: Maximum documents to process in a single discovery run
+                    default: 500
+                    minimum: 1
+                    order: 4
+                  min_cluster_size:
+                    type: number
+                    description: Minimum documents required to form a cluster
+                    default: 2
+                    minimum: 1
+                    order: 5
+                  num_sample_documents:
+                    type: number
+                    description: Number of sample documents selected per cluster for analysis
+                    default: 3
+                    minimum: 1
+                    order: 6
+                  max_sample_size:
+                    type: number
+                    description: Maximum sample size for cluster analysis
+                    default: 5
+                    minimum: 1
+                    order: 7
+                  max_concurrent_embeddings:
+                    type: number
+                    description: Maximum concurrent embedding API requests
+                    default: 5
+                    minimum: 1
+                    order: 8
+                  max_concurrent_clusters:
+                    type: number
+                    description: Maximum concurrent cluster analysis requests
+                    default: 3
+                    minimum: 1
+                    order: 9
           agents:
             order: 10
             type: object

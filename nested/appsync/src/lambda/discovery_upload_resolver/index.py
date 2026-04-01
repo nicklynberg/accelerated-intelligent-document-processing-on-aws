@@ -23,11 +23,16 @@ s3_client = boto3.client('s3', config=s3_config)
 sqs_client = boto3.client('sqs')
 dynamodb = boto3.resource('dynamodb')
 
+sfn_client = boto3.client('stepfunctions')
+
+
 def handler(event, context):
     """
     Handles discovery-related GraphQL mutations:
     - uploadDiscoveryDocument: presigned URL + job creation
     - autoDetectSections: LLM-based section boundary detection
+    - startMultiDocDiscovery: Start multi-document discovery pipeline
+    - uploadMultiDocDiscoveryZip: Upload zip file for multi-doc discovery
     """
     logger.info(f"Received event: {json.dumps(event)}")
 
@@ -35,6 +40,10 @@ def handler(event, context):
     field_name = event.get('info', {}).get('fieldName', 'uploadDiscoveryDocument')
     if field_name == 'autoDetectSections':
         return handle_auto_detect_sections(event, context)
+    elif field_name == 'startMultiDocDiscovery':
+        return handle_start_multi_doc_discovery(event, context)
+    elif field_name == 'uploadMultiDocDiscoveryZip':
+        return handle_upload_multi_doc_discovery_zip(event, context)
 
     return handle_upload_discovery_document(event, context)
 
@@ -92,6 +101,7 @@ def handle_upload_discovery_document(event, context):
         version = arguments.get('version')
         page_ranges = arguments.get('pageRanges') or []
         page_labels = arguments.get('pageLabels') or []
+        skip_job_creation = arguments.get('skipJobCreation', False)
 
         if not file_name:
             raise ValueError("fileName is required")
@@ -115,15 +125,20 @@ def handle_upload_discovery_document(event, context):
             response['groundTruthPresignedUrl'] = json.dumps(gt_presigned_post)
 
         # Create discovery jobs — one per page range, or one for the whole document
-        if page_ranges and len(page_ranges) > 0:
-            logger.info(f"Creating {len(page_ranges)} discovery jobs for page ranges: {page_ranges}")
-            for i, page_range in enumerate(page_ranges):
+        # skipJobCreation=True is used by the auto-detect sections flow which only needs
+        # a presigned URL to upload the document, without creating any discovery jobs.
+        if not skip_job_creation:
+            if page_ranges and len(page_ranges) > 0:
+                logger.info(f"Creating {len(page_ranges)} discovery jobs for page ranges: {page_ranges}")
+                for i, page_range in enumerate(page_ranges):
+                    job_id = str(uuid.uuid4())
+                    page_label = page_labels[i] if i < len(page_labels) else None
+                    create_discovery_job(job_id, object_key, gt_object_key, version, page_range=page_range, class_name_hint=page_label)
+            else:
                 job_id = str(uuid.uuid4())
-                page_label = page_labels[i] if i < len(page_labels) else None
-                create_discovery_job(job_id, object_key, gt_object_key, version, page_range=page_range, class_name_hint=page_label)
+                create_discovery_job(job_id, object_key, gt_object_key, version)
         else:
-            job_id = str(uuid.uuid4())
-            create_discovery_job(job_id, object_key, gt_object_key, version)
+            logger.info("skipJobCreation=True — returning presigned URL only, no jobs created")
 
         # Return the presigned POST data and object key
         return response
@@ -256,5 +271,146 @@ def send_discovery_message(job_id, document_key, ground_truth_key, version, page
     except Exception as e:
         logger.error(f"Error sending discovery message: {str(e)}")
         # Don't fail the upload if message sending fails
+
+
+def handle_start_multi_doc_discovery(event, context):
+    """
+    Start a multi-document discovery pipeline via Step Functions.
+
+    Creates a tracking entry in DynamoDB and starts the state machine execution.
+    Supports two modes:
+    - S3 path: directly analyze documents at an S3 location
+    - Zip upload: documents were previously uploaded as a zip file
+    """
+    arguments = event.get('arguments', {})
+    s3_bucket = arguments.get('s3Bucket')
+    s3_prefix = arguments.get('s3Prefix', '')
+    config_version = arguments.get('configVersion')
+    zip_file_name = arguments.get('zipFileName')
+    zip_file_size = arguments.get('zipFileSize')
+
+    if not config_version:
+        raise ValueError("configVersion is required")
+
+    if not s3_bucket and not zip_file_name:
+        raise ValueError("Either s3Bucket/s3Prefix or zipFileName is required")
+
+    job_id = str(uuid.uuid4())
+    bucket = s3_bucket or os.environ.get('DISCOVERY_BUCKET', '')
+    is_zip_upload = bool(zip_file_name)
+    prefix = s3_prefix
+
+    # For zip uploads, the prefix is the zip file key in the discovery bucket
+    if is_zip_upload:
+        prefix = f"multi-doc-discovery/{job_id}/upload/{zip_file_name}"
+        bucket = os.environ.get('DISCOVERY_BUCKET', '')
+
+    logger.info(
+        f"Starting multi-doc discovery job {job_id}: "
+        f"bucket={bucket}, prefix={prefix}, "
+        f"configVersion={config_version}, isZip={is_zip_upload}"
+    )
+
+    # Create tracking entry in DynamoDB
+    table_name = os.environ.get('DISCOVERY_TRACKING_TABLE')
+    if table_name:
+        table = dynamodb.Table(table_name)
+        now = datetime.now(timezone.utc)
+        item = {
+            'jobId': job_id,
+            'status': 'QUEUED',
+            'jobType': 'multi-document',
+            'currentStep': 'Queued',
+            'version': config_version,
+            'createdAt': now.isoformat(),
+            'updatedAt': now.isoformat(),
+            'ExpiresAfter': int((now + timedelta(days=7)).timestamp()),
+        }
+        if s3_bucket:
+            item['documentKey'] = f"s3://{bucket}/{prefix}"
+        if zip_file_name:
+            item['documentKey'] = zip_file_name
+        table.put_item(Item=item)
+
+    # Start Step Functions execution
+    state_machine_arn = os.environ.get('MULTI_DOC_DISCOVERY_STATE_MACHINE_ARN')
+    if not state_machine_arn:
+        raise ValueError("MULTI_DOC_DISCOVERY_STATE_MACHINE_ARN not configured")
+
+    sfn_input = {
+        'jobId': job_id,
+        'bucket': bucket,
+        'prefix': prefix,
+        'configVersion': config_version,
+        'isZipUpload': is_zip_upload,
+    }
+
+    execution = sfn_client.start_execution(
+        stateMachineArn=state_machine_arn,
+        name=f"multi-doc-{job_id[:8]}",
+        input=json.dumps(sfn_input),
+    )
+
+    logger.info(f"Started Step Functions execution: {execution['executionArn']}")
+
+    return {
+        'jobId': job_id,
+        'status': 'QUEUED',
+        'configVersion': config_version,
+        'currentStep': 'Queued',
+        'createdAt': datetime.now(timezone.utc).isoformat(),
+        'updatedAt': datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def handle_upload_multi_doc_discovery_zip(event, context):
+    """
+    Generate a presigned POST URL for uploading a zip file for multi-doc discovery.
+
+    Returns presigned URL and object key. The caller should:
+    1. Upload the zip to the presigned URL
+    2. Call startMultiDocDiscovery with the zipFileName
+    """
+    arguments = event.get('arguments', {})
+    file_name = arguments.get('fileName')
+    file_size = arguments.get('fileSize', 0)
+    config_version = arguments.get('configVersion')
+
+    if not file_name:
+        raise ValueError("fileName is required")
+    if not file_name.lower().endswith('.zip'):
+        raise ValueError("File must be a .zip file")
+    if not config_version:
+        raise ValueError("configVersion is required")
+
+    # Generate a job ID for the upload prefix
+    job_id = str(uuid.uuid4())
+    bucket = os.environ.get('DISCOVERY_BUCKET', '')
+    object_key = f"multi-doc-discovery/{job_id}/upload/{file_name}"
+
+    logger.info(
+        f"Generating presigned POST for multi-doc zip: "
+        f"bucket={bucket}, key={object_key}, size={file_size}"
+    )
+
+    # Generate presigned POST URL
+    presigned_post = s3_client.generate_presigned_post(
+        Bucket=bucket,
+        Key=object_key,
+        Fields={
+            'Content-Type': 'application/zip',
+        },
+        Conditions=[
+            ['content-length-range', 1, 1073741824],  # 1 Byte to 1 GB
+            {'Content-Type': 'application/zip'},
+        ],
+        ExpiresIn=900,  # 15 minutes
+    )
+
+    return {
+        'testSetId': job_id,  # Reuses TestSetUploadResponse type
+        'presignedUrl': json.dumps(presigned_post),
+        'objectKey': object_key,
+    }
 
 
