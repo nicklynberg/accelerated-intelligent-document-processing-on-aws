@@ -303,6 +303,19 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         ),
       ],
       [
+        'Avg Cost/Page',
+        ...Object.values(completeTestRuns).map((run) => {
+          if (run.totalCost == null || !run.costBreakdown) return 'N/A';
+          let totalPages = 0;
+          Object.values(run.costBreakdown as Record<string, Record<string, Record<string, unknown>>>).forEach((services) => {
+            Object.values(services).forEach((details) => {
+              if (details.unit === 'pages') totalPages += Number(details.value) || 0;
+            });
+          });
+          return totalPages > 0 ? `$${(Number(run.totalCost) / totalPages).toFixed(4)}` : 'N/A';
+        }),
+      ],
+      [
         'Average Accuracy',
         ...Object.values(completeTestRuns).map((run) =>
           run.overallAccuracy !== null && run.overallAccuracy !== undefined ? Number(run.overallAccuracy).toFixed(3) : 'N/A',
@@ -624,6 +637,16 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
             completedFiles: testRun.completedFiles,
             failedFiles: testRun.failedFiles,
             totalCost: testRun.totalCost,
+            avgCostPerPage: (() => {
+              if (testRun.totalCost == null || !testRun.costBreakdown) return null;
+              let totalPages = 0;
+              Object.values(testRun.costBreakdown as Record<string, Record<string, Record<string, unknown>>>).forEach((services) => {
+                Object.values(services).forEach((details) => {
+                  if (details.unit === 'pages') totalPages += Number(details.value) || 0;
+                });
+              });
+              return totalPages > 0 ? Number(testRun.totalCost) / totalPages : null;
+            })(),
             averageAccuracy: testRun.overallAccuracy,
             averageConfidence: testRun.averageConfidence,
             averageWeightedOverallScore: (() => {
@@ -816,6 +839,23 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                       testRunId,
                       testRun.totalCost !== null && testRun.totalCost !== undefined ? `$${Number(testRun.totalCost).toFixed(4)}` : 'N/A',
                     ]),
+                  ),
+                },
+                {
+                  metric: 'Avg Cost/Page',
+                  ...Object.fromEntries(
+                    Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
+                      if (testRun.totalCost == null || !testRun.costBreakdown) return [testRunId, 'N/A'];
+                      let totalPages = 0;
+                      Object.values(testRun.costBreakdown as Record<string, Record<string, Record<string, unknown>>>).forEach(
+                        (services) => {
+                          Object.values(services).forEach((details) => {
+                            if (details.unit === 'pages') totalPages += Number(details.value) || 0;
+                          });
+                        },
+                      );
+                      return [testRunId, totalPages > 0 ? `$${(Number(testRun.totalCost) / totalPages).toFixed(4)}` : 'N/A'];
+                    }),
                   ),
                 },
                 {

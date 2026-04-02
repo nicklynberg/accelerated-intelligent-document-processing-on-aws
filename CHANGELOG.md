@@ -7,6 +7,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **Average Cost Per Page Metric** — Test results and test comparison views now display an "Avg Cost/Page" metric, calculated from total cost and page counts in the cost breakdown. Also included in CSV and JSON exports from the comparison view.
+
 - **Prompt Preview** — New "Prompt Preview" tab in the Configuration page lets you preview the actual prompts sent to the LLM for each processing step (Classification, Extraction, Assessment, Summarization). Config-derived placeholders are filled in with real values (class names, cleaned JSON Schema), while document-specific placeholders are shown as highlighted markers. Includes token estimates, copy-to-clipboard, and a substitution details panel showing the exact schema sent to the LLM. Helps optimize document class schemas and prompt templates.
 
 - **IDP CLI `chat` Command & SDK `ChatOperation`** — Interactive Agent Companion Chat from the terminal and programmatic SDK access. Runs the same multi-agent orchestrator as the Web UI locally, with real-time streaming and multi-turn conversation support. Includes Analytics Agent, Error Analyzer Agent, and optionally Code Intelligence Agent (`--enable-code-intelligence`). Available as `idp-cli chat --stack-name <stack>` for interactive use, `--prompt` flag for single-shot scripting, and `client.chat.send_message()` in the Python SDK. See `docs/idp-cli.md#chat`.
