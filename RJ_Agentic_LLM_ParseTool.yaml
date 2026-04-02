@@ -1,0 +1,223 @@
+use_bda: false
+enable_blueprint_optimization: false
+managed: false
+test_set: null
+notes: Default settings for lending-package-sample configuration
+ocr:
+  backend: textract
+  model_id: us.anthropic.claude-3-7-sonnet-20250219-v1:0
+  model_lambda_hook_arn: null
+  system_prompt: >-
+    You are an expert OCR system. Extract all text from the provided image
+    accurately, preserving layout where possible.
+  task_prompt: >-
+    Extract all text from this document image. Preserve the layout, including
+    paragraphs, tables, and formatting.
+  features:
+    - name: TABLES
+  max_workers: '20'
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null
+classification:
+  skip: true
+extraction:
+  model: us.anthropic.claude-sonnet-4-6
+  model_lambda_hook_arn: null
+  system_prompt: >-
+    You are a document assistant. Respond only with JSON. Never make up data,
+    only provide data found in the document being provided.
+  task_prompt: >-
+    <background> You are an expert in document analysis and information
+    extraction.  You can understand and extract key information from documents
+    classified as type:
+
+    {DOCUMENT_CLASS}. </background>
+
+    <task> Your task is to take the unstructured text provided and convert it
+    into a well-organized table format using JSON. Identify the main entities,
+    attributes, or categories mentioned in the attributes list below and use
+    them as keys in the JSON object.  Then, extract the relevant information
+    from the text and populate the corresponding values in the JSON object.
+    </task>
+
+    <extraction-guidelines> Guidelines:
+        1. Ensure that the data is accurately represented and properly formatted within
+        the JSON structure
+        2. Include double quotes around all keys and values
+        3. Do not make up data - only extract information explicitly found in the
+        document
+        4. Do not use /n for new lines, use a space instead
+        5. If a field is not found or if unsure, return null
+        6. All dates should be in MM/DD/YYYY format
+        7. Do not perform calculations or summations unless totals are explicitly given
+        8. If an alias is not found in the document, return null
+        9. Guidelines for checkboxes:
+         9.A. CAREFULLY examine each checkbox, radio button, and selection field:
+            - Look for marks like ✓, ✗, x, filled circles (●), darkened areas, or handwritten checks indicating selection
+            - For checkboxes and multi-select fields, ONLY INCLUDE options that show clear visual evidence of selection
+            - DO NOT list options that have no visible selection mark
+         9.B. For ambiguous or overlapping tick marks:
+            - If a mark overlaps between two or more checkboxes, determine which option contains the majority of the mark
+            - Consider a checkbox selected if the mark is primarily inside the check box or over the option text
+            - When a mark touches multiple options, analyze which option was most likely intended based on position and density. For handwritten checks, the mark typically flows from the selected checkbox outward.
+            - Carefully analyze visual cues and contextual hints. Think from a human perspective, anticipate natural tendencies, and apply thoughtful reasoning to make the best possible judgment.
+        10. Think step by step first and then answer.
+    </extraction-guidelines>
+
+    If the attributes section below contains a list of attribute names and
+    descriptions, then output only those attributes, using the provided
+    descriptions as guidance for finding the correct values.
+
+    <attributes> {ATTRIBUTE_NAMES_AND_DESCRIPTIONS} </attributes>
+
+    <<CACHEPOINT>>
+
+    <document-text> {DOCUMENT_TEXT} </document-text>
+
+
+    <final-instructions> Extract key information from the document and return a
+    JSON object with the following key steps: 1. Carefully analyze the document
+    text to identify the requested attributes 2. Extract only information
+    explicitly found in the document - never make up data 3. Format all dates as
+    MM/DD/YYYY and replace newlines with spaces 4. For checkboxes, only include
+    options with clear visual selection marks 5. Use null for any fields not
+    found in the document 6. Ensure the output is properly formatted JSON with
+    quoted keys and values 7. Think step by step before finalizing your answer
+    </final-instructions>
+  temperature: '0.0'
+  top_p: '0.0'
+  top_k: '5.0'
+  max_tokens: '64000'
+  image:
+    target_width: null
+    target_height: null
+    dpi: null
+    preprocessing: null
+  agentic:
+    enabled: true
+    review_agent: false
+    review_agent_model: us.amazon.nova-2-lite-v1:0
+    max_concurrent_batches: '4'
+    table_parsing:
+      enabled: true
+      min_confidence_threshold: '95.0'
+      min_parse_success_rate: '0.9'
+      use_confidence_data: true
+      max_empty_line_gap: 3
+      auto_merge_adjacent_tables: true
+  custom_prompt_lambda_arn: null
+classes:
+  - $schema: https://json-schema.org/draft/2020-12/schema
+    $id: brokerage_statement
+    x-aws-idp-document-type: brokerage_statement
+    type: object
+    description: >-
+      A brokerage statement is a detailed report from your investment firm
+      showing everything in your investment account, including your holdings
+      (stocks, funds), their current value, all transactions (buys, sells,
+      dividends), fees, and overall account performance for a specific period,
+      offering a snapshot of your financial status and a way to track progress
+      toward your goals. Extract consolidated tabular data from
+      holdings/positions section
+    properties:
+      holdings_positions:
+        description: >-
+          Consolidated tabular data extracted from the holdings / positions /
+          Portfolio Detail section
+        type: array
+        x-aws-idp-list-item-description: A single holding/position row.
+        items:
+          $ref: '#/$defs/holdings_position'
+        x-aws-idp-evaluation-method: LLM
+        x-aws-idp-evaluation-threshold: '0.85'
+      Statement Period:
+        type: string
+        description: The Statement period as "StartDate - EndDate"
+        examples:
+          - July 1
+          - 2025 - July 31
+          - '2025'
+      Account number:
+        type: string
+        description: AccountNumber - top of page
+      PageNumber:
+        type: array
+        description: Page number (top right)
+        examples:
+          - Page 2 of 12
+          - Page 4 of 21
+    $defs:
+      holdings_position:
+        type: object
+        properties:
+          cost_basis:
+            description: >-
+              (Optional): The original purchase price or cost basis for the
+              holding
+            type: string
+            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-threshold: '0.85'
+            default: N/A
+          account_number:
+            description: >-
+              The account number associated with the holdings. If an account
+              number is listed on a different page or section from the holdings,
+              ensure that all subsequent holdings are linked to that account
+              number until a new account number is encountered
+            type: string
+            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-threshold: '0.85'
+          cash_holdings:
+            description: '*Please use Symbol $CASH$ to denote a Cash holding'
+            type: string
+            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-threshold: '0.85'
+          quantity:
+            description: The number of shares or units held (if available)
+            type: string
+            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-threshold: '0.85'
+          statement_linker_section_header:
+            description: >-
+              Include this attribute that specifies the section header (e.g.,
+              "Holdings", "Positions", "Investment Summary") where the holding
+              information is located.
+            type: string
+            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-threshold: '0.85'
+          symbol_cusip:
+            description: >-
+              The symbol (e.g., AAPL for Apple Inc.) or CUSIP number (unique
+              security identifier). When a CUSIP is not present, identify the
+              symbol based on security description and populate this field.
+              (never put security description value for this field)
+            type: string
+            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-threshold: '0.85'
+          security_description:
+            description: >-
+              (Optional): A description of the security or asset (e.g., "Apple
+              Inc. Stock"). For Prudential Statements consider "Variable
+              Investments" as Security Description and not Symbol or CUSIP
+            type: string
+            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-threshold: '0.85'
+          price:
+            description: '(Optional): The price per unit/share of the security.'
+            type: string
+            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-threshold: '0.85'
+          value:
+            description: >-
+              The total value of the holding (e.g., the total market value/
+              portfolio value)
+            type: string
+            x-aws-idp-evaluation-method: LLM
+            x-aws-idp-evaluation-threshold: '0.85'
+          total_pages_in_doc:
+            type: string
+            description: The total number of pages in the document
+    x-aws-idp-document-name-regex: ^BKR_STMT_.*$

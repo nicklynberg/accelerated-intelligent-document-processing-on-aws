@@ -82,6 +82,81 @@ class ImageConfig(BaseModel):
         return bool(v)
 
 
+class TableParsingConfig(BaseModel):
+    """Configuration for deterministic table parsing tool in agentic extraction.
+
+    When enabled, the extraction agent gains a parse_table tool that can
+    deterministically parse well-formatted Markdown tables from OCR output
+    without LLM inference. The agent decides when to use this tool based
+    on table quality and confidence metrics.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable the parse_table tool for the extraction agent. "
+        "When enabled, the agent can use deterministic table parsing "
+        "for well-formatted Markdown tables in OCR output (works with any OCR backend "
+        "that produces Markdown tables: Textract with TABLES/LAYOUT, or Bedrock OCR).",
+    )
+    min_confidence_threshold: float = Field(
+        default=95.0,
+        ge=0.0,
+        le=100.0,
+        description="Minimum average OCR text confidence (Textract 0-100 scale) "
+        "for the agent to prefer table parsing over LLM extraction. "
+        "Included in the agent's system prompt as guidance.",
+    )
+    min_parse_success_rate: float = Field(
+        default=0.90,
+        ge=0.0,
+        le=1.0,
+        description="Minimum parse_success_rate from the parse_table tool "
+        "for the agent to trust the parsed results. Below this threshold, "
+        "the agent should fall back to LLM extraction.",
+    )
+    use_confidence_data: bool = Field(
+        default=True,
+        description="Whether to load and provide OCR confidence data to the "
+        "parse_table tool for quality assessment.",
+    )
+    max_empty_line_gap: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description=(
+            "Maximum consecutive empty lines to tolerate within a table "
+            "before treating it as table boundary. Helps handle OCR page "
+            "breaks and artifacts. Higher values are more tolerant but may "
+            "merge unrelated tables."
+        ),
+    )
+    auto_merge_adjacent_tables: bool = Field(
+        default=True,
+        description="Automatically merge consecutive tables with identical column "
+        "structure. Helps recover from table splits caused by OCR artifacts like "
+        "page breaks. Disable if documents contain multiple similar tables that "
+        "should remain separate.",
+    )
+
+    @field_validator(
+        "min_confidence_threshold", "min_parse_success_rate", mode="before"
+    )
+    @classmethod
+    def parse_float(cls, v: Any) -> float:
+        """Parse float from string or number"""
+        if isinstance(v, str):
+            return float(v) if v else 0.0
+        return float(v)
+
+    @field_validator("max_empty_line_gap", mode="before")
+    @classmethod
+    def parse_int(cls, v: Any) -> int:
+        """Parse int from string or number"""
+        if isinstance(v, str):
+            return int(v) if v else 0
+        return int(v)
+
+
 class AgenticConfig(BaseModel):
     """Agentic extraction configuration"""
 
@@ -99,6 +174,12 @@ class AgenticConfig(BaseModel):
         "1 = sequential (default). >1 splits pages into N batches and runs N agents "
         "concurrently. Reduces wall-clock time but increases Bedrock RPM. "
         "Tune based on your Bedrock quota.",
+    )
+    table_parsing: TableParsingConfig = Field(
+        default_factory=TableParsingConfig,
+        description="Configuration for deterministic table parsing tool. "
+        "When enabled, the extraction agent can parse well-formatted "
+        "Markdown tables from OCR output without LLM inference.",
     )
 
 

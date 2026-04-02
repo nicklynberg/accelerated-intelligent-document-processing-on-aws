@@ -102,10 +102,11 @@ const SchemaBuilder = ({
 
   const CLASS_NAME_PATTERN = /^[a-zA-Z0-9\-_]+$/;
   const isClassNameValid = (name: string): boolean => name.trim().length > 0 && CLASS_NAME_PATTERN.test(name.trim());
-  const classNameErrorText = newClassName.trim() && !CLASS_NAME_PATTERN.test(newClassName.trim())
-    ? 'Class name can only contain letters, numbers, hyphens, and underscores'
-    : '';
-    
+  const classNameErrorText =
+    newClassName.trim() && !CLASS_NAME_PATTERN.test(newClassName.trim())
+      ? 'Class name can only contain letters, numbers, hyphens, and underscores'
+      : '';
+
   const lastExportedSchemaRef = useRef<string | null>(null);
   const lastValidationResultRef = useRef<string | null>(null);
 

@@ -759,21 +759,39 @@ Resources:
                     description: Enable Agentic Extraction
                     order: 0
                     default: false
-                  review_agent:
-                    type: boolean
-                    description: This introduces a second agent to review the first agents work. Only use with highly complex workflows as it increases token usage.
-                    order: 1
-                    default: false
-                  review_agent_model:
-                    type: string
-                    description: Model to review the initial extraction agents work and correct it if needed, if not specified will default to the same as the extraction model.
-                    default: ""
                   max_concurrent_batches:
                     type: number
                     description: "Number of concurrent page-batch agents for parallel extraction. 1=sequential (default). Higher values (2-5) split pages into batches and run agents concurrently for faster extraction. Increases Bedrock RPM usage. Tune based on your Bedrock quota."
                     minimum: 1
                     maximum: 10
                     default: 1
+                  table_parsing:
+                    type: object
+                    sectionLabel: Table Parsing Tool
+                    description: "When enabled, the extraction agent gains a deterministic parse_table tool for efficiently extracting well-formatted Markdown tables from OCR output without LLM inference. The agent decides when to use this tool based on table quality and OCR confidence metrics."
+                    order: 4
+                    properties:
+                      enabled:
+                        type: boolean
+                        description: "Enable the parse_table tool for the extraction agent. When enabled, the agent can use deterministic table parsing for well-formatted OCR tabular data instead of LLM inference."
+                        order: 0
+                        default: false
+                      min_confidence_threshold:
+                        type: number
+                        description: "Minimum average OCR text confidence (Textract 0-100 scale) for the agent to prefer table parsing over LLM extraction. Included in the agent system prompt as guidance."
+                        minimum: 0
+                        maximum: 100
+                        default: 95
+                      min_parse_success_rate:
+                        type: number
+                        description: "Minimum parse_success_rate from the parse_table tool for the agent to trust parsed results. Below this threshold, the agent falls back to LLM extraction."
+                        minimum: 0
+                        maximum: 1
+                        default: 0.9
+                      use_confidence_data:
+                        type: boolean
+                        description: "Whether to load and provide OCR confidence data to the parse_table tool for quality assessment. Requires text_confidence_uri from Textract OCR."
+                        default: true
               image:
                 type: object
                 sectionLabel: Image Processing Settings

@@ -58,3 +58,6 @@ notebooks/doc-split-metrics-exp/
 samconfig.toml
 ..bfg-report
 .git-rewrite
+
+# Cline memory bank (session-specific, not project source)
+memory-bank/

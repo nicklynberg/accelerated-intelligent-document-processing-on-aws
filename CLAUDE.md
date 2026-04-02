@@ -169,10 +169,49 @@ The unified architecture supports two processing modes, controlled by the `use_b
 2. **Pipeline Mode** (formerly Pattern 2)
    - OCR with Amazon Textract
    - Classification with Bedrock (page-level or holistic)
-   - Extraction with Bedrock
+   - Extraction with Bedrock (traditional or agentic)
    - Supports few-shot examples
+   - Optional agentic extraction with deterministic table parsing
 
 > **Note**: The separate `patterns/pattern-1/`, `patterns/pattern-2/`, and `patterns/pattern-3/` directories have been removed. All processing is now in `patterns/unified/`. See [pattern-1.md](docs/pattern-1.md) and [pattern-2.md](docs/pattern-2.md) for historical reference.
+
+### Agentic Extraction with Table Parsing
+
+The extraction service supports an optional **agentic extraction mode** with intelligent table parsing:
+
+**When to Use**:
+- Documents with large tables (100+ rows) where completeness is critical
+- Bank statements, transaction logs, brokerage statements
+- Multi-page tables that may split across OCR page breaks
+- Documents where OCR artifacts (empty lines, missing characters) cause data loss
+
+**Key Features**:
+- **Intelligent Lookahead Recovery**: Tolerates OCR artifacts (empty lines, missing pipes) by looking ahead to detect table continuation
+- **Auto-Merge Table Fragments**: Automatically merges tables with identical columns that were split by page breaks
+- **Smart Warnings**: Agent receives actionable warnings (⚠️ fragmentation, ℹ️ recovery) to verify completeness
+- **Hybrid Extraction**: Agent uses deterministic parsing for well-structured tables, falls back to LLM for complex layouts
+- **Completeness Validation**: Service validates extracted data against schema constraints (e.g., `minItems`)
+
+**Configuration**:
+```yaml
+extraction:
+  model: "us.anthropic.claude-sonnet-4-20250514-v1:0"
+  agentic:
+    enabled: true
+    table_parsing:
+      enabled: true  # Enable deterministic table parser tool
+      max_empty_line_gap: 3  # Tolerate up to 3 empty lines in tables (0-10)
+      auto_merge_adjacent_tables: true  # Merge table fragments
+      min_confidence_threshold: 95.0  # OCR confidence target (Textract only)
+      min_parse_success_rate: 0.90  # Quality threshold for parsed results
+```
+
+**Tuning**:
+- **High-quality OCR**: `max_empty_line_gap: 2`
+- **Standard quality**: `max_empty_line_gap: 3` (default)
+- **Complex/noisy documents**: `max_empty_line_gap: 5-7`
+
+See `lib/idp_common_pkg/idp_common/extraction/README.md` for detailed documentation.
 
 ### Document Processing Flow
 
@@ -194,12 +233,19 @@ The unified architecture supports two processing modes, controlled by the `use_b
   - `pip install "idp_common[core]"` - minimal dependencies
   - `pip install "idp_common[ocr]"` - OCR support
   - `pip install "idp_common[classification]"` - Classification support
-  - `pip install "idp_common[extraction]"` - Extraction support
+  - `pip install "idp_common[extraction]"` - Extraction support (includes optional agentic mode with deterministic table parsing tool)
   - `pip install "idp_common[evaluation]"` - Evaluation support
   - `pip install "idp_common[all]"` - everything
-- Components: OCR, Classification, Extraction, Evaluation, Summarization, AppSync integration, Reporting, BDA integration
+- Components: OCR, Classification, Extraction (supports traditional and agentic modes with intelligent table parsing), Evaluation, Summarization, AppSync integration, Reporting, BDA integration
 - Configuration management via DynamoDB
 - Document models and data structures
+- Extraction features:
+  - Traditional LLM-based extraction with few-shot examples
+  - Agentic extraction with tool-based structured output (Strands framework)
+  - Deterministic Markdown table parser for robust tabular data extraction
+  - Intelligent recovery from OCR artifacts (empty lines, missing pipes)
+  - Automatic merging of table fragments split by page breaks
+  - Hybrid extraction: agent uses parsing for tables, LLM for complex layouts
 
 **`idp_cli`** (`idp_cli/`):
 - Command-line interface for deployment and batch processing
