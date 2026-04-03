@@ -484,6 +484,7 @@ For full details on configuration versioning, see [configuration-versions.md](co
 - Comprehensive metrics display including:
   - **Test run metadata**: Configuration version, duration, context, file counts
   - **Overall accuracy and confidence metrics**
+  - **Cost metrics**: Total cost and average cost per page
   - **Accuracy breakdown** (precision, recall, F1-score, false alarm rate, false discovery rate)
   - **Field-Level Metrics**: Per-field extraction performance table with columns: Field Name, Accuracy, Precision, Recall, TP, FP, TN, FN
   - **Average Document Split Classification Metrics**:

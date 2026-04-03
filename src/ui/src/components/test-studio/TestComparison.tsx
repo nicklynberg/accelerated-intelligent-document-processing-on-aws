@@ -20,7 +20,13 @@ import TestStudioHeader from './TestStudioHeader';
 import useLocalStorage from '../common/local-storage';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { formatConfigVersionLink, formatConfigVersionText, type ConfigVersion as UtilsConfigVersion } from './utils/configVersionUtils';
-import { parseComparisonMetrics, parseWeightedOverallScores, parseConfigSettingValues } from '../../graphql/awsjson-parsers';
+import {
+  parseComparisonMetrics,
+  parseWeightedOverallScores,
+  parseConfigSettingValues,
+  calculateAvgCostPerPage,
+} from '../../graphql/awsjson-parsers';
+import type { CostBreakdown } from '../../graphql/awsjson-types';
 
 const client = generateClient();
 
@@ -301,6 +307,13 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         ...Object.values(completeTestRuns).map((run) =>
           run.totalCost !== null && run.totalCost !== undefined ? `$${Number(run.totalCost).toFixed(4)}` : 'N/A',
         ),
+      ],
+      [
+        'Avg Cost/Page',
+        ...Object.values(completeTestRuns).map((run) => {
+          const avg = calculateAvgCostPerPage(run.totalCost as number, run.costBreakdown as CostBreakdown);
+          return avg !== null ? `$${avg.toFixed(4)}` : 'N/A';
+        }),
       ],
       [
         'Average Accuracy',
@@ -624,6 +637,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
             completedFiles: testRun.completedFiles,
             failedFiles: testRun.failedFiles,
             totalCost: testRun.totalCost,
+            avgCostPerPage: calculateAvgCostPerPage(testRun.totalCost as number, testRun.costBreakdown as CostBreakdown),
             averageAccuracy: testRun.overallAccuracy,
             averageConfidence: testRun.averageConfidence,
             averageWeightedOverallScore: (() => {
@@ -816,6 +830,15 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                       testRunId,
                       testRun.totalCost !== null && testRun.totalCost !== undefined ? `$${Number(testRun.totalCost).toFixed(4)}` : 'N/A',
                     ]),
+                  ),
+                },
+                {
+                  metric: 'Avg Cost/Page',
+                  ...Object.fromEntries(
+                    Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
+                      const avg = calculateAvgCostPerPage(testRun.totalCost as number, testRun.costBreakdown as CostBreakdown);
+                      return [testRunId, avg !== null ? `$${avg.toFixed(4)}` : 'N/A'];
+                    }),
                   ),
                 },
                 {
