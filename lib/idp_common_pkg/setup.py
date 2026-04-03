@@ -117,7 +117,7 @@ extras_require = {
 
 setup(
     name="idp_common",
-    version="0.5.4",
+    version="0.5.5",
     packages=find_packages(
         exclude=[
             "build",
