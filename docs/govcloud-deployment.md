@@ -70,21 +70,17 @@ idp-cli publish --source-dir . --region us-east-1 --headless
 
 ### Step 2: Deploy to GovCloud
 
-Deploy the generated template to GovCloud using the AWS CloudFormation console (recommended) or deploy using AWS CLI e.g:
+Deploy the generated template to GovCloud using `idp-cli deploy` with the `--template-file` flag:
 
 ```bash
-# Populate {s3-bucket-govcloud} with the bucket name where you'd like the template to be uploaded
-aws cloudformation deploy \
-  --template-file .aws-sam/idp-govcloud.yaml \
-  --s3-bucket <S3BUCKET> \
-  --s3-prefix idp-headless \
+idp-cli deploy \
   --stack-name my-idp-headless-stack \
+  --template-file .aws-sam/idp-govcloud.yaml \
   --region us-gov-west-1 \
-  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
-  --parameter-overrides \
-    IDPPattern="Pattern2 - Packet processing with Textract and Bedrock" \
-  --s3-bucket {s3-bucket-govcloud}
+  --wait
 ```
+
+Alternatively, deploy using the AWS CloudFormation console by uploading the generated template file.
 
 ## Services Removed in GovCloud
 
