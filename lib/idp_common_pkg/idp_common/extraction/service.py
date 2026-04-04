@@ -1287,8 +1287,8 @@ Benefits: Faster, more accurate, handles OCR artifacts automatically.
                     "✓ Table Parsing Tool Results:",
                     f"  - Tables parsed: {stats.get('tables_parsed', 0)}",
                     f"  - Total rows extracted: {stats.get('rows_parsed', 0)}",
-                    f"  - Parse success rate: {stats.get('parse_success_rate', 0):.1%}",
-                    f"  - Avg OCR confidence: {stats.get('avg_confidence', 0):.1f}%",
+                    f"  - Parse success rate: {stats.get('parse_success_rate') or 0:.1%}",
+                    f"  - Avg OCR confidence: {stats.get('avg_confidence') or 0:.1f}%",
                     "",
                 ]
             )

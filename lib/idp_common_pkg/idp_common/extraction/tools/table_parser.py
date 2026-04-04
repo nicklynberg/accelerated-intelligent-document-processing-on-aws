@@ -1026,6 +1026,18 @@ def create_map_table_to_schema_tool():
             if len(split_rows) > 1:
                 merged_splits += 1
                 warnings.append(f"Auto-split merged row into {len(split_rows)} entries")
+
+            # Filter out rows where all mapped column values are empty.
+            # This removes phantom rows from non-matching tables (e.g. an
+            # account_summary table whose columns don't match the transaction
+            # column_mapping — every mapped value comes back as "").
+            mapped_col_fields = set(col_map.values())
+            split_rows = [
+                r
+                for r in split_rows
+                if any(str(r.get(f, "")).strip() for f in mapped_col_fields)
+            ]
+
             mapped_rows.extend(split_rows)
 
         # Accumulate mapped rows in agent state for finalize_table_extraction
