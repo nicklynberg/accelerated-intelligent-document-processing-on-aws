@@ -358,6 +358,8 @@ docs-setup: ## One-time docs site setup (symlinks + npm install)
 	@echo -e "$(GREEN)✅ Docs site setup complete!$(NC)"
 
 docs-build: docs-setup ## Build documentation site (no serve)
+	@echo "Syncing sidebar with new docs..."
+	cd docs-site && node sync-sidebar.mjs
 	@echo "Building documentation site..."
 	cd docs-site && npm run build
 	@echo -e "$(GREEN)✅ Docs site built! $(NC)"
