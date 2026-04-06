@@ -2689,6 +2689,8 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+                # Custom model deployments created via fine-tuning feature
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
             - Effect: Allow
               Action:
                 - aws-marketplace:Subscribe
@@ -2821,6 +2823,8 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+                # Custom model deployments created via fine-tuning feature
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
                 - !If
                   - HasCustomClassificationModelARN
                   - !Ref CustomClassificationModelARN
@@ -2957,6 +2961,8 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+                # Custom model deployments created via fine-tuning feature
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
                 - !If
                   - HasCustomExtractionModelARN
                   - !Ref CustomExtractionModelARN
@@ -3084,6 +3090,8 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+                # Custom model deployments created via fine-tuning feature
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
             - Effect: Allow
               Action:
                 - aws-marketplace:Subscribe
@@ -3304,6 +3312,8 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+                # Custom model deployments created via fine-tuning feature
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
             - Effect: Allow
               Action:
                 - aws-marketplace:Subscribe
@@ -3430,6 +3440,8 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+                # Custom model deployments created via fine-tuning feature
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
             # Lambda invoke permission for SaveReportingFunction (in main template)
             - Effect: Allow
               Action:
@@ -3606,6 +3618,8 @@ Resources:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+                # Custom model deployments created via fine-tuning feature
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
             - !If
               - HasGuardrailConfig
               - Effect: Allow

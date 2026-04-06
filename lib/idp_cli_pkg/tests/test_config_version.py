@@ -20,9 +20,13 @@ def test_copy_s3_file_with_config_version():
             "TestSetBucket": "test-set-bucket",
         }
 
-        with patch("boto3.client") as mock_boto3:
+        with (
+            patch("boto3.client") as mock_boto3_client,
+            patch("boto3.resource") as mock_boto3_resource,
+        ):
             mock_s3 = Mock()
-            mock_boto3.return_value = mock_s3
+            mock_boto3_client.return_value = mock_s3
+            mock_boto3_resource.return_value = Mock()  # Mock DynamoDB resource
 
             processor = BatchProcessor("test-stack", "us-east-1")
 
@@ -56,9 +60,13 @@ def test_copy_s3_file_without_config_version():
             "TestSetBucket": "test-set-bucket",
         }
 
-        with patch("boto3.client") as mock_boto3:
+        with (
+            patch("boto3.client") as mock_boto3_client,
+            patch("boto3.resource") as mock_boto3_resource,
+        ):
             mock_s3 = Mock()
-            mock_boto3.return_value = mock_s3
+            mock_boto3_client.return_value = mock_s3
+            mock_boto3_resource.return_value = Mock()  # Mock DynamoDB resource
 
             processor = BatchProcessor("test-stack", "us-east-1")
 

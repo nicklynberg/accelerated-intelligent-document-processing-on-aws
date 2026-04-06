@@ -67,6 +67,17 @@ export type AgentJobConnection = {
   nextToken?: Maybe<Scalars['String']['output']>;
 };
 
+export type AvailableModelsResult = {
+  baseModels: Array<BaseModelInfo>;
+  customModels: Array<CustomModelInfo>;
+};
+
+export type BaseModelInfo = {
+  id: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+  provider: Scalars['String']['output'];
+};
+
 export type CalculationDetails = {
   quotasUsed?: Maybe<QuotasUsed>;
 };
@@ -187,6 +198,20 @@ export type CreateDocumentInput = {
 
 export type CreateDocumentOutput = {
   ObjectKey?: Maybe<Scalars['ID']['output']>;
+};
+
+export type CreateFinetuningJobInput = {
+  baseModel: Scalars['String']['input'];
+  jobName: Scalars['String']['input'];
+  testSetId: Scalars['ID']['input'];
+  trainSplit?: InputMaybe<Scalars['Float']['input']>;
+};
+
+export type CustomModelInfo = {
+  baseModel: Scalars['String']['output'];
+  id: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+  status: Scalars['String']['output'];
 };
 
 export type DisPresignedUrlResponse = {
@@ -325,6 +350,48 @@ export type FileUploadInfo = {
   fileSize: Scalars['Int']['input'];
 };
 
+export type FinetuningJob = {
+  baseModelId: Scalars['String']['output'];
+  completedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  createdAt: Scalars['AWSDateTime']['output'];
+  customModelArn?: Maybe<Scalars['String']['output']>;
+  customModelDeploymentArn?: Maybe<Scalars['String']['output']>;
+  customModelName?: Maybe<Scalars['String']['output']>;
+  deploymentEndpoint?: Maybe<Scalars['String']['output']>;
+  deploymentId?: Maybe<Scalars['String']['output']>;
+  deploymentStatus?: Maybe<Scalars['String']['output']>;
+  errorMessage?: Maybe<Scalars['String']['output']>;
+  hyperparameters?: Maybe<Scalars['AWSJSON']['output']>;
+  jobId: Scalars['ID']['output'];
+  jobName: Scalars['String']['output'];
+  outputDataConfig?: Maybe<Scalars['AWSJSON']['output']>;
+  provisionedModelArn?: Maybe<Scalars['String']['output']>;
+  status: FinetuningJobStatus;
+  testSetId: Scalars['String']['output'];
+  testSetName?: Maybe<Scalars['String']['output']>;
+  trainingDataConfig?: Maybe<Scalars['AWSJSON']['output']>;
+  trainingMetrics?: Maybe<Scalars['AWSJSON']['output']>;
+  updatedAt?: Maybe<Scalars['AWSDateTime']['output']>;
+  validationDataConfig?: Maybe<Scalars['AWSJSON']['output']>;
+};
+
+export type FinetuningJobConnection = {
+  items?: Maybe<Array<Maybe<FinetuningJob>>>;
+  nextToken?: Maybe<Scalars['String']['output']>;
+};
+
+export type FinetuningJobStatus =
+  | 'CANCELLED'
+  | 'COMPLETED'
+  | 'DEPLOYING'
+  | 'FAILED'
+  | 'GENERATING_DATA'
+  | 'PENDING'
+  | 'STOPPED'
+  | 'STOPPING'
+  | 'TRAINING'
+  | 'VALIDATING';
+
 export type LatencyDistribution = {
   baseLatency?: Maybe<Scalars['String']['output']>;
   exceedsLimit?: Maybe<Scalars['Boolean']['output']>;
@@ -391,12 +458,14 @@ export type Mutation = {
   completeSectionReview?: Maybe<Document>;
   copyToBaseline: CopyToBaselineResponse;
   createDocument?: Maybe<CreateDocumentOutput>;
+  createFinetuningJob?: Maybe<FinetuningJob>;
   createUser?: Maybe<User>;
   deleteAgentJob?: Maybe<Scalars['Boolean']['output']>;
   deleteChatSession?: Maybe<Scalars['Boolean']['output']>;
   deleteConfigVersion?: Maybe<UpdateConfigurationResponse>;
   deleteDiscoveryJob: Scalars['Boolean']['output'];
   deleteDocument: Scalars['Boolean']['output'];
+  deleteFinetuningJob?: Maybe<Scalars['Boolean']['output']>;
   deleteTestSets: Scalars['Boolean']['output'];
   deleteTests: Scalars['Boolean']['output'];
   deleteUser?: Maybe<Scalars['Boolean']['output']>;
@@ -418,6 +487,7 @@ export type Mutation = {
   updateDocument?: Maybe<Document>;
   updateDocumentSection?: Maybe<Document>;
   updateDocumentStatus?: Maybe<Document>;
+  updateFinetuningJobStatus?: Maybe<FinetuningJob>;
   updatePricing?: Maybe<UpdatePricingResponse>;
   updateUser?: Maybe<User>;
   uploadDiscoveryDocument: DisPresignedUrlResponse;
@@ -474,6 +544,11 @@ export type MutationCreateDocumentArgs = {
 };
 
 
+export type MutationCreateFinetuningJobArgs = {
+  input: CreateFinetuningJobInput;
+};
+
+
 export type MutationCreateUserArgs = {
   allowedConfigVersions?: InputMaybe<Array<InputMaybe<Scalars['String']['input']>>>;
   email: Scalars['String']['input'];
@@ -503,6 +578,11 @@ export type MutationDeleteDiscoveryJobArgs = {
 
 export type MutationDeleteDocumentArgs = {
   objectKeys: Array<Scalars['String']['input']>;
+};
+
+
+export type MutationDeleteFinetuningJobArgs = {
+  jobId: Scalars['ID']['input'];
 };
 
 
@@ -638,6 +718,13 @@ export type MutationUpdateDocumentStatusArgs = {
 };
 
 
+export type MutationUpdateFinetuningJobStatusArgs = {
+  errorMessage?: InputMaybe<Scalars['String']['input']>;
+  jobId: Scalars['ID']['input'];
+  status: FinetuningJobStatus;
+};
+
+
 export type MutationUpdatePricingArgs = {
   pricingConfig: Scalars['AWSJSON']['input'];
 };
@@ -732,6 +819,7 @@ export type Query = {
   getDocument?: Maybe<Document>;
   getDocumentCount?: Maybe<DocumentCount>;
   getFileContents?: Maybe<FileContentsResponse>;
+  getFinetuningJob?: Maybe<FinetuningJob>;
   getMyProfile?: Maybe<User>;
   getPricing?: Maybe<PricingResponse>;
   getStepFunctionExecution?: Maybe<StepFunctionExecutionResponse>;
@@ -741,6 +829,7 @@ export type Query = {
   getTestSets?: Maybe<Array<Maybe<TestSet>>>;
   listAgentJobs?: Maybe<AgentJobConnection>;
   listAvailableAgents?: Maybe<Array<Maybe<Agent>>>;
+  listAvailableModels?: Maybe<AvailableModelsResult>;
   listBucketFiles?: Maybe<Array<Maybe<Scalars['String']['output']>>>;
   listChatSessions?: Maybe<ChatSessionConnection>;
   listConfigurationLibrary?: Maybe<ConfigurationLibraryResponse>;
@@ -749,10 +838,12 @@ export type Query = {
   listDocumentsByDateRange?: Maybe<DocumentPage>;
   listDocumentsDateHour?: Maybe<DocumentList>;
   listDocumentsDateShard?: Maybe<DocumentList>;
+  listFinetuningJobs?: Maybe<FinetuningJobConnection>;
   listUsers?: Maybe<UserList>;
   queryKnowledgeBase?: Maybe<Scalars['String']['output']>;
   submitAgentQuery?: Maybe<AgentJob>;
   validateTestFileName?: Maybe<TestSetValidationResponse>;
+  validateTestSetForFinetuning?: Maybe<TestSetValidationResult>;
 };
 
 
@@ -814,6 +905,11 @@ export type QueryGetDocumentCountArgs = {
 
 export type QueryGetFileContentsArgs = {
   s3Uri: Scalars['String']['input'];
+};
+
+
+export type QueryGetFinetuningJobArgs = {
+  jobId: Scalars['ID']['input'];
 };
 
 
@@ -890,6 +986,12 @@ export type QueryListDocumentsDateShardArgs = {
 };
 
 
+export type QueryListFinetuningJobsArgs = {
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+};
+
+
 export type QueryQueryKnowledgeBaseArgs = {
   input: Scalars['String']['input'];
   sessionId?: InputMaybe<Scalars['String']['input']>;
@@ -904,6 +1006,11 @@ export type QuerySubmitAgentQueryArgs = {
 
 export type QueryValidateTestFileNameArgs = {
   fileName: Scalars['String']['input'];
+};
+
+
+export type QueryValidateTestSetForFinetuningArgs = {
+  testSetId: Scalars['ID']['input'];
 };
 
 export type QuotaRequirement = {
@@ -1066,6 +1173,17 @@ export type TestSetValidationResponse = {
   testSetId?: Maybe<Scalars['String']['output']>;
 };
 
+export type TestSetValidationResult = {
+  classCount: Scalars['Int']['output'];
+  classDistribution?: Maybe<Scalars['AWSJSON']['output']>;
+  documentCount: Scalars['Int']['output'];
+  errors?: Maybe<Array<Scalars['String']['output']>>;
+  isValid: Scalars['Boolean']['output'];
+  trainCount: Scalars['Int']['output'];
+  validationCount: Scalars['Int']['output'];
+  warnings?: Maybe<Array<Scalars['String']['output']>>;
+};
+
 export type ToolMetadata = {
   toolName?: Maybe<Scalars['String']['output']>;
   toolUseId?: Maybe<Scalars['String']['output']>;
@@ -1074,6 +1192,11 @@ export type ToolMetadata = {
 export type ToolMetadataInput = {
   toolName?: InputMaybe<Scalars['String']['input']>;
   toolUseId?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type TrainingMetrics = {
+  trainingLoss?: Maybe<Scalars['Float']['output']>;
+  validationLoss?: Maybe<Scalars['Float']['output']>;
 };
 
 export type UpdateConfigurationResponse = {
@@ -1211,6 +1334,13 @@ export type CopyToBaselineMutationVariables = Exact<{
 
 export type CopyToBaselineMutation = { copyToBaseline: { success: boolean, message?: string | null } };
 
+export type CreateFinetuningJobMutationVariables = Exact<{
+  input: CreateFinetuningJobInput;
+}>;
+
+
+export type CreateFinetuningJobMutation = { createFinetuningJob?: { jobId: string, jobName: string, status: FinetuningJobStatus, baseModelId: string, customModelName?: string | null, testSetId: string, testSetName?: string | null, createdAt: string } | null };
+
 export type CreateUserMutationVariables = Exact<{
   email: Scalars['String']['input'];
   persona: Scalars['String']['input'];
@@ -1254,6 +1384,13 @@ export type DeleteDocumentMutationVariables = Exact<{
 
 
 export type DeleteDocumentMutation = { deleteDocument: boolean };
+
+export type DeleteFinetuningJobMutationVariables = Exact<{
+  jobId: Scalars['ID']['input'];
+}>;
+
+
+export type DeleteFinetuningJobMutation = { deleteFinetuningJob?: boolean | null };
 
 export type DeleteTestSetsMutationVariables = Exact<{
   testSetIds: Array<Scalars['String']['input']> | Scalars['String']['input'];
@@ -1507,6 +1644,13 @@ export type GetFileContentsQueryVariables = Exact<{
 
 export type GetFileContentsQuery = { getFileContents?: { content: string, contentType: string, size: number, isBinary?: boolean | null } | null };
 
+export type GetFinetuningJobQueryVariables = Exact<{
+  jobId: Scalars['ID']['input'];
+}>;
+
+
+export type GetFinetuningJobQuery = { getFinetuningJob?: { jobId: string, jobName: string, status: FinetuningJobStatus, baseModelId: string, customModelName?: string | null, customModelArn?: string | null, testSetId: string, testSetName?: string | null, createdAt: string, updatedAt?: string | null, completedAt?: string | null, errorMessage?: string | null, trainingMetrics?: string | null, hyperparameters?: string | null, trainingDataConfig?: string | null, validationDataConfig?: string | null, outputDataConfig?: string | null, deploymentId?: string | null, deploymentStatus?: string | null, deploymentEndpoint?: string | null, provisionedModelArn?: string | null } | null };
+
 export type GetMyProfileQueryVariables = Exact<{ [key: string]: never; }>;
 
 
@@ -1628,6 +1772,14 @@ export type ListDocumentsDateShardQueryVariables = Exact<{
 
 
 export type ListDocumentsDateShardQuery = { listDocumentsDateShard?: { nextToken?: string | null, Documents?: Array<{ ObjectKey?: string | null, PK: string, SK: string } | null> | null } | null };
+
+export type ListFinetuningJobsQueryVariables = Exact<{
+  limit?: InputMaybe<Scalars['Int']['input']>;
+  nextToken?: InputMaybe<Scalars['String']['input']>;
+}>;
+
+
+export type ListFinetuningJobsQuery = { listFinetuningJobs?: { nextToken?: string | null, items?: Array<{ jobId: string, jobName: string, status: FinetuningJobStatus, baseModelId: string, customModelName?: string | null, testSetId: string, testSetName?: string | null, createdAt: string, updatedAt?: string | null, completedAt?: string | null, errorMessage?: string | null, trainingMetrics?: string | null, deploymentId?: string | null, deploymentStatus?: string | null, deploymentEndpoint?: string | null } | null> | null } | null };
 
 export type ListUsersQueryVariables = Exact<{ [key: string]: never; }>;
 

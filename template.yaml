@@ -442,6 +442,18 @@ Parameters:
     AllowedPattern: "^(|arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/.+)$"
     ConstraintDescription: Must be empty or a valid KMS key ARN
 
+  # MLflow Integration
+  EnableMLflow:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable MLflow experiment tracking integration
+
+  MlflowTrackingURI:
+    Type: String
+    Default: ""
+    Description: SageMaker MLflow tracking server ARN
+
 Rules:
   MLflowTrackingURIRequired:
     RuleCondition: !Equals [ !Ref EnableMLflow, "true" ]
@@ -479,8 +491,8 @@ Conditions:
   CreateExternalAppClient: !Equals [ !Ref EnableMCP, "true" ]
   UseCloudFrontHosting: !Equals [ !Ref WebUIHosting, "CloudFront" ]
   UseALBHosting: !Equals [ !Ref WebUIHosting, "ALB" ]
+  EnableXRayTracingCondition: !Equals [ !Ref EnableXRayTracing, "true" ]
   UsePrivateAppSync: !Equals [ !Ref AppSyncVisibility, "PRIVATE" ]
-  IsMLflowEnabled: !Equals [ !Ref EnableMLflow, "true" ]
   HasArtifactsBucketKmsKey: !Not [ !Equals [ !Ref ArtifactsBucketKmsKeyArn, "" ] ]
 
 Metadata:
@@ -535,6 +547,11 @@ Metadata:
           default: "MCP Integration"
         Parameters:
           - EnableMCP
+      - Label:
+          default: "MLflow Integration"
+        Parameters:
+          - EnableMLflow
+          - MlflowTrackingURI
       - Label:
           default: "Web UI Hosting"
         Parameters:
@@ -617,6 +634,10 @@ Metadata:
         default: "WAF Allowed IPv4 Ranges"
       EnableMCP:
         default: "Enable MCP Integration"
+      EnableMLflow:
+        default: "Enable MLflow Integration"
+      MlflowTrackingURI:
+        default: "MLflow Tracking Server ARN"
       WebUIHosting:
         default: "Web UI Hosting Method"
       ALBVpcId:
@@ -1367,6 +1388,10 @@ Resources:
           - UsePrivateAppSync
           - !Ref LambdaVpcSecurityGroup
           - ""
+
+        # MLflow Integration
+        EnableMLflow: !Ref EnableMLflow
+        MlflowTrackingURI: !Ref MlflowTrackingURI
 
   ##########################################################################
   # Encryption key
@@ -7597,6 +7622,7 @@ Resources:
                   - !GetAtt UserManagementFunction.Arn
                   - !GetAtt CompleteSectionReviewFunction.Arn
                   - !GetAtt CalculateCapacityResolverFunction.Arn
+                  - !GetAtt FinetuningJobsResolverFunction.Arn
 
   UserManagementDataSource:
     Type: AWS::AppSync::DataSource
@@ -7671,6 +7697,703 @@ Resources:
       DataSourceName: !GetAtt CompleteSectionReviewDataSource.Name
       TypeName: Mutation
       FieldName: completeSectionReview
+
+  ##########################################################################
+  # Custom Model Fine-Tuning Resources
+  ##########################################################################
+
+  # S3 Bucket for Fine-Tuning Training Data
+  FinetuningDataBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: RetainExceptOnCreate
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref CustomerManagedEncryptionKey
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: finetuning-data-bucket-logs/
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteAfterNDays
+            Status: Enabled
+            ExpirationInDays: !Ref DataRetentionInDays
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  FinetuningDataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FinetuningDataBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnforceSSLOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub "${FinetuningDataBucket.Arn}/*"
+              - !Sub "${FinetuningDataBucket.Arn}"
+            Condition:
+              Bool:
+                "aws:SecureTransport": false
+          - Sid: AllowBedrockAccess
+            Effect: Allow
+            Principal:
+              Service: !Sub "bedrock.${AWS::URLSuffix}"
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !Sub "${FinetuningDataBucket.Arn}/*"
+              - !Sub "${FinetuningDataBucket.Arn}"
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+
+  # IAM Role for Bedrock Fine-Tuning Jobs
+  BedrockFinetuningRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-BedrockFinetuningRole"
+      Description: IAM role for Bedrock model fine-tuning jobs
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "bedrock.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      PermissionsBoundary:
+        !If [
+          HasPermissionsBoundary,
+          !Ref PermissionsBoundaryArn,
+          !Ref AWS::NoValue,
+        ]
+      Policies:
+        - PolicyName: FinetuningS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt FinetuningDataBucket.Arn
+                  - !Sub "${FinetuningDataBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - !Sub "${FinetuningDataBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Fine-Tuning List Documents Lambda (for Distributed Map)
+  FinetuningListDocumentsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  FinetuningListDocumentsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - Step Functions handles retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      FunctionName: !Sub "${AWS::StackName}-FinetuningListDocuments"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/finetuning_list_documents/
+      Timeout: 300
+      MemorySize: 512
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE: !Ref TrackingTable
+          TEST_SET_BUCKET: !Ref TestSetBucket
+          FINETUNING_DATA_BUCKET: !Ref FinetuningDataBucket
+      LoggingConfig:
+        LogGroup: !Ref FinetuningListDocumentsLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - S3ReadPolicy:
+            BucketName: !Ref TestSetBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Fine-Tuning Process Document Lambda (for Distributed Map parallel processing)
+  FinetuningProcessDocumentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  FinetuningProcessDocumentFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - Step Functions handles retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      FunctionName: !Sub "${AWS::StackName}-FinetuningProcessDocument"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/finetuning_process_document/
+      Timeout: 300
+      MemorySize: 2048
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TEST_SET_BUCKET: !Ref TestSetBucket
+          FINETUNING_DATA_BUCKET: !Ref FinetuningDataBucket
+      LoggingConfig:
+        LogGroup: !Ref FinetuningProcessDocumentLogGroup
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref TestSetBucket
+        - S3CrudPolicy:
+            BucketName: !Ref FinetuningDataBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Fine-Tuning Merge Data Lambda (combines parallel results)
+  FinetuningMergeDataLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  FinetuningMergeDataFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - Step Functions handles retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      FunctionName: !Sub "${AWS::StackName}-FinetuningMergeData"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/finetuning_merge_data/
+      Timeout: 900
+      MemorySize: 10240
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE: !Ref TrackingTable
+          FINETUNING_DATA_BUCKET: !Ref FinetuningDataBucket
+      LoggingConfig:
+        LogGroup: !Ref FinetuningMergeDataLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - S3CrudPolicy:
+            BucketName: !Ref FinetuningDataBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - kms:Encrypt
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Fine-Tuning Job Creator Lambda
+  FinetuningJobCreatorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  FinetuningJobCreatorFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - Step Functions handles retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      FunctionName: !Sub "${AWS::StackName}-FinetuningJobCreator"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/finetuning_job_creator/
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE: !Ref TrackingTable
+          FINETUNING_DATA_BUCKET: !Ref FinetuningDataBucket
+          BEDROCK_FINETUNING_ROLE_ARN: !GetAtt BedrockFinetuningRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref FinetuningJobCreatorLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:CreateModelCustomizationJob
+                - bedrock:TagResource
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:model-customization-job/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model/*"
+            - Effect: Allow
+              Action:
+                - iam:PassRole
+              Resource: !GetAtt BedrockFinetuningRole.Arn
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Fine-Tuning Job Status Checker Lambda
+  FinetuningJobStatusCheckerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  FinetuningJobStatusCheckerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - Step Functions handles retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      FunctionName: !Sub "${AWS::StackName}-FinetuningJobStatusChecker"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/finetuning_job_status_checker/
+      Timeout: 60
+      MemorySize: 256
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE: !Ref TrackingTable
+      LoggingConfig:
+        LogGroup: !Ref FinetuningJobStatusCheckerLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:GetModelCustomizationJob
+                - bedrock:GetCustomModel
+                - bedrock:GetCustomModelDeployment
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:model-customization-job/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Fine-Tuning Deployment Handler Lambda
+  FinetuningDeploymentHandlerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  FinetuningDeploymentHandlerFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required - Step Functions handles retries"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      FunctionName: !Sub "${AWS::StackName}-FinetuningDeploymentHandler"
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: src/lambda/finetuning_deployment_handler/
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE: !Ref TrackingTable
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+      LoggingConfig:
+        LogGroup: !Ref FinetuningDeploymentHandlerLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ConfigurationTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:CreateCustomModelDeployment
+                - bedrock:GetCustomModelDeployment
+                - bedrock:DeleteCustomModelDeployment
+                - bedrock:ListCustomModelDeployments
+                - bedrock:TagResource
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Fine-Tuning State Machine IAM Role
+  FinetuningStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "states.${AWS::URLSuffix}"
+            Action: sts:AssumeRole
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: FinetuningStateMachinePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !GetAtt FinetuningListDocumentsFunction.Arn
+                  - !GetAtt FinetuningProcessDocumentFunction.Arn
+                  - !GetAtt FinetuningMergeDataFunction.Arn
+                  - !GetAtt FinetuningJobCreatorFunction.Arn
+                  - !GetAtt FinetuningJobStatusCheckerFunction.Arn
+                  - !GetAtt FinetuningDeploymentHandlerFunction.Arn
+              # CloudWatch Logs actions for Step Functions logging require Resource: "*"
+              # because these APIs do not support resource-level permissions.
+              # See: https://docs.aws.amazon.com/step-functions/latest/dg/cw-logs.html
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !GetAtt TrackingTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:GenerateDataKey*
+                Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt FinetuningDataBucket.Arn
+                  - !Sub "${FinetuningDataBucket.Arn}/*"
+              # Distributed Map requires permission to start child executions
+              - Effect: Allow
+                Action:
+                  - states:StartExecution
+                Resource: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${AWS::StackName}-FinetuningStateMachine"
+              - Effect: Allow
+                Action:
+                  - states:DescribeExecution
+                  - states:StopExecution
+                Resource: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-FinetuningStateMachine:*"
+              - Effect: Allow
+                Action:
+                  - states:RedriveExecution
+                Resource: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:execution:${AWS::StackName}-FinetuningStateMachine:*:*"
+
+  # Fine-Tuning State Machine Log Group
+  FinetuningStateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}-FinetuningStateMachine"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  # Fine-Tuning State Machine
+  FinetuningStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "${AWS::StackName}-FinetuningStateMachine"
+      DefinitionUri: src/lambda/finetuning_state_machine/definition.json
+      DefinitionSubstitutions:
+        FinetuningListDocumentsArn: !GetAtt FinetuningListDocumentsFunction.Arn
+        FinetuningProcessDocumentArn: !GetAtt FinetuningProcessDocumentFunction.Arn
+        FinetuningMergeDataArn: !GetAtt FinetuningMergeDataFunction.Arn
+        FinetuningJobCreatorArn: !GetAtt FinetuningJobCreatorFunction.Arn
+        FinetuningJobStatusCheckerArn: !GetAtt FinetuningJobStatusCheckerFunction.Arn
+        FinetuningDeploymentHandlerArn: !GetAtt FinetuningDeploymentHandlerFunction.Arn
+        TrackingTableName: !Ref TrackingTable
+        FinetuningDataBucket: !Ref FinetuningDataBucket
+      Role: !GetAtt FinetuningStateMachineRole.Arn
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt FinetuningStateMachineLogGroup.Arn
+        IncludeExecutionData: true
+        Level: ALL
+      Tracing:
+        Enabled: !If [EnableXRayTracingCondition, true, false]
+      Tags:
+        Name: !Sub "${AWS::StackName}-FinetuningStateMachine"
+
+  # Fine-Tuning Jobs Resolver Lambda
+  FinetuningJobsResolverLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      RetentionInDays: !Ref LogRetentionDays
+
+  FinetuningJobsResolverFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function does not require VPC access"
+          - id: W92
+            reason: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_173: "Environment variables contain non-sensitive configuration"
+    Properties:
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      FunctionName: !Sub "${AWS::StackName}-FinetuningJobsResolver"
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      CodeUri: nested/appsync/src/lambda/finetuning_jobs_resolver/
+      Timeout: 60
+      MemorySize: 512
+      Layers:
+        - !Ref IDPCommonBaseLayer
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+          TRACKING_TABLE: !Ref TrackingTable
+          FINETUNING_STATE_MACHINE_ARN: !Ref FinetuningStateMachine
+          FINETUNING_DATA_BUCKET: !Ref FinetuningDataBucket
+      LoggingConfig:
+        LogGroup: !Ref FinetuningJobsResolverLogGroup
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrackingTable
+        - StepFunctionsExecutionPolicy:
+            StateMachineName: !GetAtt FinetuningStateMachine.Name
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:GetCustomModel
+                - bedrock:ListCustomModels
+                - bedrock:GetCustomModelDeployment
+                - bedrock:ListCustomModelDeployments
+                - bedrock:DeleteCustomModelDeployment
+                - bedrock:DeleteCustomModel
+              Resource:
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:custom-model-deployment/*"
+            - Effect: Allow
+              Action:
+                - bedrock:ListCustomModels
+                - bedrock:ListCustomModelDeployments
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey*
+                - kms:DescribeKey
+              Resource: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  # Fine-Tuning Jobs AppSync Data Source
+  FinetuningJobsDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      Name: FinetuningJobsDataSource
+      Description: Lambda function for fine-tuning job operations
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt HITLAppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt FinetuningJobsResolverFunction.Arn
+
+  # Update HITLAppSyncServiceRole to include fine-tuning resolver
+  # (This is handled by adding the function ARN to the existing role's policy)
+
+  # Fine-Tuning AppSync Resolvers
+  CreateFinetuningJobResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
+      TypeName: Mutation
+      FieldName: createFinetuningJob
+
+  DeleteFinetuningJobResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
+      TypeName: Mutation
+      FieldName: deleteFinetuningJob
+
+  UpdateFinetuningJobStatusResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
+      TypeName: Mutation
+      FieldName: updateFinetuningJobStatus
+
+  GetFinetuningJobResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
+      TypeName: Query
+      FieldName: getFinetuningJob
+
+  ListFinetuningJobsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
+      TypeName: Query
+      FieldName: listFinetuningJobs
+
+  ValidateTestSetForFinetuningResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
+      TypeName: Query
+      FieldName: validateTestSetForFinetuning
+
+  ListAvailableModelsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: APPSYNCSTACK
+    Properties:
+      ApiId: !GetAtt GraphQLApi.ApiId
+      DataSourceName: !GetAtt FinetuningJobsDataSource.Name
+      TypeName: Query
+      FieldName: listAvailableModels
 
   SkipAllSectionsReviewResolver:
     Type: AWS::AppSync::Resolver

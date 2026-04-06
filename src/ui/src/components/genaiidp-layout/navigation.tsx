@@ -19,6 +19,7 @@ import {
   USER_MANAGEMENT_PATH,
   AGENT_CHAT_PATH,
   CAPACITY_PLANNING_PATH,
+  CUSTOM_MODELS_PATH,
 } from '../../routes/constants';
 
 export const documentsNavHeader = { text: 'Tools', href: `#${DEFAULT_PATH}` };
@@ -35,6 +36,7 @@ export const adminNavItems = [
     items: [
       { type: 'link', text: 'View/Edit Configuration', href: `#${CONFIGURATION_PATH}` },
       { type: 'link', text: 'Discovery', href: `#${DISCOVERY_PATH}` },
+      { type: 'link', text: 'Custom Models', href: `#${CUSTOM_MODELS_PATH}` },
       { type: 'link', text: 'Capacity Planning', href: `#${CAPACITY_PLANNING_PATH}` },
       { type: 'link', text: 'User Management', href: `#${USER_MANAGEMENT_PATH}` },
       { type: 'link', text: 'View / Edit Pricing', href: `#${PRICING_PATH}` },
@@ -240,6 +242,8 @@ const Navigation = ({
     activeHref = `#${DISCOVERY_PATH}`;
   } else if (path.includes(USER_MANAGEMENT_PATH)) {
     activeHref = `#${USER_MANAGEMENT_PATH}`;
+  } else if (path.includes(CUSTOM_MODELS_PATH)) {
+    activeHref = `#${CUSTOM_MODELS_PATH}`;
   } else if (path.includes(CAPACITY_PLANNING_PATH)) {
     activeHref = `#${CAPACITY_PLANNING_PATH}`;
   } else if (path.includes(DOCUMENTS_PATH)) {
