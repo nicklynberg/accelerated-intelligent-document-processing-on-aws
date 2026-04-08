@@ -12,6 +12,7 @@ SPDX-License-Identifier: MIT-0
 - **Error Analyzer model selection** — The agent was using the Chat Companion's model instead of its own configured model.
 - **Error Analyzer log processing** — Fixed early termination that stopped searching after the first Lambda function with errors; now searches all relevant log groups.
 - **Error Analyzer log truncation** — Fixed handling of long log messages to trim them rather than skip them entirely.
+- **Reprocess from Document Details** — Fixed config version not being passed when reprocessing a document from the Document Details page (showed "N/A" instead of the selected version).
 
 ### Changed
 
