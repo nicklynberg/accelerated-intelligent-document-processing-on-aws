@@ -81,7 +81,7 @@ Once a fine-tuning job completes:
 ### Validate a Test Set
 
 ```bash
-idp finetuning validate --test-set docsplit
+idp-cli finetuning validate --test-set docsplit
 ```
 
 Output:
@@ -109,7 +109,7 @@ Warnings:
 ### Create a Fine-Tuning Job
 
 ```bash
-idp finetuning create \
+idp-cli finetuning create \
   --test-set docsplit \
   --base-model us.amazon.nova-pro-v1:0 \
   --name my-classifier
@@ -122,13 +122,13 @@ Fine-tuning job created:
   Status: VALIDATING
   
 Monitor progress with:
-  idp finetuning status --job-id abc123-def456-...
+  idp-cli finetuning status --job-id abc123-def456-...
 ```
 
 ### Check Job Status
 
 ```bash
-idp finetuning status --job-id abc123-def456-...
+idp-cli finetuning status --job-id abc123-def456-...
 ```
 
 Output:
@@ -151,13 +151,13 @@ Fine-Tuning Job Status:
 ### List All Jobs
 
 ```bash
-idp finetuning list
+idp-cli finetuning list
 ```
 
 ### Delete a Job
 
 ```bash
-idp finetuning delete --job-id abc123-def456-...
+idp-cli finetuning delete --job-id abc123-def456-...
 ```
 
 ### List Available Models

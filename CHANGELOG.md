@@ -192,7 +192,13 @@ SPDX-License-Identifier: MIT-0
 
 - **Discovery accessible from CLI and SDK** — Discovery can now be run programmatically via the IDP SDK (`client.discovery.run()`) and CLI (`idp-cli discover`), enabling users with many document classes to automate schema generation without the Web UI. Supports both modes: without ground truth (exploratory) and with ground truth (optimized). ([#228](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/228))
 
-- **Custom Model Fine-tuning** — Fine-tune Amazon Nova models using processed IDP documents directly from the Web UI. Create a fine-tuning job from a Test Set (which provides documents with ground truth data), generate training data in JSONL format, submit fine-tuning jobs to Bedrock, and deploy the resulting custom models for use in extraction workflows. Includes Step Functions workflow orchestration, GraphQL API for job management, and "Custom Models" section in the navigation. See [Custom Model Fine-tuning](./docs/custom-model-finetuning.md) for details.
+- **Custom Model Fine-tuning** — Fine-tune Amazon Nova models using processed IDP documents directly from the Web UI. Create a fine-tuning job from a Test Set (which provides documents with ground truth data), generate training data in JSONL format, submit fine-tuning jobs to Bedrock, and deploy the resulting custom models for use in extraction workflows. See [Custom Model Fine-tuning](./docs/custom-model-finetuning.md) for details.
+  - **Web UI**: New "Custom Models" page with job creation form (test set selector, base model selector, train/validation split), jobs table with status tracking, and detailed job view with deployment status and configuration version creation
+  - **CLI / SDK**: `idp-cli finetuning create`, `idp-cli finetuning status`, `idp-cli finetuning list`, `idp-cli finetuning delete` commands for programmatic job management
+  - **GraphQL API**: New `createFinetuningJob`, `getFinetuningJob`, `listFinetuningJobs`, `deleteFinetuningJob` mutations/queries with `FinetuningJob` type and real-time status fields
+  - **Step Functions Workflow**: 7-Lambda orchestration pipeline — list documents, parallel document processing (Distributed Map), merge training data, create Bedrock fine-tuning job, poll job status, deploy custom model via Provisioned Throughput
+  - **CloudFormation Resources**: `FinetuningDataBucket` (S3), `FinetuningStateMachine` (Step Functions), 7 Lambda functions with IAM roles, CloudWatch log groups, and Bedrock permissions for model customization and deployment
+  - **Shared Training Data Utilities**: Common module (`idp_common.model_finetuning.training_data_utils`) for extraction field parsing, baseline formatting, PDF-to-image conversion, and document image handling — shared across Lambda functions to eliminate code duplication
 
 ### Changed
 

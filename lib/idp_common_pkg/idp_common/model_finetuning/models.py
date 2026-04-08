@@ -31,15 +31,6 @@ class FinetuningWorkflowStatus(Enum):
     FAILED = "FAILED"
 
 
-class CustomModelDeploymentStatus(Enum):
-    """Status of a custom model deployment."""
-
-    CREATING = "Creating"
-    ACTIVE = "Active"
-    FAILED = "Failed"
-    DELETING = "Deleting"
-
-
 @dataclass
 class FinetuningJobConfig:
     """Configuration for a fine-tuning job."""

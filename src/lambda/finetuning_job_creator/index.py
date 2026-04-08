@@ -161,7 +161,10 @@ def _normalize_model_identifier(model_id: str) -> str:
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Lambda handler for creating Bedrock fine-tuning job."""
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info(
+        f"Creating finetuning job: jobId={event.get('jobId')}, "
+        f"baseModel={event.get('baseModel')}"
+    )
 
     job_id = event.get("jobId")
     base_model = event.get("baseModel")

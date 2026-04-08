@@ -8418,7 +8418,7 @@ Resources:
       Runtime: python3.12
       CodeUri: src/lambda/finetuning_merge_data/
       Timeout: 900
-      MemorySize: 10240
+      MemorySize: 3072  # Right-sized for I/O-bound JSONL merge operation (reduced from 10240)
       Layers:
         - !Ref IDPCommonBaseLayer
       Environment:

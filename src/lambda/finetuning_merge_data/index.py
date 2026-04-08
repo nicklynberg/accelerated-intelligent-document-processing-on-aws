@@ -37,7 +37,7 @@ FINETUNING_JOB_PREFIX = "finetuning#"
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Lambda handler for merging training data."""
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info(f"Merging finetuning data: jobId={event.get('jobId')}")
 
     job_id = event.get("jobId")
     train_split = event.get("trainSplit", 0.9)

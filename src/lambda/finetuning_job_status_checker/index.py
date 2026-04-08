@@ -44,7 +44,7 @@ BEDROCK_STATUS_MAP = {
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Lambda handler for checking fine-tuning job status."""
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info(f"Checking finetuning job status: jobId={event.get('jobId')}")
 
     job_id = event.get("jobId")
     bedrock_job_arn = event.get("bedrockJobArn")

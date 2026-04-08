@@ -45,7 +45,10 @@ DEPLOYMENT_STATUS_MAP = {
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Lambda handler for deployment operations."""
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info(
+        f"Processing deployment operation: jobId={event.get('jobId')}, "
+        f"operation={event.get('operation', 'create')}"
+    )
 
     operation = event.get("operation", "create")
 

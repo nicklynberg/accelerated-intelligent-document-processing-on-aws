@@ -35,7 +35,7 @@ FINETUNING_JOB_PREFIX = "finetuning#"
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """Lambda handler for listing documents in a test set."""
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info(f"Listing documents for testSetId={event.get('testSetId')}")
 
     job_id = event.get("jobId")
     test_set_id = event.get("testSetId")
