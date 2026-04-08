@@ -19,6 +19,7 @@ The web interface allows real-time configuration updates without stack redeploym
 - **Extraction Attributes**: Configure fields to extract for each document class (defined as JSON Schema properties)
 - **Few Shot Examples**: Upload and configure example documents to improve accuracy (supported in Pattern 2)
 - **Model Selection**: Choose between available Bedrock models for classification and extraction
+  > **💡 Cost Attribution Tip:** You can replace standard model IDs with [Bedrock Application Inference Profile](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-create.html) ARNs to enable cost-allocation tagging (e.g., for MAP migration tracking). This is a configuration-only change — no code modifications required. See [Cost Attribution with Application Inference Profiles](./cost-calculator.md#cost-attribution-with-bedrock-application-inference-profiles) for step-by-step instructions.
 - **Prompt Engineering**: Customize system and task prompts for optimal results
 - **OCR Features**: Configure Textract features (TABLES, FORMS, SIGNATURES, LAYOUT) for enhanced data capture
 - **Evaluation Methods**: Set evaluation methods and thresholds for each attribute

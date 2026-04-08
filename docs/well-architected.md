@@ -118,7 +118,7 @@ The GenAI Intelligent Document Processing (GenAIIDP) Accelerator demonstrates st
 
 ### Recommendations
 
-- Implement more granular cost allocation tags to track expenses by document type, workflow, or customer.
+- Implement more granular cost allocation tags to track expenses by document type, workflow, or customer. Bedrock [Application Inference Profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-create.html) can be used to tag model invocations for cost attribution — see [Cost Attribution with Application Inference Profiles](./cost-calculator.md#cost-attribution-with-bedrock-application-inference-profiles).
 - Add cost anomaly detection to identify unexpected usage patterns.
 - Consider implementing tiered storage strategies for processed documents based on access patterns.
 - Evaluate model selection based on cost-performance tradeoffs for different document types.
