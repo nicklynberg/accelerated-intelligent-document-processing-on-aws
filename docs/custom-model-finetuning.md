@@ -10,6 +10,8 @@ The Custom Model Fine-Tuning feature allows you to create specialized document c
 - You need higher accuracy for specific document classes
 - You want to optimize classification for your domain-specific terminology
 
+https://github.com/user-attachments/assets/e82c7be0-ee73-4ad7-8537-87ecf6a1a4c8
+
 ## How It Works
 
 ```mermaid
