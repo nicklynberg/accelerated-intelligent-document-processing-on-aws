@@ -127,6 +127,7 @@ Resources:
           - id: W11
             reason: "Some IAM List/Get operations and service-linked roles require wildcard resources"
     Properties:
+      MaxSessionDuration: 14400  # 4 hours - allows tests to run beyond default 60-minute token expiration
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -215,6 +216,12 @@ Resources:
                 Action:
                   - lambda:*
                 Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:idp-*'
+              # Lambda ListFunctions - required for Test Studio to discover TestRunnerFunction
+              # Note: AWS does not support resource-level permissions for ListFunctions
+              - Effect: Allow
+                Action:
+                  - lambda:ListFunctions
+                Resource: '*'
               # DynamoDB
               - Effect: Allow
                 Action:
@@ -226,9 +233,28 @@ Resources:
               - Effect: Allow
                 Action:
                   - states:*
-                Resource: 
+                Resource:
                   - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:idp-*'
                   - !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:idp-*:*'
+              # AppSync - required for cleanup
+              - Effect: Allow
+                Action:
+                  - appsync:ListGraphqlApis
+                  - appsync:GetGraphqlApi
+                  - appsync:DeleteGraphqlApi
+                Resource: '*'
+              # CloudFront - required for cleanup
+              - Effect: Allow
+                Action:
+                  - cloudfront:ListDistributions
+                  - cloudfront:GetDistribution
+                  - cloudfront:DeleteDistribution
+                  - cloudfront:GetDistributionConfig
+                  - cloudfront:UpdateDistribution
+                  - cloudfront:ListResponseHeadersPolicies
+                  - cloudfront:GetResponseHeadersPolicy
+                  - cloudfront:DeleteResponseHeadersPolicy
+                Resource: '*'
         - PolicyName: STSAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -245,6 +271,17 @@ Resources:
                 Action:
                   - logs:*
                 Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*'
+        - PolicyName: CloudWatchMetricsAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: GENAIDP
 
   ArtifactBucket:
     Type: 'AWS::S3::Bucket'
@@ -320,6 +357,7 @@ Resources:
     Properties:
       Name: app-sdlc
       ServiceRole: !If [CreateCodeBuildRole, !GetAtt CodeBuildRole.Arn, !Ref CodeBuildRoleArn]
+      TimeoutInMinutes: 120
       Artifacts:
         Type: CODEPIPELINE
       Environment:
@@ -343,7 +381,7 @@ Resources:
                 - pip install uv || { echo "uv installation failed"; exit 1; }
                 - export IDP_ADMIN_EMAIL=$(aws s3api head-object --bucket ${SOURCE_BUCKET} --key deploy/code.zip --query 'Metadata."gitlab-user-email"' --output text 2>/dev/null || echo "")
                 - make setup || { echo "IDP Common and IDP CLI installation failed"; exit 1; }
-                - pip install rich || echo "Rich installation failed, using fallback formatting"
+                - pip install rich scikit-learn || echo "Additional package installation failed, using fallbacks"
                 - export PATH="$PWD/.venv/bin:$PATH"
                 - which idp-cli || { echo "idp-cli not found in PATH"; exit 1; }
             build:
@@ -455,8 +493,10 @@ Resources:
           - Effect: Allow
             Action:
               - 'bedrock:InvokeModel'
-            Resource: 
-              - !Sub 'arn:aws:bedrock:*::foundation-model/anthropic.claude-3-5-sonnet-20240620-v1:0'
+              - 'bedrock:InvokeModelWithResponseStream'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/*'
+              - !Sub 'arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*'
           - Effect: Allow
             Action:
               - 'bedrock:ListBlueprints'
@@ -476,6 +516,11 @@ Resources:
             Resource:
               - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint/*'
               - !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:data-automation-project/*'
+          - Effect: Allow
+            Action:
+              - 'bedrock:ListIngestionJobs'
+              - 'bedrock:StopIngestionJob'
+            Resource: '*'
 
   CodeBuildKMSPolicy:
     Type: 'AWS::IAM::Policy'

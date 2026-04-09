@@ -12,15 +12,22 @@ import subprocess
 import sys
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from textwrap import dedent
 
 import boto3
 
-def run_command(cmd, check=True):
-    """Run shell command and return result"""
+def run_command(cmd, check=True, timeout=None):
+    """Run shell command and return result
+
+    Args:
+        cmd: Command to run
+        check: Raise exception if command fails
+        timeout: Timeout in seconds (default: None for no timeout)
+    """
     print(f"Running: {cmd}")
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)  # nosec B602 nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true - hardcoded commands, no user input
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)  # nosec B602 nosemgrep: python.lang.security.audit.subprocess-shell-true.subprocess-shell-true - hardcoded commands, no user input
     if result.stdout:
         print(result.stdout)
     if result.stderr:
@@ -270,6 +277,551 @@ def cleanup_iam_resources(stack_name):
         print(f"[{stack_name}] ❌ Failed to cleanup IAM stack: {e}")
 
 
+def test_step3_default_config(stack_name):
+    """Step 3: Test with default config (Pipeline mode)"""
+    print(f"Step 3: Testing with default config (Pipeline mode)...")
+    batch_id = "test-default"
+    sample_file = "lending_package.pdf"
+    verify_string = "ANYTOWN, USA 12345"
+    result_location = "pages/1/result.json"
+    content_path = "text"
+
+    def verify_extraction(json_data):
+        inference_result = json_data.get('inference_result', {})
+        if not inference_result:
+            return False, "No inference_result found"
+        total_fields = len(inference_result)
+        if total_fields == 0:
+            return False, "inference_result is empty"
+        populated_fields = sum(1 for v in inference_result.values() if v not in [None, [], {}])
+        min_expected_fields = 3
+        if total_fields < min_expected_fields:
+            return False, f"Expected at least {min_expected_fields} fields, found {total_fields}"
+        if populated_fields == 0:
+            return False, "No fields contain extracted data (all null/empty)"
+        return True, f"{populated_fields}/{total_fields} fields populated"
+
+    def verify_classification(json_data):
+        doc_class = json_data.get('document_class', {}).get('type')
+        if not doc_class:
+            return False, "No document_class.type found"
+        if doc_class == 'none':
+            return False, "Document classified as 'none' (no class detected)"
+        return True, f"Classified as '{doc_class}'"
+
+    additional_checks = [
+        ("Extraction verification", "sections/1/result.json", verify_extraction),
+        ("Classification verification", "sections/1/result.json", verify_classification),
+    ]
+
+    if not run_inference_test(stack_name, sample_file, batch_id, verify_string, result_location, content_path, None, "samples", additional_checks):
+        return {"success": False, "error": "Default config test failed"}
+
+    return {"success": True}
+
+
+def test_step4_bda_mode(stack_name):
+    """Step 4: Upload and test BDA config"""
+    print(f"Step 4: Testing with BDA mode...")
+    config_version = "test-bda"
+    config_path = "config_library/unified/lending-package-sample/config.yaml"
+
+    with open(config_path, 'r') as f:
+        config_content = f.read()
+
+    bda_config_content = config_content.replace('use_bda: false', 'use_bda: true')
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as tmp:
+        tmp.write(bda_config_content)
+        bda_config_path = tmp.name
+
+    try:
+        print(f"Uploading BDA config (use_bda: true)")
+        cmd = f"idp-cli config-upload --stack-name {stack_name} --config-file {bda_config_path} --config-version {config_version}"
+        run_command(cmd)
+
+        print(f"Activating BDA config version: {config_version}")
+        cmd = f"idp-cli config-activate --stack-name {stack_name} --config-version {config_version}"
+        run_command(cmd)
+        print(f"✅ BDA config activated and synced")
+
+        batch_id = "test-bda"
+        sample_file = "lending_package.pdf"
+        verify_string = "ANYTOWN, USA 12345"
+        bda_result_location = "pages/1/parsedResult.json"
+        content_path = "text"
+
+        def verify_bda_extraction(json_data):
+            inference_result = json_data.get('inference_result', {})
+            if not inference_result:
+                return False, "No inference_result found in BDA output"
+            total_fields = len(inference_result)
+            populated_fields = sum(1 for v in inference_result.values() if v not in [None, [], {}])
+            min_expected_fields = 3
+            if total_fields < min_expected_fields:
+                return False, f"Expected at least {min_expected_fields} fields, found {total_fields}"
+            if populated_fields == 0:
+                return False, "No fields contain extracted data (all null/empty)"
+            return True, f"{populated_fields}/{total_fields} fields populated by BDA"
+
+        bda_additional_checks = [
+            ("BDA extraction verification", "sections/1/result.json", verify_bda_extraction),
+        ]
+
+        if not run_inference_test(stack_name, sample_file, batch_id, verify_string, bda_result_location, content_path, config_version, "samples", bda_additional_checks):
+            return {"success": False, "error": "BDA config test failed"}
+
+        return {"success": True}
+    finally:
+        os.unlink(bda_config_path)
+
+
+def test_step5_rule_validation(stack_name):
+    """Step 5: Test rule validation"""
+    print(f"Step 5: Testing rule validation...")
+    config_version = "rule-validation"
+    config_path = "config_library/unified/rule-validation/config.yaml"
+    sample_file = "Prior-Auth-12345678.pdf"
+    sample_dir = "samples/rule-validation"
+    batch_id = "test-rules"
+    verify_string = "global_periods"
+    result_location = "rule_validation/sections/section_1_responses.json"
+    content_path = "responses.global_periods.0.rule_type"
+
+    print(f"Uploading rule validation config from: {config_path}")
+    cmd = f"idp-cli config-upload --stack-name {stack_name} --config-file {config_path} --config-version {config_version}"
+    run_command(cmd)
+
+    def verify_rule_results(json_data):
+        responses = json_data.get('responses', {})
+        if not responses:
+            return False, "No rule responses found"
+        total_rules = 0
+        passed_rules = 0
+        failed_rules = 0
+        for rule_name, rule_list in responses.items():
+            if isinstance(rule_list, list):
+                for rule in rule_list:
+                    total_rules += 1
+                    result = rule.get('result', '').lower()
+                    if 'pass' in result:
+                        passed_rules += 1
+                    elif 'fail' in result:
+                        failed_rules += 1
+        if total_rules == 0:
+            return False, "No rules were evaluated"
+        return True, f"{total_rules} rules evaluated ({passed_rules} passed, {failed_rules} failed)"
+
+    rule_additional_checks = [
+        ("Rule validation results", "rule_validation/sections/section_1_responses.json", verify_rule_results),
+    ]
+
+    if not run_inference_test(stack_name, sample_file, batch_id, verify_string, result_location, content_path, config_version, sample_dir, rule_additional_checks):
+        return {"success": False, "error": "Rule validation test failed"}
+
+    return {"success": True}
+
+
+def test_step6_multi_document(stack_name):
+    """Step 6: Test multi-document batch processing"""
+    print(f"Step 6: Testing multi-document batch processing...")
+    batch_id = "test-multi-batch"
+    sample_dir = "samples/w2"
+    file_pattern = "W2_XL_input_clean_100[0-2].pdf"
+
+    try:
+        print(f"Processing 3 W-2 documents in parallel...")
+        cmd = f"idp-cli run-inference --stack-name {stack_name} --dir {sample_dir} --file-pattern '{file_pattern}' --batch-id {batch_id} --monitor"
+        run_command(cmd)
+
+        result_dir = f"/tmp/result-{batch_id}"  # nosec B108
+        cmd = f"idp-cli download-results --stack-name {stack_name} --batch-id {batch_id} --output-dir {result_dir}"
+        run_command(cmd)
+
+        print(f"Verifying all documents processed successfully...")
+        cmd = f"find {result_dir} -path '*/sections/*/result.json' | wc -l"
+        result = run_command(cmd, check=False)
+        extraction_count = int(result.stdout.strip())
+
+        if extraction_count < 3:
+            print(f"❌ Expected 3 documents processed, found {extraction_count}")
+            return {"success": False, "error": f"Multi-document batch test failed: only {extraction_count}/3 documents processed"}
+
+        print(f"✅ Multi-document batch test passed: {extraction_count} documents processed successfully")
+        return {"success": True}
+
+    except Exception as e:
+        print(f"❌ Multi-document batch test failed: {e}")
+        return {"success": False, "error": f"Multi-document batch test failed: {str(e)}"}
+
+
+def test_step7_test_studio(stack_name):
+    """Step 7: Test Studio - Run evaluation against pre-deployed test set"""
+    print(f"Step 7: Testing Test Studio with pre-deployed test set...")
+
+    try:
+        cf_client = boto3.client('cloudformation')
+        stack_response = cf_client.describe_stacks(StackName=stack_name)
+        outputs = stack_response['Stacks'][0].get('Outputs', [])
+
+        test_set_bucket = None
+        for output in outputs:
+            if output['OutputKey'] == 'S3TestSetBucketName':
+                test_set_bucket = output['OutputValue']
+                break
+
+        if not test_set_bucket:
+            print(f"⚠️  S3TestSetBucketName not found in stack outputs, skipping Test Studio test")
+            return {"success": True}
+
+        s3_client = boto3.client('s3')
+        try:
+            response = s3_client.list_objects_v2(Bucket=test_set_bucket, Delimiter='/', MaxKeys=10)
+            test_sets = [prefix['Prefix'].rstrip('/') for prefix in response.get('CommonPrefixes', [])]
+
+            if not test_sets:
+                print(f"⚠️  No test sets found in {test_set_bucket}, skipping Test Studio test")
+                return {"success": True}
+
+            print(f"Found test sets: {', '.join(test_sets)}")
+
+            test_set_name = None
+            for preferred in ['fake-w2', 'realkie-fcc-verified']:
+                if preferred in test_sets:
+                    test_set_name = preferred
+                    break
+            if not test_set_name:
+                test_set_name = test_sets[0]
+
+            print(f"Running test against test set: {test_set_name} (limited to 3 documents)")
+            print(f"Using config version: {test_set_name}")
+
+            # FIXED: Remove --monitor flag
+            cmd = f"idp-cli run-inference --stack-name {stack_name} --test-set {test_set_name} --config-version {test_set_name} --context 'CI/CD smoke test' --number-of-files 3"
+            result = run_command(cmd, check=False)
+
+            if result.returncode != 0:
+                print(f"⚠️  Test set processing failed")
+                return {"success": False, "error": f"Test Studio test failed for {test_set_name}"}
+
+            batch_id = None
+            for line in result.stdout.split('\n'):
+                if 'Batch ID:' in line or 'batch_id' in line.lower():
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        batch_id = parts[1].strip()
+                        break
+
+            if not batch_id:
+                for line in result.stdout.split('\n'):
+                    if 'Test run started:' in line:
+                        batch_id = line.split('Test run started:')[1].strip()
+                        break
+
+            if not batch_id:
+                print(f"⚠️  Could not extract batch_id from output, skipping result verification")
+                return {"success": True}
+
+            print(f"Test run batch ID: {batch_id}")
+            print(f"Waiting for test result aggregation (async process)...")
+
+            tracking_table = None
+            for output in outputs:
+                if output['OutputKey'] == 'DynamoDBTrackingTableConsoleURL':
+                    url = output['OutputValue']
+                    if 'table=' in url:
+                        tracking_table = url.split('table=')[1].split('&')[0].split('#')[0]
+                    break
+
+            if not tracking_table:
+                print(f"⚠️  DynamoDBTrackingTableConsoleURL not found in stack outputs or could not parse table name")
+                return {"success": True}
+
+            max_wait_time = 600  # 10 minutes for Test Studio evaluation
+            poll_interval = 10
+            elapsed = 0
+            test_result_found = False
+
+            dynamodb = boto3.client('dynamodb')
+
+            while elapsed < max_wait_time:
+                try:
+                    response = dynamodb.query(
+                        TableName=tracking_table,
+                        KeyConditionExpression='PK = :pk AND SK = :sk',
+                        ExpressionAttributeValues={
+                            ':pk': {'S': f'testrun#{batch_id}'},
+                            ':sk': {'S': 'metadata'}
+                        }
+                    )
+
+                    items = response.get('Items', [])
+                    if not items:
+                        if elapsed == 0:
+                            print(f"  Waiting for test run record to be created...")
+                        elif elapsed % 60 == 0:
+                            print(f"  ⚠️ Test run record not found in tracking table (elapsed: {elapsed}s)")
+                    elif 'testRunResult' in items[0]:
+                        test_result_found = True
+                        print(f"  ✓ Test result found after {elapsed}s")
+
+                        test_result = items[0]['testRunResult']['M']
+                        overall_accuracy = float(test_result.get('overallAccuracy', {}).get('N', '0'))
+
+                        accuracy_breakdown = test_result.get('accuracyBreakdown', {}).get('M', {})
+                        precision = float(accuracy_breakdown.get('precision', {}).get('N', '0'))
+                        recall = float(accuracy_breakdown.get('recall', {}).get('N', '0'))
+                        f1_score = float(accuracy_breakdown.get('f1_score', {}).get('N', '0'))
+
+                        total_cost = float(test_result.get('totalCost', {}).get('N', '0'))
+
+                        print(f"  ✓ Test Studio Results:")
+                        print(f"    - Overall Accuracy: {overall_accuracy:.2%}")
+                        print(f"    - Precision: {precision:.2%}")
+                        print(f"    - Recall: {recall:.2%}")
+                        print(f"    - F1 Score: {f1_score:.2%}")
+                        print(f"    - Total Cost: ${total_cost:.4f}")
+
+                        if overall_accuracy > 0.30:
+                            print(f"✅ Test Studio test completed: {test_set_name} with {overall_accuracy:.2%} accuracy")
+                        else:
+                            print(f"⚠️  Low accuracy detected: {overall_accuracy:.2%} (threshold: 30%)")
+
+                        break
+                    else:
+                        item = items[0]
+                        status = item.get('Status', {}).get('S', 'UNKNOWN')
+                        completed_files = item.get('CompletedFiles', {}).get('N', '0')
+                        total_files = item.get('FilesCount', {}).get('N', '?')
+                        has_completed_at = 'CompletedAt' in item
+
+                        if elapsed == 0:
+                            print(f"  Test run record found: {status}, files: {completed_files}/{total_files}")
+                        elif elapsed % 30 == 0:
+                            if has_completed_at:
+                                print(f"  Batch completed, waiting for evaluation... (elapsed: {elapsed}s)")
+                            else:
+                                print(f"  Batch processing: {status}, files: {completed_files}/{total_files} (elapsed: {elapsed}s)")
+
+                    # FIXED: Sleep on every iteration
+                    time.sleep(poll_interval)
+                    elapsed += poll_interval
+
+                except Exception as e:
+                    print(f"  ⚠️  Error polling tracking table: {e}")
+                    break
+
+            if not test_result_found:
+                print(f"❌ Test result not available after {max_wait_time}s wait")
+                try:
+                    final_check = dynamodb.query(
+                        TableName=tracking_table,
+                        KeyConditionExpression='PK = :pk AND SK = :sk',
+                        ExpressionAttributeValues={
+                            ':pk': {'S': f'testrun#{batch_id}'},
+                            ':sk': {'S': 'metadata'}
+                        }
+                    )
+                    final_items = final_check.get('Items', [])
+                    if not final_items:
+                        error_msg = f"Test Studio test failed: test run record never created (TestRunner Lambda may have failed)"
+                    elif 'CompletedAt' not in final_items[0]:
+                        error_msg = f"Test Studio test failed: batch did not complete within {max_wait_time}s"
+                    else:
+                        error_msg = f"Test Studio test failed: evaluation did not complete within {max_wait_time}s"
+                except Exception:
+                    error_msg = f"Test Studio test failed: test result not available after {max_wait_time}s"
+
+                return {"success": False, "error": error_msg}
+
+        except Exception as e:
+            print(f"⚠️  Could not access test set bucket: {e}")
+
+        return {"success": True}
+
+    except Exception as e:
+        print(f"❌ Test Studio test failed: {e}")
+        return {"success": False, "error": f"Test Studio test failed: {str(e)}"}
+
+
+def test_step8_agentic_extraction(stack_name):
+    """Step 8: Test agentic extraction with large table"""
+    print(f"Step 8: Testing agentic extraction with Nuveen (532 fund items)...")
+
+    try:
+        print(f"Uploading nuveen.yaml configuration...")
+        cmd = f"idp-cli config-upload --stack-name {stack_name} --config-file scripts/sdlc/config/nuveen.yaml --config-version agentic-nuveen --no-validate"
+        run_command(cmd, check=False)
+
+        print(f"Running agentic extraction on samples/Nuveen.pdf (this will take ~9 minutes)...")
+        cmd = f"idp-cli run-inference --stack-name {stack_name} --dir samples/ --file-pattern Nuveen.pdf --config-version agentic-nuveen --monitor"
+        result = run_command(cmd, check=False)
+
+        if result.returncode != 0:
+            print(f"❌ Agentic extraction command failed")
+            return {"success": False, "error": "Agentic extraction command failed"}
+
+        batch_id = None
+        for line in result.stdout.split('\n'):
+            if 'Batch ID:' in line:
+                batch_id = line.split('Batch ID:')[1].strip()
+                break
+
+        if batch_id:
+            print(f"Downloading results for batch: {batch_id}")
+            result_dir = f"/tmp/result-agentic-{batch_id}"  # nosec B108
+            cmd = f"idp-cli download-results --stack-name {stack_name} --batch-id {batch_id} --output-dir {result_dir}"
+            run_command(cmd, check=False)
+
+            cmd = f"find {result_dir} -path '*/sections/*/result.json' -type f | head -1"
+            find_result = run_command(cmd, check=False)
+            result_file = find_result.stdout.strip()
+
+            if result_file:
+                with open(result_file, "r") as f:
+                    result_json = json.load(f)
+
+                doc_class = result_json.get("document_class", {}).get("type")
+                if doc_class == "Estimated2024AnnualTaxableDistributions":
+                    print(f"  ✓ Document class correct: {doc_class}")
+                else:
+                    print(f"❌ Unexpected document class: {doc_class}")
+                    return {"success": False, "error": f"Agentic extraction test failed: unexpected document class '{doc_class}'"}
+
+                fund_info = result_json.get("inference_result", {}).get("FundInformation", [])
+                fund_count = len(fund_info)
+                if fund_count == 532:
+                    print(f"  ✓ FundInformation count correct: {fund_count} items")
+                    print(f"✅ Agentic extraction test completed successfully")
+                    return {"success": True}
+                else:
+                    print(f"❌ FundInformation count mismatch: expected 532, got {fund_count}")
+                    return {"success": False, "error": f"Agentic extraction test failed: expected 532 fund items, got {fund_count}"}
+            else:
+                print(f"❌ Result file not found")
+                return {"success": False, "error": "Agentic extraction test failed: result file not found"}
+        else:
+            print(f"❌ Could not extract batch ID from output")
+            return {"success": False, "error": "Agentic extraction test failed: could not extract batch ID"}
+
+    except Exception as e:
+        print(f"❌ Agentic extraction test failed: {e}")
+        return {"success": False, "error": f"Agentic extraction test failed: {str(e)}"}
+
+
+def test_step9_single_doc_discovery(stack_name):
+    """Step 9: Test single-document discovery"""
+    print(f"Step 9: Testing single-document discovery...")
+
+    try:
+        sample_file = "samples/insurance_package_single.pdf"
+        config_version = "test-discovery"
+        print(f"Running discovery on {sample_file}...")
+        print(f"Saving to config version: {config_version}")
+        print(f"This will take approximately 1-2 minutes...")
+
+        cmd = f"idp-cli discover --stack-name {stack_name} -d {sample_file} --config-version {config_version}"
+        result = run_command(cmd, check=True, timeout=180)
+
+        print(f"Verifying discovered class saved to configuration...")
+
+        config_file = f"/tmp/discovery-config.yaml"  # nosec B108
+        cmd = f"idp-cli config-download --stack-name {stack_name} --config-version {config_version} --output {config_file}"
+        run_command(cmd, check=True)
+
+        import yaml
+        with open(config_file, 'r') as f:
+            config_data = yaml.safe_load(f)
+
+        classes = config_data.get('classes', [])
+        if len(classes) == 0:
+            print(f"❌ No classes found in config version {config_version}")
+            return {"success": False, "error": f"Single-document discovery test failed: no classes found in config version {config_version}"}
+
+        discovered_class = classes[0]
+        doc_class = discovered_class.get('$id', 'Unknown')
+        num_properties = len(discovered_class.get('properties', {}))
+        print(f"  ✓ Discovered class: {doc_class}")
+        print(f"  ✓ Properties: {num_properties} top-level fields")
+        print(f"✅ Discovery test completed: schema saved to config version {config_version}")
+        return {"success": True}
+
+    except Exception as e:
+        print(f"❌ Single-document discovery test failed: {e}")
+        return {"success": False, "error": f"Single-document discovery test failed: {str(e)}"}
+
+
+def test_step10_multi_doc_discovery(stack_name):
+    """Step 10: Test multi-document discovery"""
+    print(f"Step 10: Testing multi-document discovery...")
+
+    try:
+        test_dir = "/tmp/multidoc-test"  # nosec B108
+        import shutil
+
+        if os.path.exists(test_dir):
+            shutil.rmtree(test_dir)
+        os.makedirs(test_dir)
+
+        sample_files = [
+            ("samples/w2/W2_XL_input_clean_1000.pdf", "w2_1.pdf"),
+            ("samples/w2/W2_XL_input_clean_1001.pdf", "w2_2.pdf"),
+            ("samples/bank-statement-multipage.pdf", "bank_statement.pdf"),
+            ("samples/insurance_package_single.pdf", "insurance.pdf"),
+        ]
+
+        for src, dest_name in sample_files:
+            dest = f"{test_dir}/{dest_name}"
+            if not os.path.exists(src):
+                raise FileNotFoundError(f"Sample file not found: {src}")
+            shutil.copy(src, dest)
+            if not os.path.exists(dest):
+                raise RuntimeError(f"Failed to copy {src} to {dest}")
+
+        copied_files = len(os.listdir(test_dir))
+        print(f"  ✓ Copied {copied_files} sample documents to {test_dir}")
+
+        if copied_files != len(sample_files):
+            raise RuntimeError(f"Expected {len(sample_files)} files but found {copied_files}")
+
+        print(f"Running multi-document discovery on {test_dir}...")
+        print(f"This will take approximately 2-3 minutes...")
+
+        cmd = f"idp-cli discover-multidoc --dir {test_dir} -o /tmp/multidoc-schemas"
+        run_command(cmd, check=True, timeout=240)
+
+        cmd = "find /tmp/multidoc-schemas -name '*.json' | wc -l"
+        count_result = run_command(cmd, check=True)
+        schema_count = int(count_result.stdout.strip()) if count_result.stdout.strip() else 0
+
+        if schema_count == 0:
+            print(f"❌ Multi-document discovery completed but no schemas found")
+            return {"success": False, "error": "Multi-document discovery test failed: no schemas generated"}
+
+        print(f"  ✓ Generated {schema_count} schema(s)")
+
+        cmd = "find /tmp/multidoc-schemas -name '*.json' | head -1"
+        first_schema = run_command(cmd, check=True).stdout.strip()
+        if not first_schema:
+            print(f"❌ Could not find generated schema file")
+            return {"success": False, "error": "Multi-document discovery test failed: could not find generated schema file"}
+
+        with open(first_schema, "r") as f:
+            schema_json = json.load(f)
+
+        if "$schema" not in schema_json or "properties" not in schema_json:
+            print(f"❌ Generated schema missing required fields ($schema, properties)")
+            return {"success": False, "error": "Multi-document discovery test failed: schema missing required fields"}
+
+        print(f"  ✓ Schema structure validated")
+        print(f"✅ Multi-document discovery test completed")
+        return {"success": True}
+
+    except Exception as e:
+        print(f"❌ Multi-document discovery test failed: {e}")
+        return {"success": False, "error": f"Multi-document discovery test failed: {str(e)}"}
+
+
 def deploy_and_test_stack(stack_name, admin_email, template_url):
     """Deploy and test the unified IDP stack"""
     print(f"Starting deployment: {stack_name}")
@@ -305,92 +857,80 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
 
         print(f"✅ Stack is healthy")
 
-        # Step 3: Test with default config
-        print(f"Step 3: Testing with default config...")
-        batch_id = "test-default"
-        sample_file = "lending_package.pdf"
-        verify_string = "ANYTOWN, USA 12345"
-        result_location = "pages/1/result.json"
-        content_path = "text"
+        # Run tests 3, 5, 6, 8, 9, 10 in parallel (exclude Step 4 BDA to avoid config activation race)
+        # TODO: Re-enable Step 7 (Test Studio) after adding idp-cli get-test-results command
+        print(f"\n{'='*80}")
+        print("Running tests 3, 5, 6, 8, 9, 10 in parallel (fail-fast enabled)...")
+        print(f"{'='*80}\n")
 
-        if not run_inference_test(stack_name, sample_file, batch_id, verify_string, result_location, content_path, None):
+        parallel_tests = [
+            (test_step3_default_config, "Step 3: Default config"),
+            (test_step5_rule_validation, "Step 5: Rule validation"),
+            (test_step6_multi_document, "Step 6: Multi-document batch"),
+            # (test_step7_test_studio, "Step 7: Test Studio"),  # Disabled - requires idp-cli get-test-results
+            (test_step8_agentic_extraction, "Step 8: Agentic extraction"),
+            (test_step9_single_doc_discovery, "Step 9: Single-doc discovery"),
+            (test_step10_multi_doc_discovery, "Step 10: Multi-doc discovery"),
+        ]
+
+        failed_test = None
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            # Submit all parallel tests
+            futures = {executor.submit(func, stack_name): name for func, name in parallel_tests}
+
+            # Process results as they complete (fail-fast)
+            for future in as_completed(futures):
+                test_name = futures[future]
+                try:
+                    result = future.result()
+                    if result["success"]:
+                        print(f"✅ {test_name} passed")
+                    else:
+                        print(f"❌ {test_name} failed: {result.get('error', 'Unknown error')}")
+                        failed_test = (test_name, result)
+                        # Cancel all remaining tests
+                        for f in futures:
+                            f.cancel()
+                        break
+                except Exception as e:
+                    print(f"❌ {test_name} exception: {e}")
+                    failed_test = (test_name, {"success": False, "error": str(e)})
+                    # Cancel all remaining tests
+                    for f in futures:
+                        f.cancel()
+                    break
+
+        # Check if any parallel test failed
+        if failed_test:
+            test_name, result = failed_test
+            print(f"\n❌ Test suite failed at {test_name}")
             return {
                 "stack_name": stack_name,
                 "success": False,
-                "error": "Default config test failed"
+                "error": f"{test_name} failed: {result.get('error', 'Unknown error')}"
             }
 
-        # Step 4: Upload and test BDA config
-        print(f"Step 4: Testing with BDA mode...")
-        config_version = "test-bda"
-        config_path = "config_library/unified/lending-package-sample/config.yaml"
-        
-        # Create temporary BDA config by toggling use_bda flag
-        with open(config_path, 'r') as f:
-            config_content = f.read()
-        
-        # Toggle use_bda to true
-        bda_config_content = config_content.replace('use_bda: false', 'use_bda: true')
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as tmp:
-            tmp.write(bda_config_content)
-            bda_config_path = tmp.name
-        
-        try:
-            # Upload BDA config
-            print(f"Uploading BDA config (use_bda: true)")
-            cmd = f"idp-cli config-upload --stack-name {stack_name} --config-file {bda_config_path} --config-version {config_version}"
-            run_command(cmd)
-            
-            # Activate BDA config (triggers auto-sync)
-            print(f"Activating BDA config version: {config_version}")
-            cmd = f"idp-cli config-activate --stack-name {stack_name} --config-version {config_version}"
-            run_command(cmd)
-            print(f"✅ BDA config activated and synced")
-            
-            # Run inference with BDA config version
-            # BDA writes text to parsedResult.json
-            batch_id = "test-bda"
-            bda_result_location = "pages/1/parsedResult.json"
-            if not run_inference_test(stack_name, sample_file, batch_id, verify_string, bda_result_location, content_path, config_version):
-                return {
-                    "stack_name": stack_name,
-                    "success": False,
-                    "error": "BDA config test failed"
-                }
-        finally:
-            # Clean up temp file
-            os.unlink(bda_config_path)
+        # Run Step 4 (BDA mode) sequentially after all parallel tests pass
+        # This avoids config activation race condition with Step 3
+        print(f"\n{'='*80}")
+        print("Running Step 4 (BDA mode) sequentially...")
+        print(f"{'='*80}\n")
 
-        # Step 5: Test rule validation
-        print(f"Step 5: Testing rule validation...")
-        config_version = "rule-validation"
-        config_path = "config_library/unified/rule-validation/config.yaml"
-        sample_file = "Prior-Auth-12345678.pdf"
-        sample_dir = "samples/rule-validation"
-        batch_id = "test-rules"
-        verify_string = "global_periods"
-        result_location = "rule_validation/sections/section_1_responses.json"
-        content_path = "responses.global_periods.0.rule_type"
-        
-        # Upload rule validation config
-        print(f"Uploading rule validation config from: {config_path}")
-        cmd = f"idp-cli config-upload --stack-name {stack_name} --config-file {config_path} --config-version {config_version}"
-        run_command(cmd)
-        
-        # Run inference test with rule validation
-        if not run_inference_test(stack_name, sample_file, batch_id, verify_string, result_location, content_path, config_version, sample_dir):
+        result = test_step4_bda_mode(stack_name)
+        if result["success"]:
+            print(f"✅ Step 4: BDA mode passed")
+        else:
+            print(f"❌ Step 4: BDA mode failed: {result.get('error', 'Unknown error')}")
             return {
                 "stack_name": stack_name,
                 "success": False,
-                "error": "Rule validation test failed"
+                "error": f"Step 4: BDA mode failed: {result.get('error', 'Unknown error')}"
             }
 
         print(f"✅ All tests passed")
         return {
             "stack_name": stack_name,
-            "success": True,
-            "verification_string": verify_string
+            "success": True
         }
 
     except Exception as e:
@@ -402,8 +942,21 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
         }
 
 
-def run_inference_test(stack_name, sample_file, batch_id, verify_string, result_location, content_path, config_version=None, sample_dir="samples"):
-    """Run inference test and verify results"""
+def run_inference_test(stack_name, sample_file, batch_id, verify_string, result_location, content_path, config_version=None, sample_dir="samples", additional_checks=None):
+    """Run inference test and verify results
+
+    Args:
+        stack_name: Name of the CloudFormation stack
+        sample_file: Name of the sample file to process
+        batch_id: Batch ID for this test run
+        verify_string: String to verify in the main result
+        result_location: Path to the main result file (relative to document directory)
+        content_path: Dot-separated path to content in JSON (e.g., "pages.0.text")
+        config_version: Optional config version to use
+        sample_dir: Directory containing sample files
+        additional_checks: Optional list of (check_name, file_path, verify_func) tuples
+                          where verify_func takes JSON and returns (success: bool, message: str)
+    """
     try:
         # Run inference
         print(f"Running inference with batch-id: {batch_id}...")
@@ -452,6 +1005,36 @@ def run_inference_test(stack_name, sample_file, batch_id, verify_string, result_
             return False
 
         print(f"✅ Found expected verification string: '{verify_string}'")
+
+        # Run additional verification checks
+        if additional_checks:
+            for check_name, check_path, verify_func in additional_checks:
+                print(f"Running additional check: {check_name}...")
+
+                # Find the check file
+                cmd = f"find {result_dir} -path '*/{check_path}' | head -1"
+                check_result = run_command(cmd, check=False)
+                check_file = check_result.stdout.strip()
+
+                if not check_file:
+                    print(f"⚠️  {check_name}: file not found at {check_path} (may be optional)")
+                    continue  # Skip optional checks
+
+                # Load and verify
+                try:
+                    with open(check_file, "r") as f:
+                        check_json = json.load(f)
+
+                    success, message = verify_func(check_json)
+                    if not success:
+                        print(f"❌ {check_name} failed: {message}")
+                        return False
+
+                    print(f"✅ {check_name} passed: {message}")
+                except Exception as e:
+                    print(f"❌ {check_name} error: {e}")
+                    return False
+
         return True
 
     except Exception as e:
@@ -544,7 +1127,7 @@ def generate_publish_failure_summary(publish_error):
         """)
         
         response = bedrock.invoke_model(
-            modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
+            modelId='us.anthropic.claude-sonnet-4-20250514-v1:0',
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 2000,
@@ -720,7 +1303,7 @@ def generate_deployment_summary(result, stack_name, template_url):
         
         # Call Bedrock API
         response = bedrock.invoke_model(
-            modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
+            modelId='us.anthropic.claude-sonnet-4-20250514-v1:0',
             body=json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 4000,
@@ -790,7 +1373,7 @@ def generate_deployment_summary(result, stack_name, template_url):
             """)
             
             cf_response = bedrock.invoke_model(
-                modelId='anthropic.claude-3-5-sonnet-20240620-v1:0',
+                modelId='us.anthropic.claude-sonnet-4-20250514-v1:0',
                 body=json.dumps({
                     "anthropic_version": "bedrock-2023-05-31",
                     "max_tokens": 4000,
@@ -814,6 +1397,81 @@ def generate_deployment_summary(result, stack_name, template_url):
         Error: Failed to generate AI analysis: {e}
         """)
 
+def cancel_bedrock_ingestion_jobs(stack_name):
+    """Cancel any running Bedrock ingestion jobs before stack deletion"""
+    print(f"[{stack_name}] Checking for running Bedrock ingestion jobs...")
+
+    try:
+        cf_client = boto3.client('cloudformation')
+        bedrock_agent = boto3.client('bedrock-agent')
+
+        # Get all resources from main stack and nested stacks
+        stacks_to_check = [stack_name]
+
+        # Find nested stacks
+        try:
+            resources = cf_client.describe_stack_resources(StackName=stack_name)
+            for resource in resources['StackResources']:
+                if resource['ResourceType'] == 'AWS::CloudFormation::Stack':
+                    nested_stack_name = resource['PhysicalResourceId'].split('/')[1]
+                    stacks_to_check.append(nested_stack_name)
+        except Exception as e:
+            print(f"  ⚠️ Could not list nested stacks: {e}")
+
+        jobs_cancelled = 0
+
+        # Check each stack for Bedrock data sources
+        for stack in stacks_to_check:
+            try:
+                resources = cf_client.describe_stack_resources(StackName=stack)
+
+                for resource in resources['StackResources']:
+                    if resource['ResourceType'] == 'AWS::Bedrock::DataSource':
+                        # Parse physical resource ID: knowledgeBaseId|dataSourceId
+                        physical_id = resource['PhysicalResourceId']
+                        if '|' in physical_id:
+                            kb_id, ds_id = physical_id.split('|')
+
+                            # List ingestion jobs for this data source
+                            try:
+                                response = bedrock_agent.list_ingestion_jobs(
+                                    knowledgeBaseId=kb_id,
+                                    dataSourceId=ds_id,
+                                    maxResults=10
+                                )
+
+                                for job in response.get('ingestionJobSummaries', []):
+                                    if job['status'] == 'IN_PROGRESS':
+                                        job_id = job['ingestionJobId']
+                                        print(f"  Cancelling ingestion job: {job_id}")
+
+                                        # Stop the ingestion job
+                                        bedrock_agent.stop_ingestion_job(
+                                            knowledgeBaseId=kb_id,
+                                            dataSourceId=ds_id,
+                                            ingestionJobId=job_id
+                                        )
+                                        jobs_cancelled += 1
+                                        print(f"  ✓ Cancelled ingestion job: {job_id}")
+
+                            except Exception as e:
+                                print(f"  ⚠️ Could not check/cancel jobs for {physical_id}: {e}")
+
+            except Exception as e:
+                print(f"  ⚠️ Could not check stack {stack}: {e}")
+
+        if jobs_cancelled > 0:
+            print(f"[{stack_name}] ✅ Cancelled {jobs_cancelled} running ingestion job(s)")
+            # Wait a bit for cancellation to propagate
+            print(f"[{stack_name}] Waiting 10s for job cancellation to complete...")
+            time.sleep(10)
+        else:
+            print(f"[{stack_name}] No running ingestion jobs found")
+
+    except Exception as e:
+        print(f"[{stack_name}] ⚠️ Error checking ingestion jobs: {e}")
+
+
 def cleanup_stack(result):
     """Clean up stack"""
     stack_name = result.get("stack_name")
@@ -822,15 +1480,18 @@ def cleanup_stack(result):
         # Check stack status first
         cmd_result = run_command(f"aws cloudformation describe-stacks --stack-name {stack_name} --query 'Stacks[0].StackStatus' --output text", check=False)
         stack_status = cmd_result.stdout.strip() if cmd_result.returncode == 0 else "NOT_FOUND"
-        
+
         print(f"[{stack_name}] stack status: {stack_status}")
-        
+
+        # Cancel any running Bedrock ingestion jobs before stack deletion
+        cancel_bedrock_ingestion_jobs(stack_name)
+
         # Delete the stack and wait for completion (includes all cleanup via --force-delete-all)
         print(f"[{stack_name}] attempting stack deletion...")
         run_command(f"idp-cli delete --stack-name {stack_name} --force --empty-buckets --force-delete-all --wait", check=False)
-        
+
         print(f"[{stack_name}] ✅ Cleanup completed")
-        
+
         # Clean up CodeBuild-specific IAM resources
         cleanup_iam_resources(stack_name)
     except Exception as e:

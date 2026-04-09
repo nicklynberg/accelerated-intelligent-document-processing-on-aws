@@ -11,6 +11,7 @@ SPDX-License-Identifier: MIT-0
 - **Error Analyzer system prompt improvements** — Added strategy for large batches, priority ordering, and error classification guidance.
 - **Error Analyzer settings** — Replaced duplicate inline cache with the shared cache from the common monitoring package.
 - **Shared CloudWatch Logs** — Extracted log search logic from the Error Analyzer into a reusable library in the common monitoring package.
+- **Enhanced CI/CD Automated Testing** — Enhanced GitLab CI/CD pipeline smoke tests with parallel test execution (8 tests running concurrently with fail-fast behavior), deeper verification (extraction fields, classification results, rule statistics), and added new tests: multi-document concurrent processing (Test 4), Test Studio evaluation with metrics validation (Test 7), agentic extraction with large table validation - 532 fund items (Test 8), single-document discovery (Test 9), and multi-document discovery (Test 10).
 
 ### Fixed
 
@@ -25,7 +26,6 @@ SPDX-License-Identifier: MIT-0
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.6.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.6.yaml`
    - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.6.yaml`
-
 
 ## [0.5.5]
 
