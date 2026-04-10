@@ -823,14 +823,21 @@ def test_step11_test_compare(stack_name):
 
             # Verify comparison output contains expected content
             output = result.stdout
-            expected_fields = ['Test Run ID', 'Accuracy', 'Precision', 'Recall', 'F1 Score']
+            expected_fields = ['Overall Accuracy', 'Precision', 'Recall', 'F1 Score', 'Total Cost']
             missing_fields = [field for field in expected_fields if field not in output]
 
             if missing_fields:
                 print(f"⚠️  Comparison output missing fields: {', '.join(missing_fields)}")
                 return {"success": False, "error": f"test-compare output missing fields: {', '.join(missing_fields)}"}
 
+            # Verify test run IDs appear in output (as column headers)
+            test_run_ids_in_output = all(tid in output for tid in test_run_ids)
+            if not test_run_ids_in_output:
+                print(f"⚠️  Test run IDs not found in comparison output")
+                return {"success": False, "error": "Test run IDs not found in comparison output"}
+
             print(f"  ✓ Comparison output contains all expected fields")
+            print(f"  ✓ Test run IDs present in output")
             print(f"✅ test-compare test completed successfully")
             return {"success": True}
 
