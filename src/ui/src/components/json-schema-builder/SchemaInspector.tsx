@@ -230,7 +230,6 @@ const SchemaInspector = ({
                     { label: 'us.amazon.nova-2-lite-v1:0', value: 'us.amazon.nova-2-lite-v1:0' },
                     { label: 'us.anthropic.claude-haiku-4-5-20251001-v1:0', value: 'us.anthropic.claude-haiku-4-5-20251001-v1:0' },
                     { label: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0', value: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0' },
-                    { label: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m', value: 'us.anthropic.claude-sonnet-4-5-20250929-v1:0:1m' },
                     { label: 'us.anthropic.claude-sonnet-4-6', value: 'us.anthropic.claude-sonnet-4-6' },
                     { label: 'us.anthropic.claude-sonnet-4-6:1m', value: 'us.anthropic.claude-sonnet-4-6:1m' },
                     { label: 'us.anthropic.claude-opus-4-5-20251101-v1:0', value: 'us.anthropic.claude-opus-4-5-20251101-v1:0' },
@@ -241,7 +240,6 @@ const SchemaInspector = ({
                     { label: 'eu.amazon.nova-2-lite-v1:0', value: 'eu.amazon.nova-2-lite-v1:0' },
                     { label: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0', value: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0' },
                     { label: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0', value: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0' },
-                    { label: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0:1m', value: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0:1m' },
                     { label: 'eu.anthropic.claude-sonnet-4-6', value: 'eu.anthropic.claude-sonnet-4-6' },
                     { label: 'eu.anthropic.claude-sonnet-4-6:1m', value: 'eu.anthropic.claude-sonnet-4-6:1m' },
                     { label: 'eu.anthropic.claude-opus-4-5-20251101-v1:0', value: 'eu.anthropic.claude-opus-4-5-20251101-v1:0' },
@@ -252,10 +250,6 @@ const SchemaInspector = ({
                     {
                       label: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
                       value: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0',
-                    },
-                    {
-                      label: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0:1m',
-                      value: 'global.anthropic.claude-sonnet-4-5-20250929-v1:0:1m',
                     },
                     { label: 'global.anthropic.claude-sonnet-4-6', value: 'global.anthropic.claude-sonnet-4-6' },
                     { label: 'global.anthropic.claude-sonnet-4-6:1m', value: 'global.anthropic.claude-sonnet-4-6:1m' },

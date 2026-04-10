@@ -5,11 +5,13 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+## [0.5.6]
+
 ### Added
 
 - **Test Studio CLI Commands** — `idp-cli test-result` to retrieve test results with automatic evaluation triggering and `--wait`/`--output-dir` options, and `idp-cli test-compare` to compare multiple test runs with JSON/CSV export. See `docs/idp-cli.md`.
 
-- **Custom Model Fine-Tuning** — Fine-tune Amazon Nova 2 models (Lite and Pro) for document classification using your own labeled Test Sets. The end-to-end workflow — validate data, generate training data, train via Bedrock, and deploy an on-demand custom model endpoint — is driven from a new **Custom Models** page in the Web UI. Custom models can then be selected in any configuration version for classification. Available to Admin and Author roles. **Note:** currently requires deployment in `us-east-1`. See `docs/custom-model-finetuning.md`.
+- **Custom Model Fine-Tuning** — Fine-tune Amazon Nova 2 models (Lite and Pro) for document classification and extraction using your own labeled Test Sets. The end-to-end workflow — validate data, generate training data, train via Bedrock, and deploy an on-demand custom model endpoint — is driven from a new **Custom Models** page in the Web UI. Custom models can then be selected in any configuration version for classification and/or extraction. Available to Admin and Author roles. **Note:** currently requires deployment in `us-east-1`. See `docs/custom-model-finetuning.md`.
   
 - **External SAML/OIDC Identity Provider Federation** — Optional support for federating authentication through an external SAML or OIDC identity provider via Amazon Cognito. Enables organizations to use existing enterprise identity providers (PingOne, Okta, Microsoft Entra ID, etc.) for single sign-on. All federation functionality is opt-in through 12 new CloudFormation parameters — leaving them empty results in zero additional resources and identical behavior to existing Cognito-native authentication. See `docs/external-idp.md`.
 
@@ -17,6 +19,8 @@ SPDX-License-Identifier: MIT-0
 
 - **Enhanced Information Panels** — Added comprehensive help content to the Information (ⓘ) panel on every page in the Web UI. Each panel now includes a feature summary, list of key capabilities, and "Learn more" links to relevant docs-site documentation pages. Created new panels for 8 pages that previously had none (Pricing, Capacity Planning, Custom Models, Discovery, User Management, Test Studio), and enriched the existing 7 panels with fuller descriptions and documentation links.
 ### Changed
+
+- **Removed Claude Sonnet 4:1m and Sonnet 4.5:1m model variants** — The 1M context window beta for Claude Sonnet 4 (`claude-sonnet-4-20250514-v1:0:1m`) and Sonnet 4.5 (`claude-sonnet-4-5-20250929-v1:0:1m`) is being retired effective April 30, 2026. These `:1m` model variants have been removed from all enum lists, UI dropdowns, quota code mappings, pricing, and documentation. Users needing 1M context windows should migrate to Claude Sonnet 4.6 (`claude-sonnet-4-6:1m`), where the 1M context window is generally available (GA).
 
 - **Default extraction model updated** to `us.anthropic.claude-sonnet-4-6` (was `us.anthropic.claude-sonnet-4-20250514-v1:0`) in system defaults.
 - **Error Analyzer system prompt improvements** — Added strategy for large batches, priority ordering, and error classification guidance.
