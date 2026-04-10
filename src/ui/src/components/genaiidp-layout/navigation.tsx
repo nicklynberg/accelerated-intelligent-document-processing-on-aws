@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { SideNavigationProps } from '@cloudscape-design/components';
-import { SideNavigation } from '@cloudscape-design/components';
+import { Badge, Popover, SideNavigation } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 
@@ -152,7 +152,8 @@ export const reviewerNavItems = [{ type: 'link', text: 'Document List', href: `#
 export const documentsNavItems = adminNavItems;
 
 const defaultOnFollowHandler = (ev: CustomEvent<SideNavigationProps.FollowDetail>): void => {
-  if (ev.detail.href === '#deployment-info') {
+  // Prevent navigation for non-navigable items (deployment info, region-restricted features)
+  if (ev.detail.href === '#deployment-info' || ev.detail.href === '#custom-models-unavailable') {
     ev.preventDefault();
     return;
   }
@@ -207,33 +208,44 @@ const Navigation = ({
     const deployedRegion = import.meta.env.VITE_AWS_REGION as string | undefined;
     const isCustomModelsSupported = deployedRegion === 'us-east-1';
 
-    // Debug logging (remove after testing)
-    if (pattern) {
-      console.log('[Navigation] IDPPattern detected:', settings.IDPPattern, '| Capacity Planning supported:', isCapacityPlanningSupported);
-    }
-    console.log('[Navigation] Region:', deployedRegion, '| Custom Models supported:', isCustomModelsSupported);
-
     // Build list of items to hide from the Configuration section
     const hiddenConfigItems = new Set<string>();
     if (!isCapacityPlanningSupported) {
       hiddenConfigItems.add('Capacity Planning');
     }
-    if (!isCustomModelsSupported) {
-      hiddenConfigItems.add('Custom Models');
-    }
 
-    if (hiddenConfigItems.size === 0) {
-      return baseItems;
-    }
-
-    // Filter out hidden items from Configuration section and top-level
+    // Transform navigation items: hide unsupported items, grey out region-restricted items
     return baseItems
       .map((item) => {
         if (item.type === 'section' && item.text === 'Configuration') {
           const section = item as SideNavigationProps.Section;
           return {
             ...item,
-            items: section.items.filter((subItem) => !hiddenConfigItems.has((subItem as { text?: string }).text ?? '')),
+            items: section.items
+              .filter((subItem) => !hiddenConfigItems.has((subItem as { text?: string }).text ?? ''))
+              .map((subItem) => {
+                const link = subItem as SideNavigationProps.Link;
+                // Grey out Custom Models with region badge when not in us-east-1
+                if (link.text === 'Custom Models' && !isCustomModelsSupported) {
+                  return {
+                    ...link,
+                    href: '#custom-models-unavailable',
+                    info: React.createElement(
+                      Popover,
+                      {
+                        dismissButton: false,
+                        position: 'right',
+                        size: 'medium',
+                        triggerType: 'custom',
+                        content:
+                          'Custom Models requires Amazon Nova fine-tuning, which is currently available in us-east-1 only. Deploy your stack in us-east-1 to use this feature.',
+                      },
+                      React.createElement(Badge, { color: 'grey' }, 'us-east-1 only'),
+                    ),
+                  };
+                }
+                return subItem;
+              }),
           };
         }
         return item;
