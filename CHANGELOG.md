@@ -17,6 +17,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
+- **Removed Claude Sonnet 4:1m and Sonnet 4.5:1m model variants** — The 1M context window beta for Claude Sonnet 4 (`claude-sonnet-4-20250514-v1:0:1m`) and Sonnet 4.5 (`claude-sonnet-4-5-20250929-v1:0:1m`) is being retired effective April 30, 2026. These `:1m` model variants have been removed from all enum lists, UI dropdowns, quota code mappings, pricing, and documentation. Users needing 1M context windows should migrate to Claude Sonnet 4.6 (`claude-sonnet-4-6:1m`), where the 1M context window is generally available (GA).
+
 - **Default extraction model updated** to `us.anthropic.claude-sonnet-4-6` (was `us.anthropic.claude-sonnet-4-20250514-v1:0`) in system defaults.
 - **Error Analyzer system prompt improvements** — Added strategy for large batches, priority ordering, and error classification guidance.
 - **Error Analyzer settings** — Replaced duplicate inline cache with the shared cache from the common monitoring package.
