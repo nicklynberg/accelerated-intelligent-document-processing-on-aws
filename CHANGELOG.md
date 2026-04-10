@@ -22,6 +22,9 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **Fixed** Nova 2.0 fine-tuning failure (`Invalid input error: Nova 2.0 doesn't support validation set`) — Nova 2.x models do not support validation datasets in the Bedrock `CreateModelCustomizationJob` API. The `finetuning_job_creator` Lambda and `ModelFinetuningService` now detect Nova 2.x models and skip the `validationDataConfig` parameter. Validation data is still generated and stored in S3 for internal metrics, but is no longer passed to the Bedrock API for these models. Added `model_capabilities` section to `finetuning_models.yaml` for config-driven control.
+- **Fixed** agentic extraction crash (`TypeError: unsupported format string passed to NoneType.__format__`) when table parsing stats contain `None` values for `avg_confidence` or `parse_success_rate`.
+- **Fixed** agentic extraction `map_table_to_schema` producing phantom empty rows from non-matching tables (e.g. account_summary rows prepended to transaction_details), causing list item ordering to be shifted by several positions.
 - **Error Analyzer model selection** — The agent was using the Chat Companion's model instead of its own configured model.
 - **Error Analyzer log processing** — Fixed early termination that stopped searching after the first Lambda function with errors; now searches all relevant log groups.
 - **Error Analyzer log truncation** — Fixed handling of long log messages to trim them rather than skip them entirely.

@@ -55,6 +55,27 @@ model_mappings:
   "amazon.nova-pro-v1:0": "amazon.nova-pro-v1:0:300k"
 
 # ---------------------------------------------------------------------------
+# Model Capabilities
+# ---------------------------------------------------------------------------
+# Some models have restrictions on what features they support during
+# fine-tuning. This section documents those restrictions.
+#
+# supports_validation: Whether the model supports a validation dataset
+#   during fine-tuning. Nova 2.x models do NOT support validation sets.
+#   When false, the validation data will still be generated for internal
+#   metrics but will NOT be passed to the Bedrock CreateModelCustomizationJob API.
+model_capabilities:
+  "amazon.nova-2-lite-v1:0":
+    supports_validation: false
+  "amazon.nova-2-pro-v1:0":
+    supports_validation: false
+  # Nova 1.x models support validation sets
+  "amazon.nova-lite-v1:0":
+    supports_validation: true
+  "amazon.nova-pro-v1:0":
+    supports_validation: true
+
+# ---------------------------------------------------------------------------
 # Default Hyperparameters
 # ---------------------------------------------------------------------------
 # Default hyperparameters for fine-tuning jobs. These can be overridden

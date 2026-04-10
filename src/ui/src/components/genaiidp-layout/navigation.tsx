@@ -187,7 +187,9 @@ const Navigation = ({
     return viewerNavItems;
   }, [items, isAdmin, isAuthor, isViewerOnly, isReviewerOnly]);
 
-  // Filter out Capacity Planning link if pattern is not Pattern-2
+  // Filter out navigation items based on deployment context:
+  // - Capacity Planning: hidden if pattern is not Pattern-2 or Unified
+  // - Custom Models: hidden if deployed region is not us-east-1
   const filteredItems = useMemo(() => {
     const pattern = (settings?.IDPPattern as string | undefined)?.toLowerCase();
 
@@ -201,29 +203,42 @@ const Navigation = ({
       pattern.includes('unified') ||
       /pattern[\s\-_]?2/.test(pattern); // Regex: "pattern" followed by optional separator, then "2"
 
+    // Custom Models is only available in us-east-1 (Nova fine-tuning region requirement)
+    const deployedRegion = import.meta.env.VITE_AWS_REGION as string | undefined;
+    const isCustomModelsSupported = deployedRegion === 'us-east-1';
+
     // Debug logging (remove after testing)
     if (pattern) {
       console.log('[Navigation] IDPPattern detected:', settings.IDPPattern, '| Capacity Planning supported:', isCapacityPlanningSupported);
     }
+    console.log('[Navigation] Region:', deployedRegion, '| Custom Models supported:', isCustomModelsSupported);
 
-    if (isCapacityPlanningSupported) {
-      // Show Capacity Planning for Pattern-2, Unified, or if pattern is unknown
+    // Build list of items to hide from the Configuration section
+    const hiddenConfigItems = new Set<string>();
+    if (!isCapacityPlanningSupported) {
+      hiddenConfigItems.add('Capacity Planning');
+    }
+    if (!isCustomModelsSupported) {
+      hiddenConfigItems.add('Custom Models');
+    }
+
+    if (hiddenConfigItems.size === 0) {
       return baseItems;
     }
 
-    // Filter out Capacity Planning for Pattern 1 and Pattern 3
+    // Filter out hidden items from Configuration section and top-level
     return baseItems
       .map((item) => {
         if (item.type === 'section' && item.text === 'Configuration') {
           const section = item as SideNavigationProps.Section;
           return {
             ...item,
-            items: section.items.filter((subItem) => (subItem as { text?: string }).text !== 'Capacity Planning'),
+            items: section.items.filter((subItem) => !hiddenConfigItems.has((subItem as { text?: string }).text ?? '')),
           };
         }
         return item;
       })
-      .filter((item) => (item as { text?: string }).text !== 'Capacity Planning'); // Also filter top-level if it exists
+      .filter((item) => !hiddenConfigItems.has((item as { text?: string }).text ?? ''));
   }, [baseItems, settings?.IDPPattern]);
 
   // Determine active link based on current path
