@@ -1324,48 +1324,77 @@ def generate_deployment_summary(result, stack_name, template_url):
         - Stack Name: {stack_name}
         - Template URL: {template_url}
 
-        Deployment Result (ANALYZE THIS FIRST):
+        Deployment Result (THIS IS THE SOURCE OF TRUTH):
         {json.dumps(result, indent=2)}
 
-        CodeBuild Logs:
+        CodeBuild Logs (for context only):
         {deployment_logs}
 
-        STEP 1: Check Deployment Result for failure classification:
-        - If success: true → SUCCESS CASE
-        - If error contains "No result file found" or "verification failed" or "no rule_validation directory" → SMOKE TEST FAILURE
-        - If error contains "deployment failed" or "CREATE_FAILED" or "timeout" → INFRASTRUCTURE FAILURE
+        CRITICAL: Check the "success" field in Deployment Result FIRST:
+        - If "success": false → This is a FAILURE, analyze the "error" field
+        - If "success": true → This is a SUCCESS
+        - NEVER say "All Tests Passed" if "success": false
 
-        STEP 2: Respond based on classification:
+        STEP 1: Determine case based on Deployment Result (check in this order):
 
-        FOR SUCCESS CASE:
+        Case B (INFRASTRUCTURE - check FIRST): "success": false AND "error" contains ("Stack deployment failed" OR "CREATE_FAILED" OR "ROLLBACK")
+            → Respond with: "NEED_CF_LOGS: {stack_name}"
+
+        Case A (SMOKE TEST - check SECOND): "success": false AND "error" contains "Step"
+            → Generate smoke test failure summary
+
+        Case C (SUCCESS): "success": true
+            → Generate success summary
+
+        STEP 2: Respond based on case:
+
+        FOR SUCCESS CASE (Case C only):
         🚀 DEPLOYMENT RESULTS
 
         📋 Stack Status: {stack_name} deployed successfully
-        
-        ✅ All Tests Passed:
-        • Test 1: Default config with text extraction
-        • Test 2: BDA mode config (use_bda: true) upload and inference
-        • Test 3: Rule validation config and processing
 
-        FOR INFRASTRUCTURE FAILURE:
+        ✅ All Tests Passed (9 tests):
+        • Test 1 (Step 3): Default config with pipeline mode processing ✓
+        • Test 2 (Step 5): Rule validation config and processing ✓
+        • Test 3 (Step 6): Multi-document batch processing ✓
+        • Test 4 (Step 7): Test Studio evaluation with test-result command ✓
+        • Test 5 (Step 8): Agentic extraction with large tables ✓
+        • Test 6 (Step 9): Single-document discovery ✓
+        • Test 7 (Step 10): Multi-document discovery ✓
+        • Test 8 (Step 4): BDA mode config and inference ✓
+        • Test 9 (Step 11): Test comparison with test-compare command ✓
+
+        📊 Performance Summary:
+        • Total deployment time: ~25-30 minutes
+        • All inference tests completed successfully
+        • Test Studio achieved high accuracy scores
+        • Discovery pipeline generated valid schemas
+
+        FOR INFRASTRUCTURE FAILURE (Case B):
         Respond ONLY with: "NEED_CF_LOGS: {stack_name}"
 
-        FOR SMOKE TEST FAILURE:
+        FOR SMOKE TEST FAILURE (Case A):
         🚀 DEPLOYMENT RESULTS
 
-        📋 Test Status: FAILED - [extract which test failed from error message]
+        📋 Test Status: FAILED - [extract which step/test failed from "error" field]
 
         🔍 Root Cause Analysis:
-        • Extract specific error from result
-        • Identify which test failed (default config, BDA mode, or rule validation)
-        • Focus on post-deployment verification issues
+        • Extract the exact error message from the "error" field
+        • Identify which test step failed (Step 3-11)
+        • Explain what the test validates
 
-        💡 Fix Commands:
-        • Provide specific commands to resolve verification issues
+        💡 Fix Guidance:
+        • Suggest specific fixes based on the error message
+        • Reference relevant CLI commands if applicable
 
         Keep each bullet point under 75 characters.
-        
-        IMPORTANT: Only use NEED_CF_LOGS for actual infrastructure/deployment failures, NOT for smoke test failures.
+
+        CRITICAL REMINDERS:
+        1. The "success" field in Deployment Result is the SOURCE OF TRUTH
+        2. If "success": false, you MUST generate a FAILURE summary
+        3. For Case B (Infrastructure Failure): Respond with EXACTLY "NEED_CF_LOGS: {stack_name}" and NOTHING else
+        4. CodeBuild logs are for context only, not for determining success/failure
+        5. All 9 tests must be listed in success case (Steps 3-11, excluding deployment)
         """)
         
         # Call Bedrock API
