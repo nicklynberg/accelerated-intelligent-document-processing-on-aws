@@ -5440,10 +5440,10 @@ def test_result(
         current_status = status_result.get("status", "UNKNOWN")
         console.print(f"[green]✓ Test run status: {current_status}[/green]")
 
-        # If waiting and status is EVALUATING, poll until complete
-        if wait and current_status == "EVALUATING":
+        # If waiting and status is not final, poll until complete
+        if wait and current_status not in ["COMPLETE", "PARTIAL_COMPLETE", "FAILED"]:
             console.print(
-                f"[yellow]⏳ Evaluation in progress, waiting up to {timeout}s...[/yellow]"
+                f"[yellow]⏳ Waiting for test run to complete (up to {timeout}s)...[/yellow]"
             )
             elapsed = 0
             poll_interval = 10
@@ -5462,19 +5462,19 @@ def test_result(
                 status_result = json.loads(response["Payload"].read())
                 current_status = status_result.get("status", "UNKNOWN")
 
-                if current_status in ["COMPLETE", "PARTIAL_COMPLETE"]:
+                if current_status in ["COMPLETE", "PARTIAL_COMPLETE", "FAILED"]:
                     console.print(
-                        f"[green]✓ Evaluation complete after {elapsed}s[/green]"
+                        f"[green]✓ Test run complete after {elapsed}s[/green]"
                     )
                     break
                 elif elapsed % 30 == 0:
                     console.print(
-                        f"[dim]Still evaluating... ({elapsed}s elapsed)[/dim]"
+                        f"[dim]Still processing... ({elapsed}s elapsed, status: {current_status})[/dim]"
                     )
 
-            if current_status == "EVALUATING":
+            if current_status not in ["COMPLETE", "PARTIAL_COMPLETE", "FAILED"]:
                 console.print(
-                    f"[yellow]⚠ Evaluation still in progress after {timeout}s timeout[/yellow]"
+                    f"[yellow]⚠ Test run still in progress after {timeout}s timeout (status: {current_status})[/yellow]"
                 )
                 sys.exit(1)
 
