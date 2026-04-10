@@ -372,7 +372,7 @@ class TestModelFinetuningService:
 
     @pytest.mark.unit
     def test_create_nova_job_params(self, service):
-        """Test Nova job parameters creation."""
+        """Test Nova v1 job parameters creation includes validation data."""
         config = FinetuningJobConfig(
             base_model="us.amazon.nova-lite-v1:0",
             training_data_uri="s3://bucket/training.jsonl",
@@ -400,6 +400,72 @@ class TestModelFinetuningService:
             params["validationDataConfig"]["validators"][0]["s3Uri"]
             == "s3://bucket/validation.jsonl"
         )
+
+    @pytest.mark.unit
+    def test_create_nova_2_job_params_skips_validation(self, service):
+        """Test Nova 2.x job parameters skip validation data.
+
+        Nova 2.0 does not support validation sets. Passing one causes:
+        'Invalid input error: Nova 2.0 doesn't support validation set'
+        """
+        config = FinetuningJobConfig(
+            base_model="us.amazon.nova-2-lite-v1:0",
+            training_data_uri="s3://bucket/training.jsonl",
+            role_arn="arn:aws:iam::123456789012:role/BedrockRole",
+            job_name="test-job",
+            model_name="test-model",
+            hyperparameters={"epochCount": "2"},
+        )
+
+        data_uris = {
+            "training_data_uri": "s3://bucket/training.jsonl",
+            "validation_data_uri": "s3://bucket/validation.jsonl",
+        }
+
+        params = service._create_nova_job_params(config, data_uris)
+
+        assert params["customizationType"] == "FINE_TUNING"
+        assert params["baseModelIdentifier"] == "us.amazon.nova-2-lite-v1:0"
+        assert params["trainingDataConfig"]["s3Uri"] == "s3://bucket/training.jsonl"
+        # Validation data should NOT be included for Nova 2.x models
+        assert "validationDataConfig" not in params
+
+    @pytest.mark.unit
+    def test_create_nova_2_pro_job_params_skips_validation(self, service):
+        """Test Nova 2 Pro job parameters also skip validation data."""
+        config = FinetuningJobConfig(
+            base_model="amazon.nova-2-pro-v1:0",
+            training_data_uri="s3://bucket/training.jsonl",
+            role_arn="arn:aws:iam::123456789012:role/BedrockRole",
+            job_name="test-job",
+            model_name="test-model",
+        )
+
+        data_uris = {
+            "training_data_uri": "s3://bucket/training.jsonl",
+            "validation_data_uri": "s3://bucket/validation.jsonl",
+        }
+
+        params = service._create_nova_job_params(config, data_uris)
+
+        # Validation data should NOT be included for Nova 2.x models
+        assert "validationDataConfig" not in params
+
+    @pytest.mark.unit
+    def test_is_nova_2_model(self, service):
+        """Test _is_nova_2_model correctly identifies Nova 2.x models."""
+        # Nova 2.x models (should return True)
+        assert service._is_nova_2_model("amazon.nova-2-lite-v1:0") is True
+        assert service._is_nova_2_model("amazon.nova-2-pro-v1:0") is True
+        assert service._is_nova_2_model("us.amazon.nova-2-lite-v1:0") is True
+        assert service._is_nova_2_model("us.amazon.nova-2-pro-v1:0") is True
+        assert service._is_nova_2_model("amazon.nova-2-lite-v1:0:256k") is True
+
+        # Nova 1.x models (should return False)
+        assert service._is_nova_2_model("amazon.nova-lite-v1:0") is False
+        assert service._is_nova_2_model("amazon.nova-pro-v1:0") is False
+        assert service._is_nova_2_model("us.amazon.nova-lite-v1:0") is False
+        assert service._is_nova_2_model("us.amazon.nova-pro-v1:0") is False
 
     @pytest.mark.unit
     def test_create_finetuning_job(self, service, mock_bedrock_client):

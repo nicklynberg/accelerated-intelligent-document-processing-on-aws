@@ -48,7 +48,7 @@ def _load_finetuning_config() -> Dict[str, Any]:
     The configuration is cached after first load to avoid repeated S3 calls.
     
     Returns:
-        Dictionary containing model_mappings and default_hyperparameters
+        Dictionary containing model_mappings, default_hyperparameters, and model_capabilities
     """
     global _config_cache
     
@@ -69,6 +69,12 @@ def _load_finetuning_config() -> Dict[str, Any]:
             "learningRate": "0.00001",
             "batchSize": "1",
         },
+        "model_capabilities": {
+            "amazon.nova-2-lite-v1:0": {"supports_validation": False},
+            "amazon.nova-2-pro-v1:0": {"supports_validation": False},
+            "amazon.nova-lite-v1:0": {"supports_validation": True},
+            "amazon.nova-pro-v1:0": {"supports_validation": True},
+        },
     }
     
     # Try to load from S3
@@ -88,6 +94,9 @@ def _load_finetuning_config() -> Dict[str, Any]:
                 "model_mappings": config.get("model_mappings", default_config["model_mappings"]),
                 "default_hyperparameters": config.get(
                     "default_hyperparameters", default_config["default_hyperparameters"]
+                ),
+                "model_capabilities": config.get(
+                    "model_capabilities", default_config["model_capabilities"]
                 ),
             }
             logger.info(f"Loaded fine-tuning config with {len(_config_cache['model_mappings'])} model mappings")
@@ -114,6 +123,51 @@ def _get_default_hyperparameters() -> Dict[str, str]:
     """Get the default hyperparameters from configuration."""
     config = _load_finetuning_config()
     return config.get("default_hyperparameters", {})
+
+
+def _model_supports_validation(model_id: str) -> bool:
+    """
+    Check if a model supports validation datasets during fine-tuning.
+    
+    Nova 2.x models do NOT support validation sets. Passing a validation
+    dataset to the Bedrock API for these models results in:
+    "Invalid input error: Nova 2.0 doesn't support validation set"
+    
+    Args:
+        model_id: The model identifier (can be cross-region profile, standard ID, or mapped ID)
+        
+    Returns:
+        True if the model supports validation datasets, False otherwise.
+        Defaults to True for unknown models (backward compatible).
+    """
+    config = _load_finetuning_config()
+    model_capabilities = config.get("model_capabilities", {})
+    
+    # Strip cross-region prefix for lookup (e.g., "us.amazon.nova-2-lite-v1:0" -> "amazon.nova-2-lite-v1:0")
+    normalized = model_id
+    if "." in normalized and not normalized.startswith("arn:"):
+        parts = normalized.split(".", 1)
+        if len(parts[0]) <= 3 and parts[0].isalpha():
+            normalized = parts[1]
+    
+    # Strip context window suffix for lookup (e.g., "amazon.nova-2-lite-v1:0:256k" -> "amazon.nova-2-lite-v1:0")
+    # Model capabilities are keyed by base model ID without context window suffix
+    base_id = normalized
+    # Count colons - base IDs have format "amazon.nova-2-lite-v1:0", mapped IDs have "amazon.nova-2-lite-v1:0:256k"
+    colon_parts = base_id.split(":")
+    if len(colon_parts) > 2:
+        # Has context window suffix, strip it (keep only first two parts: "amazon.nova-2-lite-v1:0")
+        base_id = ":".join(colon_parts[:2])
+    
+    # Look up capabilities
+    capabilities = model_capabilities.get(base_id, {})
+    supports_validation = capabilities.get("supports_validation", True)
+    
+    logger.info(
+        f"Model '{model_id}' (base_id='{base_id}') supports_validation={supports_validation}"
+    )
+    
+    return supports_validation
 
 
 def _normalize_model_identifier(model_id: str) -> str:
@@ -212,13 +266,20 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "hyperParameters": _get_default_hyperparameters(),
         }
 
-        # Add validation data if provided
-        if validation_data_uri:
+        # Add validation data if provided AND the model supports it.
+        # Nova 2.x models do NOT support validation sets — passing one causes:
+        # "Invalid input error: Nova 2.0 doesn't support validation set"
+        if validation_data_uri and _model_supports_validation(base_model):
             job_params["validationDataConfig"] = {
                 "validators": [
                     {"s3Uri": validation_data_uri}
                 ]
             }
+        elif validation_data_uri:
+            logger.info(
+                f"Skipping validation data for model '{base_model}' — "
+                "model does not support validation sets"
+            )
 
         # Add output data config
         output_uri = f"s3://{FINETUNING_BUCKET}/finetuning/{job_id}/output/"

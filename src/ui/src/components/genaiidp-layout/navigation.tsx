@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import type { SideNavigationProps } from '@cloudscape-design/components';
-import { SideNavigation } from '@cloudscape-design/components';
+import { Badge, Popover, SideNavigation } from '@cloudscape-design/components';
 import useSettingsContext from '../../contexts/settings';
 import useUserRole from '../../hooks/use-user-role';
 
@@ -152,7 +152,17 @@ export const reviewerNavItems = [{ type: 'link', text: 'Document List', href: `#
 export const documentsNavItems = adminNavItems;
 
 const defaultOnFollowHandler = (ev: CustomEvent<SideNavigationProps.FollowDetail>): void => {
-  if (ev.detail.href === '#deployment-info') {
+  // Prevent navigation for non-navigable items (deployment info, region-restricted features)
+  const nonNavigableHrefs = [
+    '#deployment-info',
+    '#custom-models-unavailable',
+    '#stackname',
+    '#version',
+    '#builddatetime',
+    '#idppattern',
+    '#region',
+  ];
+  if (nonNavigableHrefs.includes(ev.detail.href)) {
     ev.preventDefault();
     return;
   }
@@ -187,7 +197,9 @@ const Navigation = ({
     return viewerNavItems;
   }, [items, isAdmin, isAuthor, isViewerOnly, isReviewerOnly]);
 
-  // Filter out Capacity Planning link if pattern is not Pattern-2
+  // Filter out navigation items based on deployment context:
+  // - Capacity Planning: hidden if pattern is not Pattern-2 or Unified
+  // - Custom Models: hidden if deployed region is not us-east-1
   const filteredItems = useMemo(() => {
     const pattern = (settings?.IDPPattern as string | undefined)?.toLowerCase();
 
@@ -201,29 +213,53 @@ const Navigation = ({
       pattern.includes('unified') ||
       /pattern[\s\-_]?2/.test(pattern); // Regex: "pattern" followed by optional separator, then "2"
 
-    // Debug logging (remove after testing)
-    if (pattern) {
-      console.log('[Navigation] IDPPattern detected:', settings.IDPPattern, '| Capacity Planning supported:', isCapacityPlanningSupported);
+    // Custom Models is only available in us-east-1 (Nova fine-tuning region requirement)
+    const deployedRegion = import.meta.env.VITE_AWS_REGION as string | undefined;
+    const isCustomModelsSupported = deployedRegion === 'us-east-1';
+
+    // Build list of items to hide from the Configuration section
+    const hiddenConfigItems = new Set<string>();
+    if (!isCapacityPlanningSupported) {
+      hiddenConfigItems.add('Capacity Planning');
     }
 
-    if (isCapacityPlanningSupported) {
-      // Show Capacity Planning for Pattern-2, Unified, or if pattern is unknown
-      return baseItems;
-    }
-
-    // Filter out Capacity Planning for Pattern 1 and Pattern 3
+    // Transform navigation items: hide unsupported items, grey out region-restricted items
     return baseItems
       .map((item) => {
         if (item.type === 'section' && item.text === 'Configuration') {
           const section = item as SideNavigationProps.Section;
           return {
             ...item,
-            items: section.items.filter((subItem) => (subItem as { text?: string }).text !== 'Capacity Planning'),
+            items: section.items
+              .filter((subItem) => !hiddenConfigItems.has((subItem as { text?: string }).text ?? ''))
+              .map((subItem) => {
+                const link = subItem as SideNavigationProps.Link;
+                // Grey out Custom Models with region badge when not in us-east-1
+                if (link.text === 'Custom Models' && !isCustomModelsSupported) {
+                  return {
+                    ...link,
+                    href: '#custom-models-unavailable',
+                    info: React.createElement(
+                      Popover,
+                      {
+                        dismissButton: false,
+                        position: 'right',
+                        size: 'medium',
+                        triggerType: 'custom',
+                        content:
+                          'Custom Models requires Amazon Nova fine-tuning, which is currently available in us-east-1 only. Deploy your stack in us-east-1 to use this feature.',
+                      },
+                      React.createElement(Badge, { color: 'grey' }, 'us-east-1 only'),
+                    ),
+                  };
+                }
+                return subItem;
+              }),
           };
         }
         return item;
       })
-      .filter((item) => (item as { text?: string }).text !== 'Capacity Planning'); // Also filter top-level if it exists
+      .filter((item) => !hiddenConfigItems.has((item as { text?: string }).text ?? ''));
   }, [baseItems, settings?.IDPPattern]);
 
   // Determine active link based on current path
@@ -256,7 +292,9 @@ const Navigation = ({
   // Create navigation items with deployment info
   const navigationItems: SideNavigationProps.Item[] = [...filteredItems] as SideNavigationProps.Item[];
 
-  if (settings?.Version || settings?.StackName || settings?.BuildDateTime || settings?.IDPPattern) {
+  const deployedRegion = import.meta.env.VITE_AWS_REGION as string | undefined;
+
+  if (settings?.Version || settings?.StackName || settings?.BuildDateTime || settings?.IDPPattern || deployedRegion) {
     const deploymentInfoItems: SideNavigationProps.Item[] = [];
 
     if (settings?.StackName) {
@@ -271,6 +309,9 @@ const Navigation = ({
     if (settings?.IDPPattern) {
       const pattern = (settings.IDPPattern as string).split(' ')[0];
       deploymentInfoItems.push({ type: 'link', text: `Pattern: ${pattern}`, href: '#idppattern' });
+    }
+    if (deployedRegion) {
+      deploymentInfoItems.push({ type: 'link', text: `Region: ${deployedRegion}`, href: '#region' });
     }
 
     navigationItems.push({

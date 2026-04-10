@@ -34,6 +34,11 @@ DEFAULT_SUPPORTED_MODELS = [
     {"id": "us.amazon.nova-2-pro-v1:0", "name": "Nova 2 Pro", "provider": "Amazon"},
 ]
 
+# Nova 2.x models do NOT support validation datasets during fine-tuning.
+# Passing a validation set to the Bedrock API for these models results in:
+# "Invalid input error: Nova 2.0 doesn't support validation set"
+_NOVA_2_MODEL_PREFIXES = ("amazon.nova-2-",)
+
 # Module-level cache for supported models
 _supported_models_cache: Optional[List[Dict[str, str]]] = None
 
@@ -355,6 +360,29 @@ class ModelFinetuningService:
 
         return result
 
+    @staticmethod
+    def _is_nova_2_model(model_id: str) -> bool:
+        """
+        Check if a model identifier refers to a Nova 2.x model.
+
+        Nova 2.x models have specific restrictions, such as not supporting
+        validation datasets during fine-tuning.
+
+        Args:
+            model_id: Model identifier (may include cross-region prefix or context window suffix)
+
+        Returns:
+            True if the model is a Nova 2.x model
+        """
+        # Strip cross-region prefix (e.g., "us.amazon.nova-2-lite-v1:0" -> "amazon.nova-2-lite-v1:0")
+        normalized = model_id
+        if "." in normalized and not normalized.startswith("arn:"):
+            parts = normalized.split(".", 1)
+            if len(parts[0]) <= 3 and parts[0].isalpha():
+                normalized = parts[1]
+
+        return any(normalized.startswith(prefix) for prefix in _NOVA_2_MODEL_PREFIXES)
+
     def _create_nova_job_params(
         self, config: FinetuningJobConfig, data_uris: Dict[str, str]
     ) -> Dict[str, Any]:
@@ -389,10 +417,19 @@ class ModelFinetuningService:
         if config.output_uri:
             job_params["outputDataConfig"] = {"s3Uri": config.output_uri}
 
+        # Add validation data only if the model supports it.
+        # Nova 2.x models do NOT support validation sets — passing one causes:
+        # "Invalid input error: Nova 2.0 doesn't support validation set"
         if "validation_data_uri" in data_uris:
-            job_params["validationDataConfig"] = {
-                "validators": [{"s3Uri": data_uris["validation_data_uri"]}]
-            }
+            if self._is_nova_2_model(config.base_model):
+                logger.info(
+                    f"Skipping validation data for Nova 2.x model '{config.base_model}' "
+                    "— model does not support validation sets"
+                )
+            else:
+                job_params["validationDataConfig"] = {
+                    "validators": [{"s3Uri": data_uris["validation_data_uri"]}]
+                }
 
         if config.client_request_token:
             job_params["clientRequestToken"] = config.client_request_token

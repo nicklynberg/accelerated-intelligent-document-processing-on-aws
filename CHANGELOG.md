@@ -9,10 +9,13 @@ SPDX-License-Identifier: MIT-0
 
 - **Test Studio CLI Commands** — `idp-cli test-result` to retrieve test results with automatic evaluation triggering and `--wait`/`--output-dir` options, and `idp-cli test-compare` to compare multiple test runs with JSON/CSV export. See `docs/idp-cli.md`.
 
+- **Custom Model Fine-Tuning** — Fine-tune Amazon Nova 2 models (Lite and Pro) for document classification using your own labeled Test Sets. The end-to-end workflow — validate data, generate training data, train via Bedrock, and deploy an on-demand custom model endpoint — is driven from a new **Custom Models** page in the Web UI. Custom models can then be selected in any configuration version for classification. Available to Admin and Author roles. **Note:** currently requires deployment in `us-east-1`. See `docs/custom-model-finetuning.md`.
+  
 - **External SAML/OIDC Identity Provider Federation** — Optional support for federating authentication through an external SAML or OIDC identity provider via Amazon Cognito. Enables organizations to use existing enterprise identity providers (PingOne, Okta, Microsoft Entra ID, etc.) for single sign-on. All federation functionality is opt-in through 12 new CloudFormation parameters — leaving them empty results in zero additional resources and identical behavior to existing Cognito-native authentication. See `docs/external-idp.md`.
 
 - **Private Network Deployment** — Deploy the IDP Accelerator in fully private / air-gapped environments. New `AppSyncVisibility` parameter (`GLOBAL` | `PRIVATE`) makes the AppSync API accessible only from inside the VPC. All processing Lambda functions (21 across 3 templates) are conditionally placed in customer VPC subnets with an HTTPS-only security group. Includes a separate VPC endpoint CloudFormation template (`scripts/vpc-endpoints.yaml`) with 16 interface endpoints (AppSync, Bedrock, SQS, DynamoDB, S3, Lambda, SSM, KMS, STS, Textract, and more) and per-endpoint creation flags to skip pre-existing endpoints. All features are off by default — existing deployments are completely unaffected. See `docs/deployment-private-network.md`.
 
+- **Enhanced Information Panels** — Added comprehensive help content to the Information (ⓘ) panel on every page in the Web UI. Each panel now includes a feature summary, list of key capabilities, and "Learn more" links to relevant docs-site documentation pages. Created new panels for 8 pages that previously had none (Pricing, Capacity Planning, Custom Models, Discovery, User Management, Test Studio), and enriched the existing 7 panels with fuller descriptions and documentation links.
 ### Changed
 
 - **Default extraction model updated** to `us.anthropic.claude-sonnet-4-6` (was `us.anthropic.claude-sonnet-4-20250514-v1:0`) in system defaults.
@@ -23,6 +26,8 @@ SPDX-License-Identifier: MIT-0
 
 ### Fixed
 
+- **Fixed** agentic extraction crash (`TypeError: unsupported format string passed to NoneType.__format__`) when table parsing stats contain `None` values for `avg_confidence` or `parse_success_rate`.
+- **Fixed** agentic extraction `map_table_to_schema` producing phantom empty rows from non-matching tables (e.g. account_summary rows prepended to transaction_details), causing list item ordering to be shifted by several positions.
 - **Error Analyzer model selection** — The agent was using the Chat Companion's model instead of its own configured model.
 - **Error Analyzer log processing** — Fixed early termination that stopped searching after the first Lambda function with errors; now searches all relevant log groups.
 - **Error Analyzer log truncation** — Fixed handling of long log messages to trim them rather than skip them entirely.
