@@ -153,7 +153,16 @@ export const documentsNavItems = adminNavItems;
 
 const defaultOnFollowHandler = (ev: CustomEvent<SideNavigationProps.FollowDetail>): void => {
   // Prevent navigation for non-navigable items (deployment info, region-restricted features)
-  if (ev.detail.href === '#deployment-info' || ev.detail.href === '#custom-models-unavailable') {
+  const nonNavigableHrefs = [
+    '#deployment-info',
+    '#custom-models-unavailable',
+    '#stackname',
+    '#version',
+    '#builddatetime',
+    '#idppattern',
+    '#region',
+  ];
+  if (nonNavigableHrefs.includes(ev.detail.href)) {
     ev.preventDefault();
     return;
   }
@@ -283,7 +292,9 @@ const Navigation = ({
   // Create navigation items with deployment info
   const navigationItems: SideNavigationProps.Item[] = [...filteredItems] as SideNavigationProps.Item[];
 
-  if (settings?.Version || settings?.StackName || settings?.BuildDateTime || settings?.IDPPattern) {
+  const deployedRegion = import.meta.env.VITE_AWS_REGION as string | undefined;
+
+  if (settings?.Version || settings?.StackName || settings?.BuildDateTime || settings?.IDPPattern || deployedRegion) {
     const deploymentInfoItems: SideNavigationProps.Item[] = [];
 
     if (settings?.StackName) {
@@ -298,6 +309,9 @@ const Navigation = ({
     if (settings?.IDPPattern) {
       const pattern = (settings.IDPPattern as string).split(' ')[0];
       deploymentInfoItems.push({ type: 'link', text: `Pattern: ${pattern}`, href: '#idppattern' });
+    }
+    if (deployedRegion) {
+      deploymentInfoItems.push({ type: 'link', text: `Region: ${deployedRegion}`, href: '#region' });
     }
 
     navigationItems.push({
