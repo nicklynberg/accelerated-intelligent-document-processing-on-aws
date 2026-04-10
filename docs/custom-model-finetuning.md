@@ -38,7 +38,6 @@ Custom Model Fine-tuning is available to **Admin** and **Author** roles. The Gra
 
 ## Prerequisites
 
-- **Deployed in `us-east-1` region**: Custom Model Fine-Tuning is only available when the IDP Accelerator is deployed to the `us-east-1` AWS region. The Custom Models navigation link is automatically hidden in deployments to other regions.
 - An existing Test Set with:
   - At least 10 documents
   - At least 2 document classes
