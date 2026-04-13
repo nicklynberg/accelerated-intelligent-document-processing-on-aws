@@ -106,7 +106,9 @@ class TestTestingOperationInit:
         """Test that processor is cached per stack name."""
         client = IDPClient(stack_name="test-stack")
 
-        with patch("idp_sdk._core.test_studio_processor.TestStudioProcessor") as mock_proc_cls:
+        with patch(
+            "idp_sdk._core.test_studio_processor.TestStudioProcessor"
+        ) as mock_proc_cls:
             mock_proc = MagicMock()
             mock_proc_cls.return_value = mock_proc
 
@@ -122,13 +124,16 @@ class TestTestingOperationInit:
 
             # Different stack creates new processor
             proc3 = client.testing._get_processor(stack_name="other-stack")
+            assert proc3 is mock_proc
             assert mock_proc_cls.call_count == 2
 
     def test_processor_cache_per_stack(self):
         """Test that each stack has its own cached processor."""
         client = IDPClient(stack_name="stack-a")
 
-        with patch("idp_sdk._core.test_studio_processor.TestStudioProcessor") as mock_proc_cls:
+        with patch(
+            "idp_sdk._core.test_studio_processor.TestStudioProcessor"
+        ) as mock_proc_cls:
             mock_proc_a = MagicMock(name="proc-a")
             mock_proc_b = MagicMock(name="proc-b")
             mock_proc_cls.side_effect = [mock_proc_a, mock_proc_b]
@@ -173,9 +178,7 @@ class TestGetTestResult:
         mock_processor_cls.return_value = mock_processor
 
         client = IDPClient(stack_name="test-stack")
-        result = client.testing.get_test_result(
-            test_run_id="fake-w2-20260410-123456"
-        )
+        result = client.testing.get_test_result(test_run_id="fake-w2-20260410-123456")
 
         assert isinstance(result, TestRunResult)
         assert result.test_run_id == "fake-w2-20260410-123456"
@@ -314,9 +317,7 @@ class TestCompareTestRuns:
         mock_processor_cls.return_value = mock_processor
 
         client = IDPClient(stack_name="test-stack")
-        result = client.testing.compare_test_runs(
-            test_run_ids=["run-1", "run-2"]
-        )
+        result = client.testing.compare_test_runs(test_run_ids=["run-1", "run-2"])
 
         assert isinstance(result, TestComparisonResult)
         assert len(result.metrics) == 2
