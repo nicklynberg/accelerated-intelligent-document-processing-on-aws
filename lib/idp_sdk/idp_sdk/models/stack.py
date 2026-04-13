@@ -3,6 +3,7 @@
 
 """Stack-related models."""
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class StackDeploymentResult(BaseModel):
     """Result of a stack deployment operation."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     success: bool = Field(description="Whether the operation succeeded")
     operation: str = Field(description="Type of operation (CREATE, UPDATE)")
@@ -20,6 +23,10 @@ class StackDeploymentResult(BaseModel):
         default_factory=dict, description="Stack outputs (URLs, bucket names, etc.)"
     )
     error: Optional[str] = Field(default=None, description="Error message if failed")
+    deploy_start_time: Optional[datetime] = Field(
+        default=None,
+        description="UTC timestamp when deployment was initiated (for filtering stale events)",
+    )
 
 
 class StackDeletionResult(BaseModel):

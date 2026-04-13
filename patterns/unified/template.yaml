@@ -20,9 +20,11 @@ Parameters:
 
   DiscoveryBucket:
     Type: String
+    Default: ""
 
   DiscoveryTrackingTable:
     Type: String
+    Default: ""
 
   ConfigurationBucket:
     Type: String

@@ -163,6 +163,11 @@ class StackDeployer:
             common_params["RoleARN"] = role_arn
 
         try:
+            # Capture deploy start time for filtering stale events in failure analysis
+            from datetime import datetime, timezone
+
+            deploy_start_time = datetime.now(timezone.utc)
+
             if stack_exists:
                 logger.info(f"Stack {stack_name} exists - updating")
                 response = self.cfn.update_stack(**common_params)
@@ -183,7 +188,13 @@ class StackDeployer:
             }
 
             if wait:
-                result = self._wait_for_completion(stack_name, operation)
+                result = self._wait_for_completion(
+                    stack_name, operation, deploy_start_time=deploy_start_time
+                )
+
+            # Include deploy_start_time in result so callers (e.g., CLI failure
+            # analysis display) can filter stale events from previous deployments
+            result["deploy_start_time"] = deploy_start_time
 
             return result
 
@@ -586,13 +597,19 @@ class StackDeployer:
             # which maintains backward compatibility if validation fails
             return set()
 
-    def _wait_for_completion(self, stack_name: str, operation: str) -> Dict:
+    def _wait_for_completion(
+        self,
+        stack_name: str,
+        operation: str,
+        deploy_start_time: Optional[datetime] = None,
+    ) -> Dict:
         """
         Wait for stack operation to complete
 
         Args:
             stack_name: Stack name
             operation: CREATE or UPDATE
+            deploy_start_time: UTC timestamp when deployment was initiated (for filtering stale events)
 
         Returns:
             Dictionary with final status
@@ -656,7 +673,9 @@ class StackDeployer:
                     }
 
                     if not is_success:
-                        result["error"] = self._get_stack_failure_reason(stack_name)
+                        result["error"] = self._get_stack_failure_reason(
+                            stack_name, deploy_start_time=deploy_start_time
+                        )
 
                     return result
 
@@ -676,9 +695,15 @@ class StackDeployer:
             outputs[key] = value
         return outputs
 
-    def _get_stack_failure_reason(self, stack_name: str) -> str:
+    def _get_stack_failure_reason(
+        self,
+        stack_name: str,
+        deploy_start_time: Optional[datetime] = None,
+    ) -> str:
         """Get failure reason from stack events (simple string for backward compatibility)"""
-        analysis = self.get_deployment_failure_analysis(stack_name)
+        analysis = self.get_deployment_failure_analysis(
+            stack_name, deploy_start_time=deploy_start_time
+        )
         root_causes = analysis.get("root_causes", [])
         if root_causes:
             # Return the first root cause as a simple string
@@ -698,7 +723,12 @@ class StackDeployer:
 
         return "Unknown failure reason"
 
-    def get_deployment_failure_analysis(self, stack_name: str, _depth: int = 0) -> Dict:
+    def get_deployment_failure_analysis(
+        self,
+        stack_name: str,
+        _depth: int = 0,
+        deploy_start_time: Optional[datetime] = None,
+    ) -> Dict:
         """
         Analyze deployment failure by recursively collecting failed events
         from the main stack and all nested stacks.
@@ -706,6 +736,9 @@ class StackDeployer:
         Args:
             stack_name: Stack name or ARN
             _depth: Internal recursion depth counter (max 5)
+            deploy_start_time: UTC timestamp when deployment was initiated.
+                Only events after this time are considered, preventing stale
+                errors from previous deployments from being reported.
 
         Returns:
             Dictionary with:
@@ -726,6 +759,12 @@ class StackDeployer:
                     status = event.get("ResourceStatus", "")
                     if "FAILED" not in status:
                         continue
+
+                    # Filter out stale events from previous deployments
+                    if deploy_start_time:
+                        event_time = event.get("Timestamp")
+                        if event_time and event_time < deploy_start_time:
+                            continue
 
                     reason = event.get("ResourceStatusReason", "")
                     resource_id = event.get("LogicalResourceId", "Unknown")
@@ -775,7 +814,9 @@ class StackDeployer:
                         # Recursively get failures from the nested stack
                         if physical_id:
                             nested_analysis = self.get_deployment_failure_analysis(
-                                physical_id, _depth=_depth + 1
+                                physical_id,
+                                _depth=_depth + 1,
+                                deploy_start_time=deploy_start_time,
                             )
                             # Prepend our stack path to nested failures
                             for nested_failure in nested_analysis.get(

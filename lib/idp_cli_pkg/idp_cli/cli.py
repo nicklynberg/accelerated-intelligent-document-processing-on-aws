@@ -175,8 +175,18 @@ def _display_deployment_failure(client, stack_name: str, result):
     console.print()
 
     # Get detailed failure analysis
+    # Pass deploy_start_time if available to filter stale events from previous deployments
     try:
-        analysis = client.stack.get_failure_analysis(stack_name)
+        deploy_start_time = (
+            result.deploy_start_time
+            if hasattr(result, "deploy_start_time")
+            else result.get("deploy_start_time")
+            if isinstance(result, dict)
+            else None
+        )
+        analysis = client.stack.get_failure_analysis(
+            stack_name, deploy_start_time=deploy_start_time
+        )
 
         if analysis.root_causes:
             console.print("[bold red]Root Cause Analysis:[/bold red]")

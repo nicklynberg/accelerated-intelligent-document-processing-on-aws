@@ -71,6 +71,15 @@ class HeadlessTemplateTransformer:
             "CalculateCapacityResolver",
             "CalculateCapacityResolverFunction",
             "CalculateCapacityResolverFunctionLogGroup",
+            # Fine-tuning AppSync resources — depend on GraphQLApi
+            "FinetuningJobsDataSource",
+            "CreateFinetuningJobResolver",
+            "DeleteFinetuningJobResolver",
+            "UpdateFinetuningJobStatusResolver",
+            "GetFinetuningJobResolver",
+            "ListFinetuningJobsResolver",
+            "ValidateTestSetForFinetuningResolver",
+            "ListAvailableModelsResolver",
         }
 
         self.auth_resources: Set[str] = {
@@ -91,6 +100,13 @@ class HeadlessTemplateTransformer:
             "CognitoUserPoolEmailDomainVerifyFunctionLogGroup",
             "CognitoUserPoolEmailDomainVerifyPermission",
             "CognitoUserPoolEmailDomainVerifyPermissionReady",
+            # External Identity Provider (SAML/OIDC) — depends on UserPool
+            "ExternalIdentityProvider",
+            "ExternalIdentityProviderReady",
+            "ExternalIdPGroupMappingFunction",
+            "ExternalIdPGroupMappingFunctionLogGroup",
+            "ExternalIdPGroupMappingCognitoPolicy",
+            "ExternalIdPGroupMappingPermission",
         }
 
         self.waf_resources: Set[str] = {
@@ -200,6 +216,19 @@ class HeadlessTemplateTransformer:
             "ChatCompanionModelId",
             "EnableHITL",
             "ExistingPrivateWorkforceArn",
+            # External Identity Provider (SAML/OIDC) — depends on Cognito
+            "ExternalIdPType",
+            "ExternalIdPName",
+            "ExternalIdPMetadataURL",
+            "ExternalIdPOIDCIssuer",
+            "ExternalIdPOIDCClientId",
+            "ExternalIdPOIDCClientSecretArn",
+            "ExternalIdPGroupAttributeName",
+            "ExternalIdPAdminGroupName",
+            "ExternalIdPAuthorGroupName",
+            "ExternalIdPReviewerGroupName",
+            "ExternalIdPViewerGroupName",
+            "ExternalIdPAutoLogin",
         }
 
         # ---- Outputs to remove ----
@@ -238,6 +267,13 @@ class HeadlessTemplateTransformer:
             "IsHITLEnabled",
             "ShouldCreatePrivateWorkteam",
             "ShouldUseExistingPrivateWorkteam",
+            # External Identity Provider (SAML/OIDC) — depends on Cognito
+            "HasExternalIdP",
+            "IsExternalIdPSAML",
+            "IsExternalIdPOIDC",
+            "HasExternalIdPGroupMapping",
+            "ShouldMapExternalIdPGroups",
+            "CreateExternalAppClient",
         }
 
         # ---- Rules to remove ----
@@ -254,6 +290,7 @@ class HeadlessTemplateTransformer:
             "Document Knowledge Base",
             "Agentic Analysis",
             "HITL (A2I) Configuration",
+            "External Identity Provider",
         }
 
     @property
@@ -750,15 +787,12 @@ class HeadlessTemplateTransformer:
             logger.debug(f"Removed AppSyncApiArn parameter from {stack_name}")
 
         # Discovery-related parameters (resources removed in headless)
-        # DiscoveryBucket and DiscoveryTrackingTable are required by the nested
-        # stack (Type: String, no Default), so we must pass empty strings rather
-        # than deleting them.
-        for param in ["DiscoveryBucket", "DiscoveryTrackingTable"]:
-            if param in stack_params:
-                stack_params[param] = ""
-                logger.debug(f"Set {param} to empty string in {stack_name}")
-
+        # The nested stack declares Default: "" for DiscoveryBucket and
+        # DiscoveryTrackingTable, so we can simply delete the parameters
+        # and let CloudFormation use the defaults.
         for param in [
+            "DiscoveryBucket",
+            "DiscoveryTrackingTable",
             "DiscoveryBucketName",
             "DiscoveryTrackingTableName",
             "MultiDocDiscoveryStateMachineArn",
