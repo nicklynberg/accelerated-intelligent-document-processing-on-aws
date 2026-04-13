@@ -83,6 +83,8 @@ from .testing import (
     ExecutionsStoppedResult,
     LoadTestResult,
     StopWorkflowsResult,
+    TestComparisonResult,
+    TestRunResult,
 )
 
 __all__ = [
@@ -151,6 +153,8 @@ __all__ = [
     "ExecutionsStoppedResult",
     "DocumentsAbortedResult",
     "LoadTestResult",
+    "TestRunResult",
+    "TestComparisonResult",
     # Search models
     "SearchResult",
     "SearchCitation",

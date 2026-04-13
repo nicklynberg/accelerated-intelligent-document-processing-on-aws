@@ -50,6 +50,8 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
   - [config-list](#config-list)
   - [config-activate](#config-activate)
   - [config-delete](#config-delete)
+  - [test-result](#test-result)
+  - [test-compare](#test-compare)
   - [chat](#chat)
 - [Complete Evaluation Workflow](#complete-evaluation-workflow)
   - [Step 1: Deploy Your Stack](#step-1-deploy-your-stack)
@@ -2052,6 +2054,102 @@ idp-cli config-delete --stack-name my-stack --config-version old-version --force
 For full details on configuration versioning, see [configuration-versions.md](configuration-versions.md).
 
 This uses the same mechanism as the Web UI configuration management system.
+
+---
+
+### `test-result`
+
+Get test results for a specific Test Studio test run with automatic evaluation triggering.
+
+**Usage:**
+```bash
+idp-cli test-result [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--test-run-id` (required): Test run ID to retrieve results for
+- `--wait`: Wait for evaluation to complete (polls until metrics are calculated)
+- `--timeout`: Timeout in seconds when using `--wait` (default: 600)
+- `--output-dir`: Directory to save results as JSON file
+- `--region`: AWS region (optional)
+
+**Examples:**
+```bash
+# Get results immediately (may show "EVALUATING" status if metrics not ready)
+idp-cli test-result \
+  --stack-name my-stack \
+  --test-run-id fake-w2-20260409-123456
+
+# Wait for evaluation to complete (recommended for CI/CD)
+idp-cli test-result \
+  --stack-name my-stack \
+  --test-run-id fake-w2-20260409-123456 \
+  --wait --timeout 900
+
+# Save results to JSON file
+idp-cli test-result \
+  --stack-name my-stack \
+  --test-run-id fake-w2-20260409-123456 \
+  --wait --output-dir ./results
+```
+
+**Output:**
+- Overall accuracy, precision, recall, F1 score
+- Total cost
+- Files completed/failed
+- Created/completed timestamps
+- JSON file: `<test-run-id>-result.json` (when `--output-dir` specified)
+
+**Behavior:**
+- Triggers lazy evaluation if metrics not yet calculated (first call after test run completes)
+- Polls Lambda every 10 seconds when `--wait` is used
+- Returns complete test run data including field-level metrics and cost breakdown
+
+---
+
+### `test-compare`
+
+Compare metrics and configurations from multiple Test Studio test runs.
+
+**Usage:**
+```bash
+idp-cli test-compare [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--test-run-ids` (required): Comma-separated list of test run IDs to compare (minimum 2)
+- `--output-dir`: Directory to save comparison as JSON and CSV files
+- `--region`: AWS region (optional)
+
+**Examples:**
+```bash
+# Compare two test runs
+idp-cli test-compare \
+  --stack-name my-stack \
+  --test-run-ids "fake-w2-20260409-123456,fake-w2-20260409-234567"
+
+# Compare multiple runs and export to files
+idp-cli test-compare \
+  --stack-name my-stack \
+  --test-run-ids "run1,run2,run3" \
+  --output-dir ./comparisons
+```
+
+**Output:**
+- **Console**: Side-by-side table with accuracy, precision, recall, F1 score, and cost for each test run
+- **JSON file**: `comparison-<timestamp>.json` - Complete comparison data with full test results and config differences
+- **CSV file**: `comparison-<timestamp>.csv` - Metrics table suitable for spreadsheets
+
+**Configuration Differences:**
+- Automatically detects and displays configuration differences between test runs
+- Shows nested config paths (e.g., `classification.model`, `extraction.temperature`)
+- Highlights values that differ across test runs
+
+**Requirements:**
+- All test runs must be in `COMPLETE` or `PARTIAL_COMPLETE` status
+- Minimum 2 test runs required for comparison
 
 ---
 

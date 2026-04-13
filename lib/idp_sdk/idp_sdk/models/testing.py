@@ -53,3 +53,39 @@ class LoadTestResult(BaseModel):
     total_files: int = Field(description="Total files submitted")
     duration_minutes: int = Field(description="Test duration in minutes")
     error: Optional[str] = Field(default=None, description="Error if failed")
+
+
+class TestRunResult(BaseModel):
+    """Result of a Test Studio evaluation run."""
+
+    test_run_id: str = Field(description="Test run identifier")
+    test_set_name: str = Field(description="Test set name")
+    status: str = Field(
+        description="Test run status (COMPLETE, PARTIAL_COMPLETE, FAILED, etc.)"
+    )
+    files_count: int = Field(description="Total number of files")
+    completed_files: int = Field(description="Number of completed files")
+    failed_files: int = Field(default=0, description="Number of failed files")
+    overall_accuracy: Optional[float] = Field(
+        default=None, description="Overall accuracy (0-1)"
+    )
+    accuracy_breakdown: Optional[dict] = Field(
+        default=None, description="Precision, recall, F1 scores"
+    )
+    total_cost: Optional[float] = Field(
+        default=None, description="Total cost in dollars"
+    )
+    created_at: Optional[str] = Field(default=None, description="Creation timestamp")
+    completed_at: Optional[str] = Field(
+        default=None, description="Completion timestamp"
+    )
+    raw_data: Optional[dict] = Field(default=None, description="Full raw response data")
+
+
+class TestComparisonResult(BaseModel):
+    """Result of comparing multiple test runs."""
+
+    metrics: dict = Field(description="Metrics for each test run ID")
+    comparison_summary: Optional[dict] = Field(
+        default=None, description="Summary comparison data"
+    )

@@ -7,6 +7,7 @@ IDP CLI - Main Command Line Interface
 Command-line tool for batch document processing with the IDP Accelerator.
 """
 
+import json
 import logging
 import os
 import sys
@@ -5346,6 +5347,327 @@ def chat(
         prompt=prompt,
         enable_code_intelligence=enable_code_intelligence,
     )
+
+
+@cli.command(name="test-result")
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option("--test-run-id", required=True, help="Test run ID")
+@click.option("--region", default=None, help="AWS region")
+@click.option("--wait", is_flag=True, help="Wait for evaluation to complete")
+@click.option(
+    "--timeout", default=600, type=int, help="Timeout in seconds (default: 600)"
+)
+@click.option(
+    "--output-dir",
+    type=click.Path(),
+    help="Output directory for saving results JSON file",
+)
+def test_result(
+    stack_name: str,
+    test_run_id: str,
+    region: Optional[str],
+    wait: bool,
+    timeout: int,
+    output_dir: Optional[str],
+):
+    """Get test results for a specific test run.
+
+    Invokes TestResultsResolverFunction to trigger evaluation if needed
+    and retrieve test results including accuracy, precision, recall, F1 score, and cost.
+
+    \b
+    Examples:
+      # Get results immediately (may show evaluating status)
+      idp-cli test-result --stack-name my-stack --test-run-id fake-w2-20260409-123456
+
+      # Wait for evaluation to complete
+      idp-cli test-result --stack-name my-stack --test-run-id fake-w2-20260409-123456 --wait --timeout 900
+
+      # Save results to file
+      idp-cli test-result --stack-name my-stack --test-run-id fake-w2-20260409-123456 --wait --output-dir ./results
+    """
+    if not region:
+        region = os.environ.get("AWS_REGION", "us-east-1")
+
+    try:
+        # Use SDK to get test result
+        from idp_sdk import IDPClient
+
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        if wait:
+            console.print(
+                f"[yellow]⏳ Waiting for test run to complete (up to {timeout}s)...[/yellow]"
+            )
+
+        test_result = client.testing.get_test_result(
+            test_run_id=test_run_id,
+            wait=wait,
+            timeout=timeout,
+            poll_interval=10,
+        )
+
+        # Save to file if output-dir specified
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            output_file = os.path.join(output_dir, f"{test_run_id}-result.json")
+            with open(output_file, "w") as f:
+                # Use raw_data for complete JSON export
+                json.dump(test_result.raw_data, f, indent=2, default=str)
+            console.print(f"[green]✓ Results saved to: {output_file}[/green]\n")
+
+        # Display results using Rich formatting
+        console.print("\n[bold green]✓ Test Results[/bold green]\n")
+        console.print(f"[bold]Test Run:[/bold] {test_result.test_run_id}")
+        console.print(f"[bold]Test Set:[/bold] {test_result.test_set_name}")
+        console.print(f"[bold]Status:[/bold] {test_result.status}")
+        console.print(
+            f"[bold]Files:[/bold] {test_result.completed_files}/{test_result.files_count} completed"
+        )
+
+        if test_result.failed_files > 0:
+            console.print(
+                f"[bold red]Failed Files:[/bold red] {test_result.failed_files}"
+            )
+
+        console.print()
+
+        if test_result.overall_accuracy is not None:
+            console.print(
+                f"[bold cyan]Overall Accuracy:[/bold cyan] {test_result.overall_accuracy:.2%}"
+            )
+
+        if test_result.accuracy_breakdown:
+            breakdown = test_result.accuracy_breakdown
+            console.print(
+                f"[bold cyan]Precision:[/bold cyan] {breakdown.get('precision', 0):.2%}"
+            )
+            console.print(
+                f"[bold cyan]Recall:[/bold cyan] {breakdown.get('recall', 0):.2%}"
+            )
+            console.print(
+                f"[bold cyan]F1 Score:[/bold cyan] {breakdown.get('f1_score', 0):.2%}"
+            )
+
+        if test_result.total_cost:
+            console.print(
+                f"[bold yellow]Total Cost:[/bold yellow] ${test_result.total_cost:.4f}"
+            )
+
+        console.print()
+
+        if test_result.created_at:
+            console.print(f"[dim]Created: {test_result.created_at}[/dim]")
+        if test_result.completed_at:
+            console.print(f"[dim]Completed: {test_result.completed_at}[/dim]")
+
+    except Exception as e:
+        logger.error(f"Error getting test results: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command(name="test-compare")
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--test-run-ids",
+    required=True,
+    help="Comma-separated list of test run IDs to compare",
+)
+@click.option("--region", default=None, help="AWS region")
+@click.option(
+    "--output-dir",
+    type=click.Path(),
+    help="Output directory for saving comparison JSON and CSV files",
+)
+def test_compare(
+    stack_name: str, test_run_ids: str, region: Optional[str], output_dir: Optional[str]
+):
+    """Compare results from multiple test runs.
+
+    Shows side-by-side comparison of metrics and configuration differences
+    between test runs.
+
+    \b
+    Examples:
+      # Compare two test runs
+      idp-cli test-compare --stack-name my-stack \\
+        --test-run-ids "fake-w2-20260409-123456,fake-w2-20260409-234567"
+
+      # Compare and save to files
+      idp-cli test-compare --stack-name my-stack \\
+        --test-run-ids "run1,run2,run3" --output-dir ./comparisons
+    """
+    import csv
+    from datetime import datetime, timezone
+
+    if not region:
+        region = os.environ.get("AWS_REGION", "us-east-1")
+
+    try:
+        # Parse test run IDs
+        test_run_id_list = [tid.strip() for tid in test_run_ids.split(",")]
+
+        if len(test_run_id_list) < 2:
+            console.print(
+                "[red]✗ At least 2 test run IDs required for comparison[/red]"
+            )
+            sys.exit(1)
+
+        # Use SDK to compare test runs
+        from idp_sdk import IDPClient
+
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        console.print(f"[blue]Comparing {len(test_run_id_list)} test runs...[/blue]\n")
+
+        comparison_result = client.testing.compare_test_runs(
+            test_run_ids=test_run_id_list
+        )
+
+        metrics = comparison_result.metrics
+        # Note: configs not yet in SDK model, but in raw_data if needed
+        configs = []  # TODO: Add to SDK model if needed
+
+        if not metrics:
+            console.print("[yellow]⚠ No metrics data available for comparison[/yellow]")
+            sys.exit(1)
+
+        # Save to files if output-dir specified
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+            # Save JSON (reconstruct result dict for compatibility)
+            result_data = {
+                "metrics": metrics,
+                "configs": configs,
+            }
+            json_file = os.path.join(output_dir, f"comparison-{timestamp}.json")
+            with open(json_file, "w") as f:
+                json.dump(result_data, f, indent=2, default=str)
+            console.print(f"[green]✓ Comparison JSON saved to: {json_file}[/green]")
+
+            # Save CSV (metrics only)
+            csv_file = os.path.join(output_dir, f"comparison-{timestamp}.csv")
+            with open(csv_file, "w", newline="") as f:
+                writer = csv.writer(f)
+
+                # Header row
+                header = ["Metric"] + [tid[:30] for tid in test_run_id_list]
+                writer.writerow(header)
+
+                # Metric rows
+                metric_names = [
+                    ("Overall Accuracy", "overallAccuracy"),
+                    ("Precision", "accuracyBreakdown.precision"),
+                    ("Recall", "accuracyBreakdown.recall"),
+                    ("F1 Score", "accuracyBreakdown.f1_score"),
+                    ("Total Cost", "totalCost"),
+                    ("Files Completed", "completedFiles"),
+                    ("Files Failed", "failedFiles"),
+                ]
+
+                for display_name, metric_path in metric_names:
+                    row = [display_name]
+                    for test_run_id in test_run_id_list:
+                        test_data = metrics.get(test_run_id, {})
+
+                        # Navigate nested paths
+                        value = test_data
+                        for key in metric_path.split("."):
+                            value = value.get(key) if isinstance(value, dict) else None
+
+                        if value is not None:
+                            row.append(
+                                f"{value:.4f}"
+                                if isinstance(value, float)
+                                else str(value)
+                            )
+                        else:
+                            row.append("N/A")
+
+                    writer.writerow(row)
+
+            console.print(f"[green]✓ Comparison CSV saved to: {csv_file}[/green]\n")
+
+        # Display metrics comparison table
+        console.print("[bold green]Metrics Comparison[/bold green]\n")
+
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Metric", style="dim")
+
+        for test_run_id in test_run_id_list:
+            table.add_column(test_run_id[:20], justify="right")
+
+        # Add rows for each metric
+        metric_names = [
+            ("Overall Accuracy", "overallAccuracy", "%"),
+            ("Precision", "accuracyBreakdown.precision", "%"),
+            ("Recall", "accuracyBreakdown.recall", "%"),
+            ("F1 Score", "accuracyBreakdown.f1_score", "%"),
+            ("Total Cost", "totalCost", "$"),
+        ]
+
+        for display_name, metric_path, format_type in metric_names:
+            row = [display_name]
+            for test_run_id in test_run_id_list:
+                test_data = metrics.get(test_run_id, {})
+
+                # Navigate nested paths
+                value = test_data
+                for key in metric_path.split("."):
+                    value = value.get(key) if isinstance(value, dict) else None
+
+                if value is not None:
+                    if format_type == "%":
+                        row.append(f"{value:.2%}")
+                    elif format_type == "$":
+                        row.append(f"${value:.4f}")
+                    else:
+                        row.append(str(value))
+                else:
+                    row.append("N/A")
+
+            table.add_row(*row)
+
+        console.print(table)
+        console.print()
+
+        # Display configuration differences
+        if configs and len(configs) > 0:
+            console.print("[bold green]Configuration Differences[/bold green]\n")
+
+            config_table = Table(show_header=True, header_style="bold cyan")
+            config_table.add_column("Setting", style="dim")
+
+            for test_run_id in test_run_id_list:
+                config_table.add_column(test_run_id[:20])
+
+            for diff in configs:
+                setting = diff.get("setting", "")
+                values = diff.get("values", {})
+
+                row = [setting]
+                for test_run_id in test_run_id_list:
+                    value = values.get(test_run_id, "<missing>")
+                    # Truncate long values
+                    if len(str(value)) > 50:
+                        value = str(value)[:47] + "..."
+                    row.append(str(value))
+
+                config_table.add_row(*row)
+
+            console.print(config_table)
+        else:
+            console.print("[dim]No configuration differences to display[/dim]")
+
+        console.print()
+
+    except Exception as e:
+        logger.error(f"Error comparing test runs: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
 
 
 def main():

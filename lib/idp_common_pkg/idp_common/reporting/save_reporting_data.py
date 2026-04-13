@@ -1093,6 +1093,7 @@ class SaveReportingData:
                 ("unit_cost", pa.float64()),
                 ("estimated_cost", pa.float64()),
                 ("timestamp", pa.timestamp("ms")),
+                ("config_version", pa.string()),
             ]
         )
 
@@ -1171,6 +1172,7 @@ class SaveReportingData:
                     "unit_cost": unit_cost,
                     "estimated_cost": estimated_cost,
                     "timestamp": timestamp,
+                    "config_version": document.config_version or "default",
                 }
                 metering_records.append(metering_record)
 

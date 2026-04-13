@@ -3052,6 +3052,8 @@ Resources:
               Type: double
             - Name: timestamp
               Type: timestamp
+            - Name: config_version
+              Type: string
           Compressed: true
         PartitionKeys:
           - Name: date

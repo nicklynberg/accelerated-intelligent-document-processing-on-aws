@@ -1611,7 +1611,7 @@ else:
 
 ## Testing Operations
 
-Operations for load testing and performance validation.
+Operations for load testing, Test Studio evaluation results, and performance validation.
 
 ### testing.load_test()
 
@@ -1638,6 +1638,65 @@ result = client.testing.load_test(
 
 print(f"Total files: {result.total_files}")
 print(f"Success: {result.success}")
+```
+
+### testing.get_test_result()
+
+Get Test Studio evaluation results for a specific test run.
+
+**Parameters:**
+- `test_run_id` (str, required): Test run identifier
+- `stack_name` (str, optional): Stack name override
+- `wait` (bool, optional): Wait for test run to complete if still in progress (default: False)
+- `timeout` (int, optional): Maximum wait time in seconds (default: 300)
+- `poll_interval` (int, optional): Polling interval in seconds (default: 5)
+
+**Returns:** `TestRunResult` with evaluation metrics
+
+```python
+# Get result immediately (may be evaluating)
+result = client.testing.get_test_result(
+    test_run_id="Fake-W2-Tax-Forms-20260410-173735"
+)
+
+# Wait for evaluation to complete
+result = client.testing.get_test_result(
+    test_run_id="Fake-W2-Tax-Forms-20260410-173735",
+    wait=True,
+    timeout=900
+)
+
+print(f"Status: {result.status}")
+print(f"Overall Accuracy: {result.overall_accuracy:.2%}")
+print(f"Precision: {result.accuracy_breakdown['precision']:.2%}")
+print(f"Recall: {result.accuracy_breakdown['recall']:.2%}")
+print(f"F1 Score: {result.accuracy_breakdown['f1_score']:.2%}")
+print(f"Total Cost: ${result.total_cost:.2f}")
+```
+
+### testing.compare_test_runs()
+
+Compare multiple Test Studio evaluation runs.
+
+**Parameters:**
+- `test_run_ids` (list[str], required): List of test run identifiers to compare (minimum 2)
+- `stack_name` (str, optional): Stack name override
+
+**Returns:** `TestComparisonResult` with metrics for each test run
+
+```python
+result = client.testing.compare_test_runs(
+    test_run_ids=[
+        "Fake-W2-Tax-Forms-20260410-173735",
+        "Fake-W2-Tax-Forms-20260409-191545"
+    ]
+)
+
+for test_run_id, metrics in result.metrics.items():
+    print(f"\nTest Run: {test_run_id}")
+    print(f"  Accuracy: {metrics['overallAccuracy']:.2%}")
+    print(f"  Completed: {metrics['completedFiles']}/{metrics['filesCount']}")
+    print(f"  Cost: ${metrics['totalCost']:.2f}")
 ```
 
 ---
@@ -1728,6 +1787,8 @@ from idp_sdk import (
     ExecutionsStoppedResult,
     DocumentsAbortedResult,
     LoadTestResult,
+    TestRunResult,
+    TestComparisonResult,
 
     # Enums
     DocumentState,
