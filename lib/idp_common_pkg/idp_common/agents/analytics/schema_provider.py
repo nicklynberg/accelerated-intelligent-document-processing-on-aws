@@ -54,6 +54,7 @@ def get_metering_table_description() -> str:
 - `unit_cost` (double): Cost per unit in USD
 - `estimated_cost` (double): Calculated total cost (value × unit_cost)
 - `timestamp` (timestamp): When the operation was performed
+- `config_version` (string): Configuration version used for processing (defaults to "default" if not specified)
 
 **Partitioned by**: date (YYYY-MM-DD format)
 
@@ -89,12 +90,21 @@ GROUP BY "context"
 ORDER BY total_cost DESC
 
 -- Token usage by model
-SELECT "service_api", 
+SELECT "service_api",
        SUM(CASE WHEN "unit" = 'inputTokens' THEN "value" ELSE 0 END) as input_tokens,
        SUM(CASE WHEN "unit" = 'outputTokens' THEN "value" ELSE 0 END) as output_tokens
-FROM metering 
+FROM metering
 WHERE "unit" IN ('inputTokens', 'outputTokens')
 GROUP BY "service_api"
+
+-- Cost by configuration version
+SELECT "config_version",
+       SUM("estimated_cost") as total_cost,
+       COUNT(DISTINCT "document_id") as document_count,
+       SUM("estimated_cost") / COUNT(DISTINCT "document_id") as avg_cost_per_doc
+FROM metering
+GROUP BY "config_version"
+ORDER BY total_cost DESC
 ```
 """
 
@@ -187,6 +197,7 @@ def get_evaluation_tables_description() -> str:
 - Use `document_id` to join between all three tables
 - Use `section_id` and `document_id` to join section and attribute evaluations
 - Join with metering table on `document_id` for cost vs accuracy analysis
+- **To get config_version**: JOIN with metering table using DISTINCT subquery (each document has multiple metering rows)
 
 ### Sample Queries:
 ```sql
@@ -211,13 +222,46 @@ FROM attribute_evaluations
 WHERE "confidence" IS NOT NULL
 GROUP BY confidence_band
 
--- Cost per accuracy point by document type  
+-- Cost per accuracy point by document type
 SELECT se."section_type",
        AVG(se."accuracy") as avg_accuracy,
        SUM(m."estimated_cost") / COUNT(DISTINCT m."document_id") as avg_cost_per_doc
 FROM section_evaluations se
-JOIN metering m ON se."document_id" = m."document_id"  
+JOIN metering m ON se."document_id" = m."document_id"
 GROUP BY se."section_type"
+
+-- Get config_version for evaluation analysis (using DISTINCT to avoid duplicates)
+SELECT e."document_id",
+       e."accuracy",
+       e."f1_score",
+       m."config_version"
+FROM document_evaluations e
+JOIN (SELECT DISTINCT "document_id", "config_version" FROM metering) m
+  ON e."document_id" = m."document_id"
+WHERE m."config_version" = 'your-config-version'
+
+-- Compare accuracy across configuration versions
+SELECT m."config_version",
+       AVG(e."accuracy") as avg_accuracy,
+       AVG(e."f1_score") as avg_f1_score,
+       COUNT(DISTINCT e."document_id") as document_count
+FROM document_evaluations e
+JOIN (SELECT DISTINCT "document_id", "config_version" FROM metering) m
+  ON e."document_id" = m."document_id"
+GROUP BY m."config_version"
+ORDER BY avg_f1_score DESC
+
+-- Cost vs quality analysis by config version
+SELECT m."config_version",
+       AVG(e."weighted_overall_score") as avg_quality_score,
+       SUM(costs."estimated_cost") as total_cost,
+       SUM(costs."estimated_cost") / AVG(e."weighted_overall_score") as cost_per_quality_point
+FROM document_evaluations e
+JOIN (SELECT DISTINCT "document_id", "config_version" FROM metering) m
+  ON e."document_id" = m."document_id"
+JOIN metering costs ON e."document_id" = costs."document_id"
+GROUP BY m."config_version"
+ORDER BY avg_quality_score DESC
 ```
 """
 
