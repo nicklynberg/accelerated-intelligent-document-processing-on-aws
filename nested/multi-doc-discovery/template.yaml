@@ -370,6 +370,7 @@ Resources:
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
@@ -476,10 +477,11 @@ Resources:
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !Ref CustomerManagedEncryptionKeyArn
             - Effect: Allow
-              Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+              Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream, bedrock:GetInferenceProfile]
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
@@ -532,10 +534,11 @@ Resources:
               Action: [kms:Encrypt, kms:Decrypt, kms:ReEncrypt*, kms:GenerateDataKey*, kms:DescribeKey]
               Resource: !Ref CustomerManagedEncryptionKeyArn
             - Effect: Allow
-              Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+              Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream, bedrock:GetInferenceProfile]
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
             - Effect: Allow
               Action: [cloudwatch:PutMetricData]
               Resource: "*"
