@@ -7,7 +7,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
-- **Configuration Version in Metering Database** — Added `config_version` field to the metering database to enable cost tracking and analytics per configuration version. The metering Glue table now includes a `config_version` column, and all metering Parquet files store the configuration version used for each document. Enables Athena queries to compare costs across different configurations, support A/B testing analytics, and optimize per-version costs. Documents without a config version default to "default".
+- **Configuration Version Tracking Across All Analytics Tables** — Added `config_version` field to all analytics tables (metering, document_evaluations, section_evaluations, attribute_evaluations, and document_sections_*) to enable comprehensive tracking and analytics per configuration version. All Glue tables now include a `config_version` column, and all Parquet files store the configuration version used for each document. Enables direct filtering and comparison queries without complex JOINs - users can query "show me W2 documents processed with config v2.1" or "compare accuracy for configs v2.0 vs v2.1" with simple WHERE clauses. Supports cost analysis, A/B testing, quality comparison, and data lineage tracking. Documents without a config version default to "default".
 
 ## [0.5.6]
 
