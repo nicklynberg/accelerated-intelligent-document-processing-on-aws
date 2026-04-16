@@ -277,6 +277,13 @@ https://github.com/user-attachments/assets/d952fd37-1bd0-437f-8f67-5a634e9422e0
 
 ---
 
+### Creating Custom Test Sets with Ground Truth
+End-to-end workflow for creating your own test set from scratch — configure for high accuracy, discover the schema, process and review documents, save ground truth, and compare model accuracy vs. cost.
+
+**Related Documentation**: [Creating Custom Test Sets](./creating-custom-test-sets.md)
+
+---
+
 ## Rule Validation
 
 ### Rule Validation Demo

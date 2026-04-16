@@ -7,6 +7,9 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+
+- **Creating Custom Test Sets Guide** — New tutorial-style documentation (`docs/creating-custom-test-sets.md`) walking through the end-to-end workflow for creating custom test sets with ground truth data from scratch: configure for max accuracy, discover document schema, process samples, review/edit predictions, save evaluation baselines, register test sets, and run comparative test executions to evaluate cost vs. accuracy tradeoffs. Referenced from `docs/demo-videos.md`.
+  
 - **Configuration Version Tracking Across All Analytics Tables** — Added `config_version` field to all analytics tables (metering, document_evaluations, section_evaluations, attribute_evaluations, and document_sections_*) to enable comprehensive tracking and analytics per configuration version. All Glue tables now include a `config_version` column, and all Parquet files store the configuration version used for each document. Enables direct filtering and comparison queries without complex JOINs - users can query "show me W2 documents processed with config v2.1" or "compare accuracy for configs v2.0 vs v2.1" with simple WHERE clauses. Supports cost analysis, A/B testing, quality comparison, and data lineage tracking. Documents without a config version default to "default".
 
 ### Fixed
