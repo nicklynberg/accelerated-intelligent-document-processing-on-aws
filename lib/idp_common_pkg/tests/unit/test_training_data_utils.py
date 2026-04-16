@@ -359,23 +359,10 @@ class TestConvertPdfToImages:
     @pytest.mark.unit
     def test_returns_empty_on_error(self):
         """Test that errors during conversion return empty list."""
-        with patch("builtins.__import__") as mock_import:
-            mock_pdfium = MagicMock()
-            mock_pdfium.PdfDocument.side_effect = RuntimeError("corrupt PDF")
+        mock_pdfium = MagicMock()
+        mock_pdfium.PdfDocument.side_effect = RuntimeError("corrupt PDF")
 
-            original_import = (
-                __builtins__.__import__
-                if hasattr(__builtins__, "__import__")
-                else __import__
-            )
-
-            def side_effect(name, *args, **kwargs):
-                if name == "pypdfium2":
-                    return mock_pdfium
-                return original_import(name, *args, **kwargs)
-
-            mock_import.side_effect = side_effect
-
+        with patch.dict("sys.modules", {"pypdfium2": mock_pdfium}):
             result = convert_pdf_to_images(b"corrupt pdf")
             assert result == []
 

@@ -19,6 +19,8 @@ SPDX-License-Identifier: MIT-0
 
 - **Prompt caching with application inference profiles** — Fixed `<<CACHEPOINT>>` tags being stripped when using Bedrock application inference profile ARNs as model IDs. The cachepoint check now resolves inference profile ARNs to their underlying foundation model via the `GetInferenceProfile` API, enabling prompt caching for profiles that wrap supported models (Claude, Nova). Results are cached to avoid repeated API calls, with graceful fallback if the API call fails. ([#272](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/272))
 
+- **Chat with document uses hardcoded US model ID** — Fixed "Chat with document" feature failing in non-US regions (e.g., `eu-west-1`) with "The provided model identifier is invalid" error. The backend Lambda's `get_summarization_model()` fallback was hardcoded to `us.amazon.nova-pro-v1:0`. Added `get_default_model_for_region()` helper that selects the appropriate region-prefixed model (`eu.amazon.nova-pro-v1:0` for EU, `us.amazon.nova-pro-v1:0` for US) based on `AWS_REGION`. ([#282](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/282))
+
 ## [0.5.6]
 
 ### Added
