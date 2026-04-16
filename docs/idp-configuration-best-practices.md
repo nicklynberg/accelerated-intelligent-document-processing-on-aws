@@ -1505,8 +1505,8 @@ Configure from these supported models:
 - `us.anthropic.claude-opus-4-5-20251101-v1:0`
 - `us.anthropic.claude-opus-4-6-v1`
 - `us.anthropic.claude-opus-4-6-v1:1m`
-- `us.anthropic.claude-opus-4-7-v1`
-- `us.anthropic.claude-opus-4-7-v1:1m`
+- `us.anthropic.claude-opus-4-7`
+- `us.anthropic.claude-opus-4-7:1m`
 - `eu.amazon.nova-lite-v1:0`
 - `eu.amazon.nova-pro-v1:0`
 - `eu.amazon.nova-2-lite-v1:0`

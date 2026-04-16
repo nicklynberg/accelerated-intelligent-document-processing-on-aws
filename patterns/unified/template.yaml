@@ -315,8 +315,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "us.anthropic.claude-opus-4-6-v1"
                   - "us.anthropic.claude-opus-4-6-v1:1m"
-                  - "us.anthropic.claude-opus-4-7-v1"
-                  - "us.anthropic.claude-opus-4-7-v1:1m"
+                  - "us.anthropic.claude-opus-4-7"
+                  - "us.anthropic.claude-opus-4-7:1m"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -426,8 +426,8 @@ Resources:
                     - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                     - "us.anthropic.claude-opus-4-6-v1"
                     - "us.anthropic.claude-opus-4-6-v1:1m"
-                    - "us.anthropic.claude-opus-4-7-v1"
-                    - "us.anthropic.claude-opus-4-7-v1:1m"
+                    - "us.anthropic.claude-opus-4-7"
+                    - "us.anthropic.claude-opus-4-7:1m"
                     - "eu.amazon.nova-lite-v1:0"
                     - "eu.amazon.nova-pro-v1:0"
                     - "eu.amazon.nova-2-lite-v1:0"
@@ -713,8 +713,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "us.anthropic.claude-opus-4-6-v1"
                   - "us.anthropic.claude-opus-4-6-v1:1m"
-                  - "us.anthropic.claude-opus-4-7-v1"
-                  - "us.anthropic.claude-opus-4-7-v1:1m"
+                  - "us.anthropic.claude-opus-4-7"
+                  - "us.anthropic.claude-opus-4-7:1m"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -911,8 +911,8 @@ Resources:
                   - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                   - "us.anthropic.claude-opus-4-6-v1"
                   - "us.anthropic.claude-opus-4-6-v1:1m"
-                  - "us.anthropic.claude-opus-4-7-v1"
-                  - "us.anthropic.claude-opus-4-7-v1:1m"
+                  - "us.anthropic.claude-opus-4-7"
+                  - "us.anthropic.claude-opus-4-7:1m"
                   - "eu.amazon.nova-lite-v1:0"
                   - "eu.amazon.nova-pro-v1:0"
                   - "eu.amazon.nova-2-lite-v1:0"
@@ -1084,8 +1084,8 @@ Resources:
                     "us.anthropic.claude-opus-4-5-20251101-v1:0",
                     "us.anthropic.claude-opus-4-6-v1",
                     "us.anthropic.claude-opus-4-6-v1:1m",
-                    "us.anthropic.claude-opus-4-7-v1",
-                    "us.anthropic.claude-opus-4-7-v1:1m",
+                    "us.anthropic.claude-opus-4-7",
+                    "us.anthropic.claude-opus-4-7:1m",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1182,8 +1182,8 @@ Resources:
                     "us.anthropic.claude-opus-4-5-20251101-v1:0",
                     "us.anthropic.claude-opus-4-6-v1",
                     "us.anthropic.claude-opus-4-6-v1:1m",
-                    "us.anthropic.claude-opus-4-7-v1",
-                    "us.anthropic.claude-opus-4-7-v1:1m",
+                    "us.anthropic.claude-opus-4-7",
+                    "us.anthropic.claude-opus-4-7:1m",
                     "eu.amazon.nova-lite-v1:0",
                     "eu.amazon.nova-pro-v1:0",
                     "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1276,8 +1276,8 @@ Resources:
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
-                        "us.anthropic.claude-opus-4-7-v1",
-                        "us.anthropic.claude-opus-4-7-v1:1m",
+                        "us.anthropic.claude-opus-4-7",
+                        "us.anthropic.claude-opus-4-7:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1365,8 +1365,8 @@ Resources:
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
-                        "us.anthropic.claude-opus-4-7-v1",
-                        "us.anthropic.claude-opus-4-7-v1:1m",
+                        "us.anthropic.claude-opus-4-7",
+                        "us.anthropic.claude-opus-4-7:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1452,8 +1452,8 @@ Resources:
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
-                        "us.anthropic.claude-opus-4-7-v1",
-                        "us.anthropic.claude-opus-4-7-v1:1m",
+                        "us.anthropic.claude-opus-4-7",
+                        "us.anthropic.claude-opus-4-7:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1539,8 +1539,8 @@ Resources:
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
-                        "us.anthropic.claude-opus-4-7-v1",
-                        "us.anthropic.claude-opus-4-7-v1:1m",
+                        "us.anthropic.claude-opus-4-7",
+                        "us.anthropic.claude-opus-4-7:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1641,8 +1641,8 @@ Resources:
                       - "us.anthropic.claude-sonnet-4-6"
                       - "us.anthropic.claude-opus-4-20250514-v1:0"
                       - "us.anthropic.claude-opus-4-6-v1:1m"
-                      - "us.anthropic.claude-opus-4-7-v1"
-                      - "us.anthropic.claude-opus-4-7-v1:1m"
+                      - "us.anthropic.claude-opus-4-7"
+                      - "us.anthropic.claude-opus-4-7:1m"
                     order: 1
                   temperature:
                     type: number
@@ -1725,8 +1725,8 @@ Resources:
                       - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "us.anthropic.claude-opus-4-6-v1"
                       - "us.anthropic.claude-opus-4-6-v1:1m"
-                      - "us.anthropic.claude-opus-4-7-v1"
-                      - "us.anthropic.claude-opus-4-7-v1:1m"
+                      - "us.anthropic.claude-opus-4-7"
+                      - "us.anthropic.claude-opus-4-7:1m"
                       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
                       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "global.anthropic.claude-sonnet-4-6"
@@ -1774,8 +1774,8 @@ Resources:
                       - "us.anthropic.claude-opus-4-5-20251101-v1:0"
                       - "us.anthropic.claude-opus-4-6-v1"
                       - "us.anthropic.claude-opus-4-6-v1:1m"
-                      - "us.anthropic.claude-opus-4-7-v1"
-                      - "us.anthropic.claude-opus-4-7-v1:1m"
+                      - "us.anthropic.claude-opus-4-7"
+                      - "us.anthropic.claude-opus-4-7:1m"
                       - "global.amazon.nova-pro-v1:0"
                       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
                       - "global.anthropic.claude-sonnet-4-6"
@@ -1867,8 +1867,8 @@ Resources:
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
-                        "us.anthropic.claude-opus-4-7-v1",
-                        "us.anthropic.claude-opus-4-7-v1:1m",
+                        "us.anthropic.claude-opus-4-7",
+                        "us.anthropic.claude-opus-4-7:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",
@@ -1955,8 +1955,8 @@ Resources:
                         "us.anthropic.claude-opus-4-5-20251101-v1:0",
                         "us.anthropic.claude-opus-4-6-v1",
                         "us.anthropic.claude-opus-4-6-v1:1m",
-                        "us.anthropic.claude-opus-4-7-v1",
-                        "us.anthropic.claude-opus-4-7-v1:1m",
+                        "us.anthropic.claude-opus-4-7",
+                        "us.anthropic.claude-opus-4-7:1m",
                         "eu.amazon.nova-lite-v1:0",
                         "eu.amazon.nova-pro-v1:0",
                         "eu.amazon.nova-2-lite-v1:0", "eu.amazon.nova-2-lite-v1:0:priority", "eu.amazon.nova-2-lite-v1:0:flex",

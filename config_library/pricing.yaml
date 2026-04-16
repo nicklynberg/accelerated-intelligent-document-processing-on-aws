@@ -283,7 +283,7 @@ pricing:
       - name: cacheWriteInputTokens
         price: "12.5E-6"
 
-  - name: bedrock/us.anthropic.claude-opus-4-7-v1
+  - name: bedrock/us.anthropic.claude-opus-4-7
     units:
       - name: inputTokens
         price: "5.0E-6"
@@ -294,7 +294,7 @@ pricing:
       - name: cacheWriteInputTokens
         price: "6.25E-6"
 
-  - name: bedrock/us.anthropic.claude-opus-4-7-v1:1m
+  - name: bedrock/us.anthropic.claude-opus-4-7:1m
     units:
       - name: inputTokens
         price: "10.0E-6"
