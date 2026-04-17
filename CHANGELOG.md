@@ -29,6 +29,8 @@ SPDX-License-Identifier: MIT-0
 
 - **Chat with document uses hardcoded US model ID** — Fixed "Chat with document" feature failing in non-US regions (e.g., `eu-west-1`) with "The provided model identifier is invalid" error. The backend Lambda's `get_summarization_model()` fallback was hardcoded to `us.amazon.nova-pro-v1:0`. Added `get_default_model_for_region()` helper that selects the appropriate region-prefixed model (`eu.amazon.nova-pro-v1:0` for EU, `us.amazon.nova-pro-v1:0` for US) based on `AWS_REGION`. ([#282](https://github.com/aws-solutions-library-samples/accelerated-intelligent-document-processing-on-aws/issues/282))
 
+- **BDA activation modal checking wrong version config** — Fixed the "Activate Version" flow incorrectly checking the *currently selected* version's `use_bda` flag (`mergedConfig?.use_bda`) instead of the *target* version being activated. This caused the BDA sync confirmation modal to appear (or not appear) based on the wrong version's configuration. The fix fetches and inspects the target version's actual config before deciding whether to show the modal. Also added a `fetchVersions()` refresh after BDA sync operations to keep BDA project ARN metadata up to date in the versions list.
+
 ## [0.5.6]
 
 ### Added
