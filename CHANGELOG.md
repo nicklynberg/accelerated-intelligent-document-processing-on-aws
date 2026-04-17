@@ -11,7 +11,7 @@ SPDX-License-Identifier: MIT-0
 
 - **Add Documents to Existing Test Sets** — New "Add Documents" action in Test Studio allows incrementally adding documents (with ground truth) to an existing test set. Supports both "From Existing Files" (S3 pattern) and "From Upload" (ZIP) sources. Key features:
   - **Automatic baseline filtering**: When using the Input Bucket, files without matching baseline/ground truth data are automatically excluded rather than failing the operation, with a result message reporting counts (e.g., "Added 8 of 12 files (4 excluded - no baseline data)")
-  - **Time filter**: Optional "Modified after" filter (Last 1 hour, 4 hours, 24 hours, 7 days, 30 days) for both new test set creation and add-documents flows, making it easy to pick up recently reviewed documents
+  - **Time filter**: Optional "Modified after" filter with presets (Last 1 hour, 4 hours, 24 hours, 7 days, 30 days) and a custom date/time picker, available in both new test set creation and add-documents flows
   - **Idempotent**: Re-adding an existing document overwrites it; file counts are always recounted from S3 for accuracy
   - **UPDATING status**: Test sets show a transient "Updating..." badge while documents are being added
 

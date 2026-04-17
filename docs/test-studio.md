@@ -410,7 +410,7 @@ components/
    - **Input Bucket**: Scan main processing bucket for matching files
    - **Test Set Bucket**: Scan dedicated test set bucket for matching files
    - **Description**: Optional description field to document the test set purpose
-   - **Modified after filter**: Optional time filter to include only recently modified files (useful for incremental workflows)
+   - **Modified after filter**: Optional time filter to include only recently modified files — choose a preset (Last 1 hour, 24 hours, 7 days, etc.) or pick a custom date/time (useful for incremental workflows)
 2. **Zip Upload**: Upload zip containing `input/` and `baseline/` folders
    - **Description**: Optional description field to document the test set purpose
 3. **Direct Upload**: Files uploaded directly to TestSetBucket are auto-detected
@@ -429,7 +429,8 @@ You can incrementally add documents to a COMPLETED test set — useful for build
 **Key behaviors:**
 - **Automatic baseline filtering** (Input Bucket): Files without matching baseline data in the evaluation bucket are automatically excluded rather than failing. A result message reports the counts (e.g., "Added 8 of 12 files (4 excluded - no baseline data)").
 - **Idempotent**: Adding a document that already exists overwrites it. File counts are always recounted from S3 for accuracy.
-- **Time filter**: Use the "Modified after" filter (Last 1 hour, 4 hours, 24 hours, 7 days, 30 days) to easily pick up recently reviewed documents without crafting complex patterns.
+- **Prepopulated file pattern**: The file pattern field is pre-filled with the pattern used to create the test set, so you can reuse or adjust it.
+- **Time filter**: Use the "Modified after" filter — choose a preset (Last 1 hour, 4 hours, 24 hours, 7 days, 30 days) or select "Custom date/time" with a date picker to specify an exact cutoff. This makes it easy to pick up recently reviewed documents without crafting complex patterns.
 
 ### File Structure Requirements
 ```
