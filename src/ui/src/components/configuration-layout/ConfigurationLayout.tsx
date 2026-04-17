@@ -339,8 +339,41 @@ const ConfigurationLayout = (): React.JSX.Element => {
       return;
     }
 
+    // Check if the version being activated (not the currently selected one) has BDA enabled
+    // Need to check the actual use_bda flag in config, not just bdaProjectArn existence
+    // (bdaProjectArn can be stale from previous syncs)
+    let targetHasBda = false;
+
+    try {
+      // Fetch the target version's config to check use_bda flag
+      const targetConfig = await fetchVersion(versionName);
+
+      // Parse configs if they're JSON strings
+      let targetDefaultConfig = targetConfig.default;
+      let targetCustomConfig = targetConfig.custom;
+
+      if (typeof targetDefaultConfig === 'string') {
+        targetDefaultConfig = JSON.parse(targetDefaultConfig);
+      }
+      if (typeof targetCustomConfig === 'string') {
+        targetCustomConfig = JSON.parse(targetCustomConfig);
+      }
+
+      // Merge default and custom configs (custom overrides default)
+      const targetMergedConfig: Record<string, unknown> =
+        targetDefaultConfig && targetCustomConfig
+          ? { ...targetDefaultConfig, ...targetCustomConfig }
+          : ((targetCustomConfig || targetDefaultConfig || {}) as Record<string, unknown>);
+
+      targetHasBda = (targetMergedConfig.use_bda as boolean) === true;
+    } catch (err) {
+      console.error('Failed to fetch target version config:', err);
+      // Fallback: if we can't fetch config, don't show modal
+      targetHasBda = false;
+    }
+
     // Check if BDA-enabled pattern and show confirmation for auto-sync to BDA (unless skipping)
-    if ((isPattern1 || mergedConfig?.use_bda) && !skipSyncConfirmation) {
+    if ((isPattern1 || targetHasBda) && !skipSyncConfirmation) {
       setActivateVersionTarget(versionName);
       setShowActivateVersionConfirmModal(true);
       return;
@@ -1594,6 +1627,9 @@ const ConfigurationLayout = (): React.JSX.Element => {
 
         // Refresh configuration to show any new classes
         await fetchConfiguration(currentVersionName);
+
+        // Refresh versions list to update BDA project ARN metadata
+        await fetchVersions();
 
         // Only auto-dismiss if there are no warnings in the message
         // Warnings indicate BDA limitations that users should read
