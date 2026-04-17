@@ -150,6 +150,19 @@ This data helps you identify:
 
 For details on evaluation metrics and reporting, see [Evaluation Framework](./evaluation.md) and [Enhanced Reporting](./evaluation-enhanced-reporting.md).
 
+## Incrementally Growing Your Test Set
+
+You don't have to create your entire test set in one go. As you process and review more documents over time, you can add them to an existing test set:
+
+1. Process new documents and save their evaluation baselines (Steps 3-4 above)
+2. Go to **Test Studio** → **Test Sets** tab
+3. Select your existing test set and click **Add Documents** → **From Existing Files**
+4. Select the **Input Bucket** and enter a file pattern matching your new documents
+5. Optionally use the **Modified after** filter (e.g., "Last 24 hours") to easily find recently reviewed documents
+6. Click **Check Files** to preview matches, then **Add Documents**
+
+Files without matching baseline data are automatically excluded, so you can use a broad pattern — only documents you've reviewed and saved as evaluation baselines will be added. The test set's file count is updated automatically.
+
 ## Next Steps
 
 - **Improve accuracy**: Use field-level metrics to refine your document class descriptions, attribute prompts, and few-shot examples. See [IDP Configuration Best Practices](./idp-configuration-best-practices.md) and [Few-Shot Examples](./few-shot-examples.md).

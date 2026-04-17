@@ -451,6 +451,8 @@ export type MultiDocDiscoveryJob = {
 
 export type Mutation = {
   abortWorkflow: AbortWorkflowResponse;
+  addDocumentsToTestSet?: Maybe<TestSet>;
+  addDocumentsToTestSetFromUpload?: Maybe<TestSetUploadResponse>;
   addTestSet?: Maybe<TestSet>;
   addTestSetFromUpload?: Maybe<TestSetUploadResponse>;
   autoDetectSections?: Maybe<Scalars['String']['output']>;
@@ -501,11 +503,26 @@ export type MutationAbortWorkflowArgs = {
 };
 
 
+export type MutationAddDocumentsToTestSetArgs = {
+  bucketType: Scalars['String']['input'];
+  fileCount: Scalars['Int']['input'];
+  filePattern: Scalars['String']['input'];
+  modifiedAfter?: InputMaybe<Scalars['String']['input']>;
+  testSetId: Scalars['String']['input'];
+};
+
+
+export type MutationAddDocumentsToTestSetFromUploadArgs = {
+  input: TestSetDocumentsUploadInput;
+};
+
+
 export type MutationAddTestSetArgs = {
   bucketType: Scalars['String']['input'];
   description?: InputMaybe<Scalars['String']['input']>;
   fileCount: Scalars['Int']['input'];
   filePattern: Scalars['String']['input'];
+  modifiedAfter?: InputMaybe<Scalars['String']['input']>;
   name: Scalars['String']['input'];
 };
 
@@ -945,6 +962,7 @@ export type QueryListAgentJobsArgs = {
 export type QueryListBucketFilesArgs = {
   bucketType: Scalars['String']['input'];
   filePattern: Scalars['String']['input'];
+  modifiedAfter?: InputMaybe<Scalars['String']['input']>;
 };
 
 
@@ -1153,8 +1171,15 @@ export type TestSet = {
   fileCount?: Maybe<Scalars['Int']['output']>;
   filePattern?: Maybe<Scalars['String']['output']>;
   id: Scalars['String']['output'];
+  lastAddResult?: Maybe<Scalars['String']['output']>;
   name: Scalars['String']['output'];
   status?: Maybe<Scalars['String']['output']>;
+};
+
+export type TestSetDocumentsUploadInput = {
+  fileName: Scalars['String']['input'];
+  fileSize: Scalars['Int']['input'];
+  testSetId: Scalars['String']['input'];
 };
 
 export type TestSetUploadInput = {

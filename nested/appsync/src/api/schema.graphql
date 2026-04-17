@@ -545,12 +545,19 @@ type TestSet @aws_cognito_user_pools @aws_iam {
   status: String
   createdAt: AWSDateTime!
   error: String
+  lastAddResult: String
 }
 
 input TestSetUploadInput {
   fileName: String!
   fileSize: Int!
   description: String
+}
+
+input TestSetDocumentsUploadInput {
+  testSetId: String!
+  fileName: String!
+  fileSize: Int!
 }
 
 input FileUploadInfo {
@@ -732,9 +739,13 @@ type Mutation {
     @aws_auth(cognito_groups: ["Admin", "Author"])
   deleteTests(testRunIds: [String!]!): Boolean!
     @aws_auth(cognito_groups: ["Admin", "Author"])
-  addTestSet(name: String!, description: String, filePattern: String!, bucketType: String!, fileCount: Int!): TestSet
+  addTestSet(name: String!, description: String, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String): TestSet
     @aws_auth(cognito_groups: ["Admin", "Author"])
   addTestSetFromUpload(input: TestSetUploadInput!): TestSetUploadResponse
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  addDocumentsToTestSet(testSetId: String!, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String): TestSet
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  addDocumentsToTestSetFromUpload(input: TestSetDocumentsUploadInput!): TestSetUploadResponse
     @aws_auth(cognito_groups: ["Admin", "Author"])
   deleteTestSets(testSetIds: [String!]!): Boolean!
     @aws_auth(cognito_groups: ["Admin", "Author"])
@@ -873,7 +884,7 @@ type Query @aws_cognito_user_pools @aws_iam {
     @aws_auth(cognito_groups: ["Admin", "Author"])
   getTestSets: [TestSet]
     @aws_auth(cognito_groups: ["Admin", "Author"])
-  listBucketFiles(bucketType: String!, filePattern: String!): [String]
+  listBucketFiles(bucketType: String!, filePattern: String!, modifiedAfter: String): [String]
     @aws_auth(cognito_groups: ["Admin", "Author"])
   validateTestFileName(fileName: String!): TestSetValidationResponse
     @aws_auth(cognito_groups: ["Admin", "Author"])

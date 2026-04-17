@@ -3383,6 +3383,32 @@ Resources:
 
 
   ##########################################################################
+  # AddDocumentsToTestSetResolver
+  ##########################################################################
+  AddDocumentsToTestSetResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt TestSetDataSource.Name
+      TypeName: Mutation
+      FieldName: addDocumentsToTestSet
+
+
+  ##########################################################################
+  # AddDocumentsToTestSetFromUploadResolver
+  ##########################################################################
+  AddDocumentsToTestSetFromUploadResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt TestSetDataSource.Name
+      TypeName: Mutation
+      FieldName: addDocumentsToTestSetFromUpload
+
+
+  ##########################################################################
   # DeleteTestSetsResolver
   ##########################################################################
   DeleteTestSetsResolver:
