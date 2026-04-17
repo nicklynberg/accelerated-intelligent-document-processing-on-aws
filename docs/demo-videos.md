@@ -231,6 +231,15 @@ https://github.com/user-attachments/assets/ee817858-8285-4087-9b25-2c7c5bea65df
 
 ---
 
+### Custom Model Fine-Tuning
+Fine-tune Amazon Nova models for document classification using your own labeled Test Sets — validate data, generate training data, train via Bedrock, and deploy a custom model endpoint.
+
+https://github.com/user-attachments/assets/e82c7be0-ee73-4ad7-8537-87ecf6a1a4c8
+
+**Related Documentation**: [Custom Model Fine-Tuning Documentation](./custom-model-finetuning.md)
+
+---
+
 ## Evaluation & Testing
 
 ### Evaluation Framework
@@ -280,7 +289,18 @@ https://github.com/user-attachments/assets/d952fd37-1bd0-437f-8f67-5a634e9422e0
 ### Creating Custom Test Sets with Ground Truth
 End-to-end workflow for creating your own test set from scratch — configure for high accuracy, discover the schema, process and review documents, save ground truth, and compare model accuracy vs. cost.
 
+https://github.com/user-attachments/assets/d5e0d590-ce8b-4e14-b2b7-8bde31e57ec2
+
 **Related Documentation**: [Creating Custom Test Sets](./creating-custom-test-sets.md)
+
+---
+
+### Adding Documents to Existing Test Sets
+Incrementally grow test sets over time by adding newly reviewed documents with ground truth — with automatic baseline filtering, time-based file selection, and prepopulated file patterns.
+
+https://github.com/user-attachments/assets/bcd18e62-4795-44ea-9554-637062fd21d7
+
+**Related Documentation**: [Creating Custom Test Sets - Incrementally Growing Your Test Set](./creating-custom-test-sets.md#incrementally-growing-your-test-set)
 
 ---
 
