@@ -321,7 +321,7 @@ def test_step3_default_config(stack_name):
 
 
 def test_step4_bda_mode(stack_name):
-    """Step 4: Upload and test BDA config"""
+    """Step 4: Upload and test BDA config (sync without activation for parallel execution)"""
     print(f"Step 4: Testing with BDA mode...")
     config_version = "test-bda"
     config_path = "config_library/unified/lending-package-sample/config.yaml"
@@ -340,10 +340,10 @@ def test_step4_bda_mode(stack_name):
         cmd = f"idp-cli config-upload --stack-name {stack_name} --config-file {bda_config_path} --config-version {config_version}"
         run_command(cmd)
 
-        print(f"Activating BDA config version: {config_version}")
-        cmd = f"idp-cli config-activate --stack-name {stack_name} --config-version {config_version}"
+        print(f"Syncing BDA config to create blueprints (without activation)")
+        cmd = f"idp-cli config-sync-bda --stack-name {stack_name} --config-version {config_version}"
         run_command(cmd)
-        print(f"✅ BDA config activated and synced")
+        print(f"✅ BDA config synced (will use --config-version for inference)")
 
         batch_id = "test-bda"
         sample_file = "lending_package.pdf"
@@ -909,13 +909,14 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
 
         print(f"✅ Stack is healthy")
 
-        # Run tests 3, 5-10 in parallel (exclude Step 4 BDA to avoid config activation race)
+        # Run tests 3-10 in parallel (Step 4 BDA now uses config-sync-bda + --config-version, no activation race)
         print(f"\n{'='*80}")
-        print("Running tests 3, 5-10 in parallel (fail-fast enabled)...")
+        print("Running tests 3-10 in parallel (fail-fast enabled)...")
         print(f"{'='*80}\n")
 
         parallel_tests = [
             (test_step3_default_config, "Step 3: Default config"),
+            (test_step4_bda_mode, "Step 4: BDA mode"),
             (test_step5_rule_validation, "Step 5: Rule validation"),
             (test_step6_multi_document, "Step 6: Multi-document batch"),
             (test_step7_test_studio, "Step 7: Test Studio"),
@@ -925,7 +926,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
         ]
 
         failed_test = None
-        with ThreadPoolExecutor(max_workers=7) as executor:
+        with ThreadPoolExecutor(max_workers=8) as executor:
             # Submit all parallel tests
             futures = {executor.submit(func, stack_name): name for func, name in parallel_tests}
 
@@ -961,24 +962,7 @@ def deploy_and_test_stack(stack_name, admin_email, template_url):
                 "error": f"{test_name} failed: {result.get('error', 'Unknown error')}"
             }
 
-        # Run Step 4 (BDA mode) sequentially after all parallel tests pass
-        # This avoids config activation race condition with Step 3
-        print(f"\n{'='*80}")
-        print("Running Step 4 (BDA mode) sequentially...")
-        print(f"{'='*80}\n")
-
-        result = test_step4_bda_mode(stack_name)
-        if result["success"]:
-            print(f"✅ Step 4: BDA mode passed")
-        else:
-            print(f"❌ Step 4: BDA mode failed: {result.get('error', 'Unknown error')}")
-            return {
-                "stack_name": stack_name,
-                "success": False,
-                "error": f"Step 4: BDA mode failed: {result.get('error', 'Unknown error')}"
-            }
-
-        # Run Step 11 (test-compare) sequentially after BDA
+        # Run Step 11 (test-compare) sequentially after parallel tests
         print(f"\n{'='*80}")
         print("Running Step 11 (test-compare) sequentially...")
         print(f"{'='*80}\n")
@@ -1369,20 +1353,20 @@ def generate_deployment_summary(result, stack_name, template_url):
 
         ✅ All Tests Passed (9 tests):
         • Test 1 (Step 3): Default config with pipeline mode processing ✓
-        • Test 2 (Step 5): Rule validation config and processing ✓
-        • Test 3 (Step 6): Multi-document batch processing ✓
-        • Test 4 (Step 7): Test Studio evaluation with test-result command ✓
-        • Test 5 (Step 8): Agentic extraction with large tables ✓
-        • Test 6 (Step 9): Single-document discovery ✓
-        • Test 7 (Step 10): Multi-document discovery ✓
-        • Test 8 (Step 4): BDA mode config and inference ✓
+        • Test 2 (Step 4): BDA mode config and inference (parallel) ✓
+        • Test 3 (Step 5): Rule validation config and processing ✓
+        • Test 4 (Step 6): Multi-document batch processing ✓
+        • Test 5 (Step 7): Test Studio evaluation with test-result command ✓
+        • Test 6 (Step 8): Agentic extraction with large tables ✓
+        • Test 7 (Step 9): Single-document discovery ✓
+        • Test 8 (Step 10): Multi-document discovery ✓
         • Test 9 (Step 11): Test comparison with test-compare command ✓
 
-        📊 Performance Summary:
-        • Total deployment time: ~25-30 minutes
+        📊 Test Results:
         • All inference tests completed successfully
         • Test Studio achieved high accuracy scores
         • Discovery pipeline generated valid schemas
+        • BDA mode processing validated
 
         FOR INFRASTRUCTURE FAILURE (Case B):
         Respond ONLY with: "NEED_CF_LOGS: {stack_name}"
@@ -1408,7 +1392,7 @@ def generate_deployment_summary(result, stack_name, template_url):
         2. If "success": false, you MUST generate a FAILURE summary
         3. For Case B (Infrastructure Failure): Respond with EXACTLY "NEED_CF_LOGS: {stack_name}" and NOTHING else
         4. CodeBuild logs are for context only, not for determining success/failure
-        5. All 9 tests must be listed in success case (Steps 3-11, excluding deployment)
+        5. All 9 tests must be listed in success case (Steps 3-10 run in parallel, Step 11 sequential)
         """)
         
         # Call Bedrock API with temperature=0 for deterministic output

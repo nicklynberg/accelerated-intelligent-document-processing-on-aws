@@ -6,15 +6,13 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 ## Test Execution Strategy
 
-### Parallel Execution (Steps 3, 5-10)
-- **7 tests run concurrently** to minimize pipeline runtime
+### Parallel Execution (Steps 3-10)
+- **8 tests run concurrently** to minimize pipeline runtime
 - **Fail-fast enabled**: If any test fails, remaining tests are cancelled and cleanup begins
-- **Expected runtime**: ~30-45 minutes (vs 60+ minutes sequential)
+- **Expected runtime**: ~25-35 minutes (vs 60+ minutes sequential)
 
-### Sequential Execution (Steps 4, 11)
-- **Step 4 (BDA) runs after parallel tests** complete
-  - **Reason**: BDA config activation changes stack default, which would interfere with Step 3 if run in parallel
-- **Step 11 (test-compare) runs after Step 4** complete
+### Sequential Execution (Step 11)
+- **Step 11 (test-compare) runs after parallel tests** complete
   - **Reason**: Requires multiple test runs to compare, runs after all other tests to avoid interference
 
 ## Test Coverage
@@ -56,10 +54,11 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 ---
 
-### Step 4: BDA Mode Test 🔄 *Sequential*
+### Step 4: BDA Mode Test ⚡ *Parallel*
 **What it tests**: Bedrock Data Automation end-to-end processing
-- BDA config upload and activation
-- Packet/media document processing
+- BDA config upload and sync (without activation)
+- BDA blueprint creation via `config-sync-bda`
+- Packet/media document processing using `--config-version`
 - Integrated OCR + classification + extraction via BDA
 - **Verification**:
   - BDA output structure
@@ -68,7 +67,7 @@ The CI/CD pipeline runs a comprehensive smoke test suite that validates all majo
 
 **Test Document**: `samples/lending_package.pdf`  
 **Duration**: ~6-8 minutes  
-**Why Sequential**: Config activation changes stack default, must run after Step 3
+**Implementation**: Uses `idp-cli config-sync-bda` to create BDA project/blueprints, then runs inference with `--config-version` parameter (no activation needed)
 
 ---
 
@@ -331,6 +330,7 @@ idp-cli test-compare --stack-name <stack> --test-run-ids "id1,id2" --output-dir 
 # Config management
 idp-cli config-upload --stack-name <stack> --config-file <file> --config-version <version>
 idp-cli config-activate --stack-name <stack> --config-version <version>
+idp-cli config-sync-bda --stack-name <stack> --config-version <version>
 
 # Discovery workflows
 idp-cli discover --stack-name <stack> --dir samples/ --file-pattern <pattern>
@@ -405,7 +405,7 @@ idp-cli test-compare --stack-name my-stack \
 1. **Step 7 (Test Studio)**: Evaluation timeout - ensure `idp-cli test-result --wait` is used
 2. **Step 8 (Agentic)**: Table parsing failures if OCR quality poor
 3. **Steps 9-10 (Discovery)**: Ingestion job cleanup failures if permissions missing
-4. **Step 4 (BDA)**: Config activation race if run in parallel with Step 3
+4. **Step 4 (BDA)**: BDA sync failures or blueprint creation errors
 5. **Step 11 (test-compare)**: Requires TestResultsResolverFunctionArn in stack outputs
 6. **Parallel Tests**: Fail-fast cancellation if any test fails
 
