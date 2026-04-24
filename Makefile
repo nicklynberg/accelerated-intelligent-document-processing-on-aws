@@ -21,6 +21,10 @@ else
   PIP := $(CURDIR)/$(VENV_DIR)/bin/pip
 endif
 
+# idp-cli invocation — uses `python -m idp_cli.cli` so it works whether or not
+# the virtualenv is activated (picks up $(PYTHON) which prefers .venv).
+IDP_CLI := $(PYTHON) -m idp_cli.cli
+
 ##@ General
 .PHONY: help
 help: ## Show this help message
@@ -393,3 +397,74 @@ dsr-scan: ## Run DSR security scan
 dsr-fix: ## Run DSR interactive fix
 	@echo "Running DSR interactive fix..."
 	$(PYTHON) scripts/dsr/fix.py
+
+##@ Deploy
+# Thin wrappers around `idp-cli publish` / `deploy` / `delete` for the common
+# 80% case. Uncommon flags can still be passed via EXTRA_ARGS="--foo --bar".
+# See 'docs/idp-cli.md' (or 'idp-cli <cmd> --help') for the full option list.
+
+.PHONY: publish deploy delete-stack
+
+# Usage examples:
+#   make publish REGION=us-east-1
+#   make publish REGION=us-east-1 BUCKET_BASENAME=my-idp-artifacts PREFIX=v1
+#   make publish REGION=us-gov-west-1 HEADLESS=1
+#   make publish REGION=us-east-1 PUBLIC=1 EXTRA_ARGS="--clean-build --verbose"
+publish: ## Build & publish IDP artifacts to S3 (Usage: make publish REGION=... [BUCKET_BASENAME=...] [PREFIX=...] [HEADLESS=1] [PUBLIC=1] [EXTRA_ARGS=...])
+ifndef REGION
+	$(error REGION is not set. Usage: make publish REGION=us-east-1 [BUCKET_BASENAME=...] [PREFIX=...] [HEADLESS=1] [PUBLIC=1] [EXTRA_ARGS=...])
+endif
+	@echo -e "$(CYAN)Running idp-cli publish (region=$(REGION))...$(NC)"
+	$(IDP_CLI) publish \
+		--source-dir . \
+		--region $(REGION) \
+		$(if $(BUCKET_BASENAME),--bucket-basename $(BUCKET_BASENAME)) \
+		$(if $(PREFIX),--prefix $(PREFIX)) \
+		$(if $(HEADLESS),--headless) \
+		$(if $(PUBLIC),--public) \
+		$(EXTRA_ARGS)
+
+# Usage examples:
+#   make deploy STACK_NAME=my-idp ADMIN_EMAIL=me@example.com                 # create new stack
+#   make deploy STACK_NAME=my-idp                                             # update existing stack
+#   make deploy STACK_NAME=my-idp-dev ADMIN_EMAIL=me@example.com FROM_CODE=1  # build & deploy from local source
+#   make deploy STACK_NAME=my-idp ADMIN_EMAIL=me@example.com HEADLESS=1       # headless (no UI)
+#   make deploy STACK_NAME=my-idp CUSTOM_CONFIG=./my-config.yaml              # update config on existing stack
+#   make deploy STACK_NAME=my-idp NO_WAIT=1                                   # fire-and-forget (default is --wait)
+#   make deploy STACK_NAME=my-idp EXTRA_ARGS="--max-concurrent 200 --log-level DEBUG"
+deploy: ## Deploy/update IDP CloudFormation stack (Usage: make deploy STACK_NAME=... [ADMIN_EMAIL=...] [REGION=...] [FROM_CODE=1] [HEADLESS=1] [CUSTOM_CONFIG=...] [TEMPLATE_URL=...] [TEMPLATE_FILE=...] [NO_WAIT=1] [EXTRA_ARGS=...])
+ifndef STACK_NAME
+	$(error STACK_NAME is not set. Usage: make deploy STACK_NAME=my-stack [ADMIN_EMAIL=...] [REGION=...] [FROM_CODE=1] [HEADLESS=1] [CUSTOM_CONFIG=...] [NO_WAIT=1] [EXTRA_ARGS=...])
+endif
+	@echo -e "$(CYAN)Running idp-cli deploy (stack=$(STACK_NAME))...$(NC)"
+	$(IDP_CLI) deploy \
+		--stack-name $(STACK_NAME) \
+		$(if $(ADMIN_EMAIL),--admin-email $(ADMIN_EMAIL)) \
+		$(if $(REGION),--region $(REGION)) \
+		$(if $(FROM_CODE),--from-code .) \
+		$(if $(HEADLESS),--headless) \
+		$(if $(CUSTOM_CONFIG),--custom-config $(CUSTOM_CONFIG)) \
+		$(if $(TEMPLATE_URL),--template-url $(TEMPLATE_URL)) \
+		$(if $(TEMPLATE_FILE),--template-file $(TEMPLATE_FILE)) \
+		$(if $(NO_WAIT),,--wait) \
+		$(EXTRA_ARGS)
+
+# Usage examples:
+#   make delete-stack STACK_NAME=test-stack                                   # interactive
+#   make delete-stack STACK_NAME=test-stack FORCE=1                            # skip confirmation
+#   make delete-stack STACK_NAME=test-stack FORCE=1 EMPTY_BUCKETS=1            # empty buckets first
+#   make delete-stack STACK_NAME=test-stack FORCE=1 FORCE_DELETE_ALL=1         # comprehensive cleanup
+delete-stack: ## Delete an IDP CloudFormation stack (Usage: make delete-stack STACK_NAME=... [FORCE=1] [EMPTY_BUCKETS=1] [FORCE_DELETE_ALL=1] [REGION=...] [NO_WAIT=1] [EXTRA_ARGS=...])
+ifndef STACK_NAME
+	$(error STACK_NAME is not set. Usage: make delete-stack STACK_NAME=my-stack [FORCE=1] [EMPTY_BUCKETS=1] [FORCE_DELETE_ALL=1])
+endif
+	@echo -e "$(YELLOW)Running idp-cli delete (stack=$(STACK_NAME))...$(NC)"
+	$(IDP_CLI) delete \
+		--stack-name $(STACK_NAME) \
+		$(if $(FORCE),--force) \
+		$(if $(EMPTY_BUCKETS),--empty-buckets) \
+		$(if $(FORCE_DELETE_ALL),--force-delete-all) \
+		$(if $(REGION),--region $(REGION)) \
+		$(if $(NO_WAIT),,--wait) \
+		$(EXTRA_ARGS)
+

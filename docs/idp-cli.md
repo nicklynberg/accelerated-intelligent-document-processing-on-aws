@@ -91,6 +91,56 @@ cd lib/idp_cli_pkg
 pip install -e ".[test]"
 ```
 
+## Makefile Shortcuts
+
+The root `Makefile` provides convenience wrappers for the most common `idp-cli` commands. These use the project's `.venv` Python automatically — no need to `source .venv/bin/activate` first.
+
+```bash
+# Publish artifacts to S3
+make publish REGION=us-east-1
+make publish REGION=us-east-1 BUCKET_BASENAME=my-artifacts PREFIX=v1
+make publish REGION=us-gov-west-1 HEADLESS=1
+
+# Deploy / update a stack (--wait is the default)
+make deploy STACK_NAME=my-idp ADMIN_EMAIL=me@example.com
+make deploy STACK_NAME=my-idp-dev ADMIN_EMAIL=me@example.com FROM_CODE=1
+make deploy STACK_NAME=my-idp CUSTOM_CONFIG=./my-config.yaml
+
+# Delete a stack
+make delete-stack STACK_NAME=test-stack FORCE=1 FORCE_DELETE_ALL=1
+```
+
+**First-class Make variables** (common flags):
+
+| Variable | Target(s) | Maps to CLI flag |
+|---|---|---|
+| `REGION` | publish, deploy, delete-stack | `--region` |
+| `STACK_NAME` | deploy, delete-stack | `--stack-name` |
+| `ADMIN_EMAIL` | deploy | `--admin-email` |
+| `FROM_CODE=1` | deploy | `--from-code .` |
+| `HEADLESS=1` | publish, deploy | `--headless` |
+| `PUBLIC=1` | publish | `--public` |
+| `BUCKET_BASENAME` | publish | `--bucket-basename` |
+| `PREFIX` | publish | `--prefix` |
+| `CUSTOM_CONFIG` | deploy | `--custom-config` |
+| `TEMPLATE_URL` | deploy | `--template-url` |
+| `TEMPLATE_FILE` | deploy | `--template-file` |
+| `NO_WAIT=1` | deploy, delete-stack | omits `--wait` |
+| `FORCE=1` | delete-stack | `--force` |
+| `EMPTY_BUCKETS=1` | delete-stack | `--empty-buckets` |
+| `FORCE_DELETE_ALL=1` | delete-stack | `--force-delete-all` |
+
+**Uncommon flags** — pass anything else via `EXTRA_ARGS`:
+
+```bash
+make deploy STACK_NAME=my-idp EXTRA_ARGS="--role-arn arn:aws:iam::123:role/Foo --no-rollback"
+make publish REGION=us-east-1 EXTRA_ARGS="--clean-build --verbose"
+```
+
+Run `make help` to see all available targets, or `idp-cli <command> --help` for the full option reference.
+
+---
+
 ## Quick Start
 
 ### Global Options
