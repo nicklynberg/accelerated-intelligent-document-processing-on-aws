@@ -16,6 +16,10 @@ SPDX-License-Identifier: MIT-0
   - Additive: classes without the new flag behave exactly as before.
   - See `docs/classification.md#excluding-static-pages-eg-instructions-legal-boilerplate`.
 
+### Changed
+
+- **Headless deployment documentation generalized** — headless mode is no longer documented as a GovCloud-only capability. New `docs/headless-deployment.md` is the canonical guide covering headless deployment for both Commercial and GovCloud regions (API-only / pipeline integrations, organizational restrictions on UI-layer services, cost optimization, and required for GovCloud). 
+
 ## Templates
    - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.8.yaml`
    - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.8.yaml`
