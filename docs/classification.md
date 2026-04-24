@@ -429,6 +429,8 @@ You can mark a class as *excluded* so that downstream stages
 will **skip** sections classified as that class, avoiding wasted LLM
 calls, tokens, and noise in accuracy metrics.
 
+https://github.com/user-attachments/assets/3c5106ee-ffaf-48d0-ac57-6de78a221474
+
 ### How classification decides a section is "excluded"
 
 The **primary mechanism is the LLM classifier** using each class's
