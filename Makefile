@@ -105,7 +105,7 @@ setup-venv: ## Create .venv and install all packages into it
 	@echo -e "$(YELLOW)   To activate manually: source $(VENV_DIR)/bin/activate$(NC)"
 
 ##@ Code Quality
-lint: ruff-lint format check-arn-partitions validate-buildspec ui-lint codegen-check ## Run all linting (ruff, format, ARN checks, buildspec, UI, codegen)
+lint: ruff-lint format check-arn-partitions validate-buildspec ui-lint codegen-check ## Run all linting (ruff, format, ARN checks, buildspec, UI, codegen). Use FORCE=1 to force UI lint re-run despite checksum match.
 fastlint: ruff-lint format check-arn-partitions validate-buildspec ## Quick lint without UI checks
 
 ruff-lint: ## Run ruff linting with auto-fix
