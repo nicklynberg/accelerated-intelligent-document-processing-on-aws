@@ -255,17 +255,21 @@ endif
 	@echo "Starting UI development server..."
 	cd src/ui && npm run start
 
-ui-lint: ## Run UI linting with checksum caching (skips if unchanged)
+ui-lint: ## Run UI linting with checksum caching (skips if unchanged). Use FORCE=1 to force re-run.
 	@echo "Checking if UI lint is needed..."
 	@CURRENT_HASH=$$($(PYTHON) -c "from publish import IDPPublisher; p = IDPPublisher(); print(p.get_directory_checksum('src/ui'))"); \
 	STORED_HASH=$$(test -f src/ui/.checksum && cat src/ui/.checksum || echo ""); \
-	if [ "$$CURRENT_HASH" != "$$STORED_HASH" ]; then \
-		echo "UI code checksum changed - running lint..."; \
+	if [ -n "$(FORCE)" ] || [ "$$CURRENT_HASH" != "$$STORED_HASH" ]; then \
+		if [ -n "$(FORCE)" ]; then \
+			echo "FORCE=1 set - running lint..."; \
+		else \
+			echo "UI code checksum changed - running lint..."; \
+		fi; \
 		cd src/ui && npm ci --prefer-offline --no-audit && npm run lint -- --fix && npm run typecheck || exit 1; \
 		echo "$$CURRENT_HASH" > .checksum; \
 		echo -e "$(GREEN)✅ UI lint and typecheck completed and checksum updated$(NC)"; \
 	else \
-		echo -e "$(GREEN)✅ UI code checksum unchanged - skipping lint$(NC)"; \
+		echo -e "$(GREEN)✅ UI code checksum unchanged - skipping lint (use FORCE=1 to force re-run)$(NC)"; \
 	fi
 
 ui-build: ## Build UI for production
