@@ -4,6 +4,8 @@ SPDX-License-Identifier: MIT-0
 # Changelog
 
 ## [Unreleased]
+  
+## [0.5.8]
 
 ### Added
 
@@ -14,6 +16,12 @@ SPDX-License-Identifier: MIT-0
   - Additive: classes without the new flag behave exactly as before.
   - See `docs/classification.md#excluding-static-pages-eg-instructions-legal-boilerplate`.
 
+## Templates
+   - us-west-2: `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/genai-idp/idp-main_0.5.8.yaml`
+   - us-east-1: `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/genai-idp/idp-main_0.5.8.yaml`
+   - eu-central-1: `https://s3.eu-central-1.amazonaws.com/aws-ml-blog-eu-central-1/artifacts/genai-idp/idp-main_0.5.8.yaml`
+  
+  
 ## [0.5.7]
 
 ### Added
