@@ -5,6 +5,15 @@ SPDX-License-Identifier: MIT-0
 
 ## [Unreleased]
 
+### Added
+
+- **Excluded-class feature — skip static instruction / legal / boilerplate pages** — Government forms and similar packages often bundle static informational pages (legal warnings, fee instructions, tax notices, oaths) alongside the pages that carry applicant data. Mark a document class with `x-aws-idp-exclude-from-processing: true` and all downstream stages (extraction, assessment, summarization, rule validation, evaluation) skip sections classified as that class — making **zero LLM calls** on boilerplate pages.
+  - Optional `x-aws-idp-exclusion-reason` ("instructions", "legal", "cover-page", …) surfaces as a grey **`Skipped: <reason>`** badge in the UI Sections panel and as an **"Excluded Sections (Not Evaluated)"** table in the evaluation markdown report.
+  - Configurable via the **UI Configuration Editor** → Document Schema → select a document-type class → "Exclude from Processing" checkbox + "Exclusion Reason" input.
+  - New end-to-end sample config at `config_library/unified/ds11-passport-application/` with a matching DS-11 U.S. Passport Application PDF fixture and a standalone demo notebook (`notebooks/usecase-specific-examples/ds11-passport-application/`).
+  - Additive: classes without the new flag behave exactly as before.
+  - See `docs/classification.md#excluding-static-pages-eg-instructions-legal-boilerplate`.
+
 ## [0.5.7]
 
 ### Added
