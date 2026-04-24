@@ -18,7 +18,7 @@ SPDX-License-Identifier: MIT-0
 
 ### Changed
 
-- **UI dependency cleanup — eliminated 11 of 12 npm deprecation warnings** — Replaced deprecated `@aws-sdk/*` packages with `@smithy/*` equivalents, removed unused Babel plugins, migrated ESLint 8→9 (flat config), upgraded Prettier 2→3, and upgraded jsdom 26→29. Added `"type": "module"` to `package.json`. Also added `caughtErrors: 'none'` to ESLint config to stop flagging unused catch clause variables (reduces UI lint warnings from 39 → 21). Added `FORCE=1` arg to `make ui-lint` to force re-run despite checksum match.
+- **UI dependency cleanup — eliminated 11 of 12 npm deprecation warnings** — Replaced deprecated `@aws-sdk/*` packages with `@smithy/*` equivalents, removed unused Babel plugins, migrated ESLint 8→9 (flat config), upgraded Prettier 2→3, and upgraded jsdom 26→29. Added `"type": "module"` to `package.json`. Also added `caughtErrors: 'none'` to ESLint config to stop flagging unused catch clause variables. Added `FORCE=1` arg to `make ui-lint` to force re-run despite checksum match.
 
 - **Headless deployment documentation generalized** — headless mode is no longer documented as a GovCloud-only capability. New `docs/headless-deployment.md` is the canonical guide covering headless deployment for both Commercial and GovCloud regions (API-only / pipeline integrations, organizational restrictions on UI-layer services, cost optimization, and required for GovCloud). 
 
