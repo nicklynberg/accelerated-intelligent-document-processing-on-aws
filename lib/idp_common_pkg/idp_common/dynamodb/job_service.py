@@ -101,3 +101,20 @@ class JobDynamoDBService:
         )
         item = response.get("Attributes")
         return item.get("Files") if item else None
+
+    def mark_results_ready(self, job_id: str, ready: bool = True) -> None:
+        """
+        Mark the job's results.zip as ready (or not) for download.
+
+        The API's GetJob handler uses this flag to avoid returning
+        SUCCEEDED/PARTIALLY_SUCCEEDED before the results zip is uploaded,
+        which would otherwise race the client into a 404 on download.
+        """
+        timestamp = datetime.now(timezone.utc).isoformat()
+        self.client.update_item(
+            key={"PK": f"job#{job_id}", "SK": "metadata"},
+            update_expression="SET ResultsReady = :ready, UpdatedAt = :ts",
+            expression_attribute_names={},
+            expression_attribute_values={":ready": ready, ":ts": timestamp},
+        )
+        logger.info(f"Marked job {job_id} ResultsReady={ready}")
