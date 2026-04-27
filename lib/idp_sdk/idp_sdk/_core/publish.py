@@ -2140,12 +2140,19 @@ STDERR:
                 lines = output.strip().split("\n") if output.strip() else []
 
                 # Separate errors from warnings
+                # cfn-lint output lines start with the rule code (e.g., "E3003 ..." or
+                # "W1030 ..."). Use regex matching so that rule codes elsewhere in the
+                # message (e.g., ARN prefixes like "AWS::EC2::") don't cause
+                # misclassification.
+                import re
+
                 for line in lines:
-                    if not line.strip():
+                    stripped = line.strip()
+                    if not stripped:
                         continue
-                    if line.strip().startswith("E") or ":E" in line:
+                    if re.match(r"^E\d{4}\b", stripped):
                         all_errors.append(f"[{template_name}] {line}")
-                    elif line.strip().startswith("W") or ":W" in line:
+                    elif re.match(r"^W\d{4}\b", stripped):
                         all_warnings.append(f"[{template_name}] {line}")
 
         # Report results

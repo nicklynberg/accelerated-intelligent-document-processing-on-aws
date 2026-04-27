@@ -4740,10 +4740,13 @@ Resources:
           Id: TrackWorkflowCompletion
           RetryPolicy:
             MaximumRetryAttempts: 3
-        - Arn: !If [DeployApiGateway, !GetAtt JobTracker.Arn, !Ref "AWS::NoValue"]
-          Id: TrackJobCompletion
-          RetryPolicy:
-            MaximumRetryAttempts: 3
+        - !If
+          - DeployApiGateway
+          - Arn: !GetAtt JobTracker.Arn
+            Id: TrackJobCompletion
+            RetryPolicy:
+              MaximumRetryAttempts: 3
+          - !Ref "AWS::NoValue"
 
   WorkflowTrackerPermission:
     Type: AWS::Lambda::Permission
