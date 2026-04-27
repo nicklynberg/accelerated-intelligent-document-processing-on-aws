@@ -616,6 +616,11 @@ def deploy(
                 value = match.group(2).strip().rstrip(",")
                 additional_params[key] = value
 
+        # When --headless is used, auto-set EnableHeadless=true stack parameter so
+        # users don't need to pass it twice. Explicit --parameters values win.
+        if headless and "EnableHeadless" not in additional_params:
+            additional_params["EnableHeadless"] = "true"
+
         # Deploy stack via SDK (build_parameters is called internally by client.stack.deploy)
         # Debug: show custom config path hint before deploy
         if custom_config:
