@@ -7,21 +7,48 @@ IDP CLI - Main Command Line Interface
 Command-line tool for batch document processing with the IDP Accelerator.
 """
 
+import json
 import logging
 import os
-import subprocess
 import sys
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-import boto3
-import click
-from idp_sdk import IDPClient
-from rich.console import Console
-from rich.live import Live
-from rich.table import Table
+_SETUP_HELP = """\
+Error: Required packages not found.
 
-from . import display
+idp-cli requires idp-sdk, idp_common, and their dependencies to be installed.
+
+To fix this, run one of:
+  make setup          Install into your current Python environment
+  make setup-venv     Create a .venv and install into it
+
+If you already ran 'make setup-venv', activate it first:
+  source .venv/bin/activate
+
+See docs/idp-cli.md for details.
+"""
+
+try:
+    import boto3
+    import click
+    from idp_sdk import IDPClient
+    from rich.console import Console
+    from rich.live import Live
+    from rich.table import Table
+
+    from . import display
+except ImportError:
+    # Dependencies not installed — main() will print a helpful message and exit.
+    # Define minimal stubs so the module can still be imported for entry point resolution.
+    if not TYPE_CHECKING:
+        click = None
+        IDPClient = None
+        Console = None
+        Live = None
+        Table = None
+        display = None
+        boto3 = None
 
 # Configure logging
 logging.basicConfig(
@@ -29,105 +56,97 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-console = Console()
+console = Console() if Console is not None else None
 
 
-def _build_from_local_code(from_code_dir: str, region: str, stack_name: str) -> tuple:
+def _build_from_local_code(
+    from_code_dir: str,
+    region: str,
+    stack_name: str,
+    *,
+    headless: bool = False,
+    bucket_basename: Optional[str] = None,
+    prefix: Optional[str] = None,
+    public: bool = False,
+    max_workers: Optional[int] = None,
+    clean_build: bool = False,
+    no_validate: bool = False,
+    verbose: bool = False,
+    lint: bool = True,
+) -> tuple:
     """
-    Build project from local code using publish.py
+    Build project from local code using the SDK publish operation.
 
     Args:
         from_code_dir: Path to project root directory
         region: AWS region
         stack_name: CloudFormation stack name (unused but kept for signature compatibility)
+        headless: If True, also generate a headless template variant.
+        bucket: S3 bucket basename for artifacts (auto-generated if not provided).
+        prefix: S3 key prefix for artifacts (default: idp-cli).
+        public: If True, make artifacts publicly readable.
+        max_workers: Max concurrent build workers.
+        clean_build: Force full rebuild.
+        no_validate: Skip CloudFormation template validation.
+        verbose: Enable verbose output.
+        lint: Enable linting (default: True).
 
     Returns:
-        Tuple of (template_path, None) on success
+        Tuple of (template_path, template_url) on success.
+        If headless, returns the headless template path/url instead.
 
     Raises:
         SystemExit: On build failure
     """
-    # Verify publish.py exists
-    publish_script = os.path.join(from_code_dir, "publish.py")
-    if not os.path.isfile(publish_script):
-        console.print(f"[red]✗ Error: publish.py not found in {from_code_dir}[/red]")
-        console.print(
-            "[yellow]Tip: --from-code should point to the project root directory[/yellow]"
-        )
-        sys.exit(1)
-
-    # Get AWS account ID
-    try:
-        sts = boto3.client("sts", region_name=region)
-        account_id = sts.get_caller_identity()["Account"]
-    except Exception as e:
-        console.print(f"[red]✗ Error: Failed to get AWS account ID: {e}[/red]")
-        sys.exit(1)
-
-    # Set parameters for publish.py
-    cfn_bucket_basename = f"idp-accelerator-artifacts-{account_id}"
-    cfn_prefix = "idp-cli"
-
     console.print("[bold cyan]Building project from source...[/bold cyan]")
-    console.print(f"[dim]Bucket: {cfn_bucket_basename}[/dim]")
-    console.print(f"[dim]Prefix: {cfn_prefix}[/dim]")
+    console.print(f"[dim]Source: {from_code_dir}[/dim]")
     console.print(f"[dim]Region: {region}[/dim]")
+    if headless:
+        console.print("[dim]Mode: headless[/dim]")
+    if bucket_basename:
+        console.print(f"[dim]Bucket: {bucket_basename}[/dim]")
+    if prefix:
+        console.print(f"[dim]Prefix: {prefix}[/dim]")
     console.print()
 
-    # Build command
-    cmd = [
-        sys.executable,  # Use same Python interpreter
-        publish_script,
-        cfn_bucket_basename,
-        cfn_prefix,
-        region,
-    ]
-
-    console.print(f"[dim]Running: {' '.join(cmd)}[/dim]")
-    console.print()
-
-    # Run with streaming output
     try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-            cwd=from_code_dir,
+        client = IDPClient(region=region)
+        result = client.publish.build(
+            source_dir=from_code_dir,
+            bucket=bucket_basename,
+            prefix=prefix,
+            region=region,
+            headless=headless,
+            public=public,
+            max_workers=max_workers,
+            clean_build=clean_build,
+            no_validate=no_validate,
+            verbose=verbose,
+            lint=lint,
         )
 
-        # Stream output line by line
-        for line in process.stdout or []:  # type: ignore
-            # Print each line immediately (preserve formatting from publish.py)
-            print(line, end="")
-
-        process.wait()
-
-        if process.returncode != 0:
-            console.print("[red]✗ Build failed. See output above for details.[/red]")
+        if not result.success:
+            console.print(f"[red]✗ Build failed: {result.error}[/red]")
             sys.exit(1)
 
+        console.print()
+
+        # Return headless template if headless mode
+        if headless and result.headless_template_path:
+            console.print(
+                f"[green]✓ Build complete (headless). Template: {result.headless_template_path}[/green]"
+            )
+            return result.headless_template_path, result.headless_template_url
+
+        console.print(
+            f"[green]✓ Build complete. Template: {result.template_path}[/green]"
+        )
+        console.print()
+        return result.template_path, result.template_url
+
     except Exception as e:
-        console.print(f"[red]✗ Error running publish.py: {e}[/red]")
+        console.print(f"[red]✗ Error during build: {e}[/red]")
         sys.exit(1)
-
-    # Verify template was created
-    template_path = os.path.join(from_code_dir, ".aws-sam", "idp-main.yaml")
-    if not os.path.isfile(template_path):
-        console.print(
-            f"[red]✗ Error: Built template not found at {template_path}[/red]"
-        )
-        console.print(
-            "[yellow]The build may have failed or the template was not generated.[/yellow]"
-        )
-        sys.exit(1)
-
-    console.print()
-    console.print(f"[green]✓ Build complete. Using template: {template_path}[/green]")
-    console.print()
-
-    return template_path, None
 
 
 def _display_deployment_failure(client, stack_name: str, result):
@@ -157,8 +176,18 @@ def _display_deployment_failure(client, stack_name: str, result):
     console.print()
 
     # Get detailed failure analysis
+    # Pass deploy_start_time if available to filter stale events from previous deployments
     try:
-        analysis = client.stack.get_failure_analysis(stack_name)
+        deploy_start_time = (
+            result.deploy_start_time
+            if hasattr(result, "deploy_start_time")
+            else result.get("deploy_start_time")
+            if isinstance(result, dict)
+            else None
+        )
+        analysis = client.stack.get_failure_analysis(
+            stack_name, deploy_start_time=deploy_start_time
+        )
 
         if analysis.root_causes:
             console.print("[bold red]Root Cause Analysis:[/bold red]")
@@ -208,7 +237,7 @@ TEMPLATE_URLS = {
 
 
 @click.group()
-@click.version_option(version="0.5.3")
+@click.version_option(version="0.5.7")
 def cli():
     """
     IDP CLI - Batch document processing for IDP Accelerator
@@ -243,6 +272,11 @@ def cli():
     help="URL to CloudFormation template in S3 (default: auto-selected based on region)",
 )
 @click.option(
+    "--template-file",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to a local CloudFormation template file (e.g., .aws-sam/idp-main.yaml from a previous publish)",
+)
+@click.option(
     "--max-concurrent",
     default=100,
     type=int,
@@ -271,11 +305,48 @@ def cli():
 )
 @click.option("--region", help="AWS region (optional)")
 @click.option("--role-arn", help="CloudFormation service role ARN")
+@click.option(
+    "--headless",
+    is_flag=True,
+    help="Deploy headless (no UI/AppSync/Cognito/WAF) — for API-only or GovCloud deployments",
+)
+@click.option(
+    "--bucket-basename",
+    default=None,
+    help="S3 bucket basename for artifacts — region is appended automatically (auto-generated if not provided, used with --from-code)",
+)
+@click.option(
+    "--prefix",
+    default=None,
+    help="S3 key prefix for artifacts (default: idp-cli, used with --from-code)",
+)
+@click.option(
+    "--public",
+    is_flag=True,
+    help="Make S3 artifacts publicly readable (used with --from-code)",
+)
+@click.option(
+    "--build-max-workers",
+    type=int,
+    default=None,
+    help="Concurrent build workers (used with --from-code)",
+)
+@click.option(
+    "--clean-build",
+    is_flag=True,
+    help="Force full rebuild by deleting checksums (used with --from-code)",
+)
+@click.option(
+    "--no-validate-template",
+    is_flag=True,
+    help="Skip CloudFormation template validation (used with --from-code)",
+)
 def deploy(
     stack_name: str,
     admin_email: str,
     from_code: Optional[str],
     template_url: str,
+    template_file: Optional[str],
     max_concurrent: int,
     log_level: str,
     enable_hitl: str,
@@ -285,12 +356,24 @@ def deploy(
     no_rollback: bool,
     region: Optional[str],
     role_arn: Optional[str],
+    headless: bool,
+    bucket_basename: Optional[str],
+    prefix: Optional[str],
+    public: bool,
+    build_max_workers: Optional[int],
+    clean_build: bool,
+    no_validate_template: bool,
 ):
     """
     Deploy or update IDP stack from command line
     
     For new stacks, --admin-email is required.
     For existing stacks, only specify parameters you want to update.
+    
+    Headless mode (--headless) deploys without UI, AppSync, Cognito, WAF,
+    Agents, HITL, and Knowledge Base — suitable for API-only or GovCloud use.
+    
+    To build templates without deploying, use 'idp-cli publish' instead.
     
     Examples:
     
@@ -300,14 +383,14 @@ def deploy(
       # Deploy from local code
       idp-cli deploy --stack-name my-idp --from-code . --admin-email user@example.com --wait
       
-      # Update existing stack with local config file
-      idp-cli deploy --stack-name my-idp --custom-config ./my-config.yaml
+      # Deploy headless from local code
+      idp-cli deploy --stack-name my-idp --from-code . --headless --wait
       
-      # Update existing stack from local code
-      idp-cli deploy --stack-name my-idp --from-code . --wait
+      # Deploy headless from pre-built template
+      idp-cli deploy --stack-name my-idp --headless --wait
       
-      # Update existing stack with custom settings
-      idp-cli deploy --stack-name my-idp --max-concurrent 200 --wait
+      # Deploy from code with custom bucket/prefix
+      idp-cli deploy --stack-name my-idp --from-code . --bucket my-artifacts --prefix v1 --wait
       
       # Create with additional parameters
       idp-cli deploy --stack-name my-idp \\
@@ -316,9 +399,10 @@ def deploy(
     """
     try:
         # Validate mutually exclusive options
-        if from_code and template_url:
+        exclusive_count = sum(1 for x in [from_code, template_url, template_file] if x)
+        if exclusive_count > 1:
             console.print(
-                "[red]✗ Error: Cannot specify both --from-code and --template-url[/red]"
+                "[red]✗ Error: Cannot specify more than one of --from-code, --template-url, --template-file[/red]"
             )
             sys.exit(1)
 
@@ -337,8 +421,87 @@ def deploy(
         template_path = None
         if from_code:
             template_path, template_url = _build_from_local_code(
-                from_code, region, stack_name
+                from_code,
+                region,
+                stack_name,
+                headless=headless,
+                bucket_basename=bucket_basename,
+                prefix=prefix,
+                public=public,
+                max_workers=build_max_workers,
+                clean_build=clean_build,
+                no_validate=no_validate_template,
             )
+
+        # Handle local template file (from a previous publish)
+        elif template_file:
+            template_path = os.path.abspath(template_file)
+            console.print(f"[bold]Using local template: {template_path}[/bold]")
+
+        # Handle headless mode for pre-built templates (no --from-code)
+        elif headless and not template_url:
+            # Download default template, transform to headless, upload to temp bucket
+            console.print("[bold cyan]Generating headless template...[/bold cyan]")
+            if region in TEMPLATE_URLS:
+                source_url = TEMPLATE_URLS[region]
+            else:
+                supported_regions = ", ".join(TEMPLATE_URLS.keys())
+                raise ValueError(
+                    f"Region '{region}' is not supported for headless mode. "
+                    f"Supported regions: {supported_regions}. "
+                    f"Please use --from-code or --template-url explicitly."
+                )
+
+            # Download template, transform, upload
+            import tempfile
+
+            import boto3 as _boto3
+            import requests
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # Download
+                local_template = os.path.join(tmpdir, "idp-main.yaml")
+                console.print(f"[dim]Downloading template from {source_url}...[/dim]")
+                resp = requests.get(source_url, timeout=60)
+                resp.raise_for_status()
+                with open(local_template, "wb") as f:
+                    f.write(resp.content)
+
+                # Transform
+                headless_template = os.path.join(tmpdir, "idp-headless.yaml")
+                client_tmp = IDPClient(region=region)
+                is_govcloud = region and region.startswith("us-gov-")
+                transform_result = client_tmp.publish.transform_template_headless(
+                    source_template=local_template,
+                    output_path=headless_template,
+                    update_govcloud_config=is_govcloud,
+                )
+                if not transform_result.success:
+                    console.print(
+                        f"[red]✗ Headless transformation failed: {transform_result.error}[/red]"
+                    )
+                    sys.exit(1)
+
+                # Upload to per-account bucket
+                sts = _boto3.client("sts", region_name=region)
+                account_id = sts.get_caller_identity()["Account"]
+                bucket_name = f"idp-accelerator-artifacts-{account_id}-{region}"
+                s3 = _boto3.client("s3", region_name=region)
+                s3_key = "idp-cli/idp-headless.yaml"
+                s3.upload_file(
+                    headless_template,
+                    bucket_name,
+                    s3_key,
+                    ExtraArgs={"ContentType": "text/yaml"},
+                )
+                template_url = (
+                    f"https://s3.{region}.amazonaws.com/{bucket_name}/{s3_key}"
+                )
+                # Note: template_path left as None — the temp file will be deleted
+                # when this `with` block exits. Deploy will use template_url instead.
+                console.print(
+                    f"[green]✓ Headless template uploaded: {template_url}[/green]"
+                )
 
         # Determine template URL (user-provided takes precedence)
         elif not template_url:
@@ -452,6 +615,11 @@ def deploy(
                 key = match.group(1).strip()
                 value = match.group(2).strip().rstrip(",")
                 additional_params[key] = value
+
+        # When --headless is used, auto-set EnableHeadless=true stack parameter so
+        # users don't need to pass it twice. Explicit --parameters values win.
+        if headless and "EnableHeadless" not in additional_params:
+            additional_params["EnableHeadless"] = "true"
 
         # Deploy stack via SDK (build_parameters is called internally by client.stack.deploy)
         # Debug: show custom config path hint before deploy
@@ -943,9 +1111,13 @@ def delete(
     help="Delete all documents in this batch (alternative to --document-ids)",
 )
 @click.option(
+    "--pattern",
+    help='Wildcard pattern to match document keys (e.g. "batch-123/*.pdf", "*invoice*")',
+)
+@click.option(
     "--status-filter",
     type=click.Choice(["FAILED", "COMPLETED", "PROCESSING", "QUEUED"]),
-    help="Only delete documents with this status (use with --batch-id)",
+    help="Only delete documents with this status (use with --batch-id or --pattern)",
 )
 @click.option(
     "--dry-run",
@@ -963,6 +1135,7 @@ def delete_documents_cmd(
     stack_name: str,
     document_ids: Optional[str],
     batch_id: Optional[str],
+    pattern: Optional[str],
     status_filter: Optional[str],
     dry_run: bool,
     force: bool,
@@ -991,6 +1164,12 @@ def delete_documents_cmd(
       # Delete only failed documents in a batch
       idp-cli delete-documents --stack-name my-stack --batch-id cli-batch-20250123 --status-filter FAILED
 
+      # Delete documents matching a wildcard pattern
+      idp-cli delete-documents --stack-name my-stack --pattern "batch-123/*.pdf"
+
+      # Delete all failed invoice documents
+      idp-cli delete-documents --stack-name my-stack --pattern "*invoice*" --status-filter FAILED
+
       # Dry run to see what would be deleted
       idp-cli delete-documents --stack-name my-stack --batch-id cli-batch-20250123 --dry-run
 
@@ -999,19 +1178,24 @@ def delete_documents_cmd(
     """
     try:
         import boto3
-        from idp_common.delete_documents import delete_documents, get_documents_by_batch
+        from idp_common.delete_documents import (
+            delete_documents,
+            get_documents_by_batch,
+            get_documents_by_pattern,
+        )
         from idp_sdk import IDPClient
 
-        # Validate input
-        if not document_ids and not batch_id:
+        # Validate input - exactly one of document_ids, batch_id, or pattern required
+        selector_count = sum(1 for x in [document_ids, batch_id, pattern] if x)
+        if selector_count == 0:
             console.print(
-                "[red]✗ Error: Must specify either --document-ids or --batch-id[/red]"
+                "[red]✗ Error: Must specify one of --document-ids, --batch-id, or --pattern[/red]"
             )
             sys.exit(1)
 
-        if document_ids and batch_id:
+        if selector_count > 1:
             console.print(
-                "[red]✗ Error: Cannot specify both --document-ids and --batch-id[/red]"
+                "[red]✗ Error: Cannot specify more than one of --document-ids, --batch-id, --pattern[/red]"
             )
             sys.exit(1)
 
@@ -1040,6 +1224,27 @@ def delete_documents_cmd(
         if document_ids:
             doc_list = [d.strip() for d in document_ids.split(",")]
             console.print(f"Selected {len(doc_list)} document(s) for deletion")
+        elif pattern:
+            console.print(
+                f"[bold blue]Finding documents matching pattern: {pattern}[/bold blue]"
+            )
+            doc_list = get_documents_by_pattern(
+                tracking_table=tracking_table,
+                pattern=pattern,
+                status_filter=status_filter,
+            )
+            if not doc_list:
+                console.print(
+                    f"[yellow]No documents found matching pattern: {pattern}[/yellow]"
+                )
+                if status_filter:
+                    console.print(
+                        f"[yellow]  (with status filter: {status_filter})[/yellow]"
+                    )
+                sys.exit(0)
+            console.print(f"Found {len(doc_list)} document(s) matching pattern")
+            if status_filter:
+                console.print(f"  (filtered by status: {status_filter})")
         else:
             console.print(
                 f"[bold blue]Getting documents for batch: {batch_id}[/bold blue]"
@@ -2705,6 +2910,10 @@ def _monitor_progress(
     status_data = {}
     stats = {}
 
+    # Minimum wait time before considering batch complete (seconds)
+    # This gives time for documents to be picked up by the queue and tracked in DynamoDB
+    MIN_WAIT_BEFORE_COMPLETE = 60
+
     try:
         with Live(console=console, refresh_per_second=1) as live:
             while True:
@@ -2723,8 +2932,22 @@ def _monitor_progress(
                 live.update(layout)
 
                 # Check if all complete
+                # Add grace period: don't exit early if no documents have completed/failed yet
+                # This handles the case where documents are still being picked up by the queue
                 if stats["all_complete"]:
-                    break
+                    # If we have actual completions or failures, we can exit
+                    has_terminal_docs = stats["completed"] > 0 or stats["failed"] > 0
+                    # Or if we've waited long enough (documents should have started by now)
+                    waited_long_enough = elapsed_time >= MIN_WAIT_BEFORE_COMPLETE
+
+                    if has_terminal_docs or waited_long_enough:
+                        break
+                    else:
+                        # Documents haven't started yet, keep waiting
+                        logger.debug(
+                            f"all_complete=True but no terminal docs yet, waiting... "
+                            f"(elapsed={elapsed_time:.1f}s, min_wait={MIN_WAIT_BEFORE_COMPLETE}s)"
+                        )
 
                 # Wait before next check
                 time.sleep(refresh_interval)
@@ -2826,8 +3049,6 @@ def _invoke_test_set_resolver(
     """Invoke test set resolver lambda for auto-detection"""
     import json
 
-    import boto3
-
     lambda_client = boto3.client("lambda", region_name=region)
 
     # Handle pagination to get all functions - EXACT same logic as test runner
@@ -2886,8 +3107,6 @@ def _invoke_test_runner(
 ):
     """Invoke test runner lambda to start test set processing"""
     import json
-
-    import boto3
 
     # Find test runner function by name pattern
     lambda_client = boto3.client("lambda", region_name=region)
@@ -2959,7 +3178,6 @@ def _get_test_set_document_ids(
     resources: dict,
 ):
     """Get document IDs from test set for monitoring"""
-    import boto3
 
     # Get test set bucket from resources
     test_set_bucket = resources.get("TestSetBucket")
@@ -3019,7 +3237,6 @@ def _create_test_set_from_manifest(
     """Create test set structure from manifest files"""
     import os
 
-    import boto3
     import pandas as pd
 
     # Get test set bucket
@@ -4680,8 +4897,793 @@ def _write_discover_output(output, all_schemas, console, is_batch=True):
             )
 
 
+@cli.command(name="discover-multidoc")
+@click.option(
+    "--dir",
+    "document_dir",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True),
+    help="Directory containing documents to analyze (recursive scan)",
+)
+@click.option(
+    "--document",
+    "-d",
+    "documents",
+    multiple=True,
+    type=click.Path(exists=True),
+    help="Individual document files (repeatable: -d doc1.pdf -d doc2.png)",
+)
+@click.option(
+    "--embedding-model",
+    default=None,
+    help="Bedrock embedding model ID (default: us.cohere.embed-v4:0)",
+)
+@click.option(
+    "--analysis-model",
+    default=None,
+    help="Bedrock LLM for cluster analysis (default: us.anthropic.claude-sonnet-4-6)",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(),
+    help="Output directory for discovered JSON schemas",
+)
+@click.option(
+    "--stack-name",
+    default=None,
+    help="CloudFormation stack name (required for --save-to-config)",
+)
+@click.option(
+    "--config-version",
+    default=None,
+    help="Configuration version to save schemas to",
+)
+@click.option(
+    "--save-to-config",
+    is_flag=True,
+    default=False,
+    help="Save discovered schemas to the stack's configuration",
+)
+@click.option("--region", default=None, help="AWS region")
+def multi_discover(
+    document_dir,
+    documents,
+    embedding_model,
+    analysis_model,
+    output,
+    stack_name,
+    config_version,
+    save_to_config,
+    region,
+):
+    """Discover document classes from a collection of documents.
+
+    Analyzes a directory of documents using embedding-based clustering and
+    agentic analysis to automatically discover document classes and generate
+    JSON Schemas.
+
+    Requires: make setup (or: pip install idp-common[multi_document_discovery])
+
+    Note: Requires at least 2 documents per expected class. Clusters with
+    fewer than 2 documents are filtered as noise. For discovering schemas
+    from individual documents, use 'idp-cli discover' instead.
+
+    \b
+    Examples:
+      # Discover from a directory of documents
+      idp-cli discover-multidoc --dir ./samples/
+
+      # Discover with explicit files
+      idp-cli discover-multidoc -d doc1.pdf -d doc2.png -d doc3.jpg
+
+      # Save schemas to output directory
+      idp-cli discover-multidoc --dir ./samples/ -o ./schemas/
+
+      # Save to stack configuration
+      idp-cli discover-multidoc --dir ./samples/ --save-to-config \\
+          --stack-name IDP --config-version v2
+    """
+    import json
+
+    from rich.console import Console
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.table import Table
+
+    console = Console()
+
+    if not document_dir and not documents:
+        console.print(
+            "[red]Error: Either --dir or --document/-d must be provided[/red]"
+        )
+        sys.exit(1)
+
+    if save_to_config and not stack_name:
+        console.print(
+            "[red]Error: --stack-name is required when using --save-to-config[/red]"
+        )
+        sys.exit(1)
+
+    if save_to_config and not config_version:
+        console.print(
+            "[red]Error: --config-version is required when using --save-to-config[/red]"
+        )
+        sys.exit(1)
+
+    try:
+        from idp_sdk import IDPClient
+    except ImportError:
+        console.print("[red]Error: idp-sdk is required. pip install idp-sdk[/red]")
+        sys.exit(1)
+
+    client = IDPClient(stack_name=stack_name, region=region)
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=False,
+    ) as progress:
+        task = progress.add_task("Starting multi-document discovery...", total=None)
+
+        def _progress_callback(step: str, data=None):
+            data = data or {}
+            if step == "documents_found":
+                progress.update(
+                    task,
+                    description=f"Found {data.get('count', '?')} documents",
+                )
+            elif step == "generating_embeddings":
+                progress.update(
+                    task,
+                    description=(
+                        f"Generating embeddings for {data.get('total', '?')} documents..."
+                    ),
+                )
+            elif step == "embedding_progress":
+                done = data.get("done", 0)
+                total = data.get("total", 0)
+                progress.update(
+                    task,
+                    description=f"Embedding documents... {done}/{total}",
+                )
+            elif step == "clustering":
+                progress.update(
+                    task,
+                    description=(
+                        f"Clustering {data.get('num_documents', '?')} documents..."
+                    ),
+                )
+            elif step == "clustering_complete":
+                progress.update(
+                    task,
+                    description=(f"Found {data.get('num_clusters', '?')} clusters"),
+                )
+            elif step == "analyzing_clusters":
+                progress.update(
+                    task,
+                    description=(
+                        f"Analyzing {data.get('total', '?')} clusters with AI agent..."
+                    ),
+                )
+            elif step == "cluster_analysis_progress":
+                done = data.get("done", 0)
+                total = data.get("total", 0)
+                cls = data.get("classification", "")
+                label = f" → {cls}" if cls else ""
+                progress.update(
+                    task,
+                    description=f"Analyzing clusters... {done}/{total}{label}",
+                )
+            elif step == "reflecting":
+                progress.update(task, description="Generating reflection report...")
+            elif step == "saving_to_config":
+                progress.update(
+                    task,
+                    description=(
+                        f"Saving to config version '{data.get('version', '?')}'..."
+                    ),
+                )
+            elif step == "pipeline_complete":
+                progress.update(task, description="Pipeline complete ✓")
+
+        result = client.discovery.run_multi_doc(
+            document_dir=document_dir,
+            document_paths=list(documents) if documents else None,
+            embedding_model_id=embedding_model,
+            analysis_model_id=analysis_model,
+            save_to_config=save_to_config,
+            config_version=config_version,
+            output_dir=output,
+            progress_callback=_progress_callback,
+            region=region,
+        )
+
+    # Display results
+    console.print()
+
+    if result.status == "FAILED":
+        console.print(f"[red]✗ Discovery failed: {result.error}[/red]")
+        sys.exit(1)
+
+    # Summary table
+    table = Table(title="Multi-Document Discovery Results", show_lines=True)
+    table.add_column("Cluster", style="cyan", justify="center")
+    table.add_column("Classification", style="bold green")
+    table.add_column("Documents", style="yellow", justify="center")
+    table.add_column("Fields", style="magenta", justify="center")
+    table.add_column("Status", justify="center")
+
+    for dc in result.discovered_classes:
+        if dc.error:
+            table.add_row(
+                str(dc.cluster_id),
+                "—",
+                str(dc.document_count),
+                "—",
+                "[red]✗ Error[/red]",
+            )
+        else:
+            num_fields = (
+                len(dc.json_schema.get("properties", {})) if dc.json_schema else 0
+            )
+            table.add_row(
+                str(dc.cluster_id),
+                dc.classification or "Unknown",
+                str(dc.document_count),
+                str(num_fields),
+                "[green]✓[/green]",
+            )
+
+    console.print(table)
+    console.print()
+
+    # Stats line
+    console.print(
+        f"[bold]Summary:[/bold] {result.total_documents} documents → "
+        f"{result.total_clusters} clusters → "
+        f"{len([c for c in result.discovered_classes if not c.error])} schemas"
+    )
+
+    if result.noise_documents > 0:
+        console.print(
+            f"[yellow]⚠ {result.noise_documents} documents failed embedding[/yellow]"
+        )
+
+    if result.config_version:
+        console.print(
+            f"[green]✓ Schemas saved to config version: {result.config_version}[/green]"
+        )
+
+    if output:
+        console.print(f"[green]✓ Schemas written to: {output}[/green]")
+
+    # Print schemas to stdout if no output specified
+    if not output and not save_to_config:
+        all_schemas = [
+            dc.json_schema
+            for dc in result.discovered_classes
+            if dc.json_schema and not dc.error
+        ]
+        if all_schemas:
+            console.print()
+            console.print("[bold]Discovered schemas:[/bold]")
+            console.print(json.dumps(all_schemas, indent=2))
+
+    # Print reflection report if available
+    if result.reflection_report:
+        console.print()
+        console.print("[bold]Reflection Report:[/bold]")
+        from rich.markdown import Markdown
+
+        console.print(Markdown(result.reflection_report))
+
+    if result.status == "PARTIAL":
+        console.print(
+            "\n[yellow]⚠ Some clusters failed analysis. "
+            "Check the errors above.[/yellow]"
+        )
+        sys.exit(1)
+
+
+@cli.command()
+@click.option(
+    "--source-dir",
+    default=".",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True),
+    help="Path to IDP project root directory",
+)
+@click.option(
+    "--bucket-basename",
+    default=None,
+    help="S3 bucket basename for artifacts — region is appended automatically (auto-generated if not provided)",
+)
+@click.option(
+    "--prefix", default=None, help="S3 key prefix for artifacts (default: idp-cli)"
+)
+@click.option("--region", required=True, help="AWS region for deployment")
+@click.option(
+    "--headless", is_flag=True, help="Also generate a headless (no-UI) template variant"
+)
+@click.option("--public", is_flag=True, help="Make S3 artifacts publicly readable")
+@click.option(
+    "--max-workers",
+    type=int,
+    default=None,
+    help="Maximum concurrent build workers (default: auto-detect)",
+)
+@click.option(
+    "--clean-build",
+    is_flag=True,
+    help="Delete all checksum files to force full rebuild",
+)
+@click.option(
+    "--no-validate", is_flag=True, help="Skip CloudFormation template validation"
+)
+@click.option("--verbose", "-v", is_flag=True, help="Enable verbose build output")
+@click.option(
+    "--lint/--no-lint",
+    default=True,
+    help="Enable/disable ruff linting and cfn-lint (default: enabled)",
+)
+def publish(
+    source_dir: str,
+    bucket_basename: Optional[str],
+    prefix: Optional[str],
+    region: str,
+    headless: bool,
+    public: bool,
+    max_workers: Optional[int],
+    clean_build: bool,
+    no_validate: bool,
+    verbose: bool,
+    lint: bool,
+):
+    """
+    Build, package, and publish IDP CloudFormation artifacts to S3
+
+    This command is the CLI equivalent of publish.py. It builds all Lambda
+    functions, Lambda layers, SAM templates, packages the UI, and uploads
+    everything to S3. Optionally generates a headless template variant.
+
+    Examples:
+
+      # Standard build and publish
+      idp-cli publish --source-dir . --region us-east-1
+
+      # With custom bucket and prefix
+      idp-cli publish --source-dir . --bucket my-artifacts --prefix v1 --region us-east-1
+
+      # Build with headless template
+      idp-cli publish --source-dir . --region us-east-1 --headless
+
+      # Public artifacts (for shared deployments)
+      idp-cli publish --source-dir . --region us-east-1 --public
+
+      # Full rebuild with verbose output
+      idp-cli publish --source-dir . --region us-east-1 --clean-build --verbose
+
+      # Skip validation
+      idp-cli publish --source-dir . --region us-east-1 --no-validate
+    """
+    try:
+        client = IDPClient(region=region)
+        result = client.publish.build(
+            source_dir=source_dir,
+            bucket=bucket_basename,
+            prefix=prefix,
+            region=region,
+            headless=headless,
+            public=public,
+            max_workers=max_workers,
+            clean_build=clean_build,
+            no_validate=no_validate,
+            verbose=verbose,
+            lint=lint,
+        )
+
+        if not result.success:
+            console.print(f"[red]✗ Publish failed: {result.error}[/red]")
+            sys.exit(1)
+
+        # Print deployment URLs
+        console.print()
+        client.publish.print_deployment_urls(
+            template_url=result.template_url or "",
+            region=region,
+            headless_template_url=result.headless_template_url,
+        )
+        console.print()
+        console.print("[bold green]✅ Publish complete![/bold green]")
+
+    except Exception as e:
+        logger.error(f"Error during publish: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option("--region", default=None, help="AWS region")
+@click.option(
+    "--prompt",
+    default=None,
+    help="Single-shot prompt (non-interactive mode)",
+)
+@click.option(
+    "--enable-code-intelligence",
+    is_flag=True,
+    default=False,
+    help="Enable Code Intelligence Agent (uses external third-party services)",
+)
+def chat(
+    stack_name: str,
+    region: Optional[str],
+    prompt: Optional[str],
+    enable_code_intelligence: bool,
+):
+    """Interactive Agent Companion Chat from the terminal.
+
+    Provides access to the full multi-agent orchestrator including
+    Analytics, Error Analyzer, and other agents.
+
+    \b
+    Examples:
+      # Interactive mode
+      idp-cli chat --stack-name IDP
+
+      # Single-shot mode
+      idp-cli chat --stack-name IDP --prompt "How many documents were processed today?"
+
+      # With Code Intelligence (external services)
+      idp-cli chat --stack-name IDP --enable-code-intelligence
+    """
+    try:
+        from .chat import run_chat
+    except ImportError:
+        console.print(
+            "[red]✗ Chat requires idp_common[agents] to be installed.\n"
+            "  Run: pip install -e 'lib/idp_common_pkg[agents]'[/red]"
+        )
+        sys.exit(1)
+
+    run_chat(
+        stack_name=stack_name,
+        region=region,
+        prompt=prompt,
+        enable_code_intelligence=enable_code_intelligence,
+    )
+
+
+@cli.command(name="test-result")
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option("--test-run-id", required=True, help="Test run ID")
+@click.option("--region", default=None, help="AWS region")
+@click.option("--wait", is_flag=True, help="Wait for evaluation to complete")
+@click.option(
+    "--timeout", default=600, type=int, help="Timeout in seconds (default: 600)"
+)
+@click.option(
+    "--output-dir",
+    type=click.Path(),
+    help="Output directory for saving results JSON file",
+)
+def test_result(
+    stack_name: str,
+    test_run_id: str,
+    region: Optional[str],
+    wait: bool,
+    timeout: int,
+    output_dir: Optional[str],
+):
+    """Get test results for a specific test run.
+
+    Invokes TestResultsResolverFunction to trigger evaluation if needed
+    and retrieve test results including accuracy, precision, recall, F1 score, and cost.
+
+    \b
+    Examples:
+      # Get results immediately (may show evaluating status)
+      idp-cli test-result --stack-name my-stack --test-run-id fake-w2-20260409-123456
+
+      # Wait for evaluation to complete
+      idp-cli test-result --stack-name my-stack --test-run-id fake-w2-20260409-123456 --wait --timeout 900
+
+      # Save results to file
+      idp-cli test-result --stack-name my-stack --test-run-id fake-w2-20260409-123456 --wait --output-dir ./results
+    """
+    if not region:
+        region = os.environ.get("AWS_REGION", "us-east-1")
+
+    try:
+        # Use SDK to get test result
+        from idp_sdk import IDPClient
+
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        if wait:
+            console.print(
+                f"[yellow]⏳ Waiting for test run to complete (up to {timeout}s)...[/yellow]"
+            )
+
+        test_result = client.testing.get_test_result(
+            test_run_id=test_run_id,
+            wait=wait,
+            timeout=timeout,
+            poll_interval=10,
+        )
+
+        # Save to file if output-dir specified
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            output_file = os.path.join(output_dir, f"{test_run_id}-result.json")
+            with open(output_file, "w") as f:
+                # Use raw_data for complete JSON export
+                json.dump(test_result.raw_data, f, indent=2, default=str)
+            console.print(f"[green]✓ Results saved to: {output_file}[/green]\n")
+
+        # Display results using Rich formatting
+        console.print("\n[bold green]✓ Test Results[/bold green]\n")
+        console.print(f"[bold]Test Run:[/bold] {test_result.test_run_id}")
+        console.print(f"[bold]Test Set:[/bold] {test_result.test_set_name}")
+        console.print(f"[bold]Status:[/bold] {test_result.status}")
+        console.print(
+            f"[bold]Files:[/bold] {test_result.completed_files}/{test_result.files_count} completed"
+        )
+
+        if test_result.failed_files > 0:
+            console.print(
+                f"[bold red]Failed Files:[/bold red] {test_result.failed_files}"
+            )
+
+        console.print()
+
+        if test_result.overall_accuracy is not None:
+            console.print(
+                f"[bold cyan]Overall Accuracy:[/bold cyan] {test_result.overall_accuracy:.2%}"
+            )
+
+        if test_result.accuracy_breakdown:
+            breakdown = test_result.accuracy_breakdown
+            console.print(
+                f"[bold cyan]Precision:[/bold cyan] {breakdown.get('precision', 0):.2%}"
+            )
+            console.print(
+                f"[bold cyan]Recall:[/bold cyan] {breakdown.get('recall', 0):.2%}"
+            )
+            console.print(
+                f"[bold cyan]F1 Score:[/bold cyan] {breakdown.get('f1_score', 0):.2%}"
+            )
+
+        if test_result.total_cost:
+            console.print(
+                f"[bold yellow]Total Cost:[/bold yellow] ${test_result.total_cost:.4f}"
+            )
+
+        console.print()
+
+        if test_result.created_at:
+            console.print(f"[dim]Created: {test_result.created_at}[/dim]")
+        if test_result.completed_at:
+            console.print(f"[dim]Completed: {test_result.completed_at}[/dim]")
+
+    except Exception as e:
+        logger.error(f"Error getting test results: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
+@cli.command(name="test-compare")
+@click.option("--stack-name", required=True, help="CloudFormation stack name")
+@click.option(
+    "--test-run-ids",
+    required=True,
+    help="Comma-separated list of test run IDs to compare",
+)
+@click.option("--region", default=None, help="AWS region")
+@click.option(
+    "--output-dir",
+    type=click.Path(),
+    help="Output directory for saving comparison JSON and CSV files",
+)
+def test_compare(
+    stack_name: str, test_run_ids: str, region: Optional[str], output_dir: Optional[str]
+):
+    """Compare results from multiple test runs.
+
+    Shows side-by-side comparison of metrics and configuration differences
+    between test runs.
+
+    \b
+    Examples:
+      # Compare two test runs
+      idp-cli test-compare --stack-name my-stack \\
+        --test-run-ids "fake-w2-20260409-123456,fake-w2-20260409-234567"
+
+      # Compare and save to files
+      idp-cli test-compare --stack-name my-stack \\
+        --test-run-ids "run1,run2,run3" --output-dir ./comparisons
+    """
+    import csv
+    from datetime import datetime, timezone
+
+    if not region:
+        region = os.environ.get("AWS_REGION", "us-east-1")
+
+    try:
+        # Parse test run IDs
+        test_run_id_list = [tid.strip() for tid in test_run_ids.split(",")]
+
+        if len(test_run_id_list) < 2:
+            console.print(
+                "[red]✗ At least 2 test run IDs required for comparison[/red]"
+            )
+            sys.exit(1)
+
+        # Use SDK to compare test runs
+        from idp_sdk import IDPClient
+
+        client = IDPClient(stack_name=stack_name, region=region)
+
+        console.print(f"[blue]Comparing {len(test_run_id_list)} test runs...[/blue]\n")
+
+        comparison_result = client.testing.compare_test_runs(
+            test_run_ids=test_run_id_list
+        )
+
+        metrics = comparison_result.metrics
+        # Note: configs not yet in SDK model, but in raw_data if needed
+        configs = []  # TODO: Add to SDK model if needed
+
+        if not metrics:
+            console.print("[yellow]⚠ No metrics data available for comparison[/yellow]")
+            sys.exit(1)
+
+        # Save to files if output-dir specified
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+            # Save JSON (reconstruct result dict for compatibility)
+            result_data = {
+                "metrics": metrics,
+                "configs": configs,
+            }
+            json_file = os.path.join(output_dir, f"comparison-{timestamp}.json")
+            with open(json_file, "w") as f:
+                json.dump(result_data, f, indent=2, default=str)
+            console.print(f"[green]✓ Comparison JSON saved to: {json_file}[/green]")
+
+            # Save CSV (metrics only)
+            csv_file = os.path.join(output_dir, f"comparison-{timestamp}.csv")
+            with open(csv_file, "w", newline="") as f:
+                writer = csv.writer(f)
+
+                # Header row
+                header = ["Metric"] + [tid[:30] for tid in test_run_id_list]
+                writer.writerow(header)
+
+                # Metric rows
+                metric_names = [
+                    ("Overall Accuracy", "overallAccuracy"),
+                    ("Precision", "accuracyBreakdown.precision"),
+                    ("Recall", "accuracyBreakdown.recall"),
+                    ("F1 Score", "accuracyBreakdown.f1_score"),
+                    ("Total Cost", "totalCost"),
+                    ("Files Completed", "completedFiles"),
+                    ("Files Failed", "failedFiles"),
+                ]
+
+                for display_name, metric_path in metric_names:
+                    row = [display_name]
+                    for test_run_id in test_run_id_list:
+                        test_data = metrics.get(test_run_id, {})
+
+                        # Navigate nested paths
+                        value = test_data
+                        for key in metric_path.split("."):
+                            value = value.get(key) if isinstance(value, dict) else None
+
+                        if value is not None:
+                            row.append(
+                                f"{value:.4f}"
+                                if isinstance(value, float)
+                                else str(value)
+                            )
+                        else:
+                            row.append("N/A")
+
+                    writer.writerow(row)
+
+            console.print(f"[green]✓ Comparison CSV saved to: {csv_file}[/green]\n")
+
+        # Display metrics comparison table
+        console.print("[bold green]Metrics Comparison[/bold green]\n")
+
+        table = Table(show_header=True, header_style="bold cyan")
+        table.add_column("Metric", style="dim")
+
+        for test_run_id in test_run_id_list:
+            table.add_column(test_run_id[:20], justify="right")
+
+        # Add rows for each metric
+        metric_names = [
+            ("Overall Accuracy", "overallAccuracy", "%"),
+            ("Precision", "accuracyBreakdown.precision", "%"),
+            ("Recall", "accuracyBreakdown.recall", "%"),
+            ("F1 Score", "accuracyBreakdown.f1_score", "%"),
+            ("Total Cost", "totalCost", "$"),
+        ]
+
+        for display_name, metric_path, format_type in metric_names:
+            row = [display_name]
+            for test_run_id in test_run_id_list:
+                test_data = metrics.get(test_run_id, {})
+
+                # Navigate nested paths
+                value = test_data
+                for key in metric_path.split("."):
+                    value = value.get(key) if isinstance(value, dict) else None
+
+                if value is not None:
+                    if format_type == "%":
+                        row.append(f"{value:.2%}")
+                    elif format_type == "$":
+                        row.append(f"${value:.4f}")
+                    else:
+                        row.append(str(value))
+                else:
+                    row.append("N/A")
+
+            table.add_row(*row)
+
+        console.print(table)
+        console.print()
+
+        # Display configuration differences
+        if configs and len(configs) > 0:
+            console.print("[bold green]Configuration Differences[/bold green]\n")
+
+            config_table = Table(show_header=True, header_style="bold cyan")
+            config_table.add_column("Setting", style="dim")
+
+            for test_run_id in test_run_id_list:
+                config_table.add_column(test_run_id[:20])
+
+            for diff in configs:
+                setting = diff.get("setting", "")
+                values = diff.get("values", {})
+
+                row = [setting]
+                for test_run_id in test_run_id_list:
+                    value = values.get(test_run_id, "<missing>")
+                    # Truncate long values
+                    if len(str(value)) > 50:
+                        value = str(value)[:47] + "..."
+                    row.append(str(value))
+
+                config_table.add_row(*row)
+
+            console.print(config_table)
+        else:
+            console.print("[dim]No configuration differences to display[/dim]")
+
+        console.print()
+
+    except Exception as e:
+        logger.error(f"Error comparing test runs: {e}", exc_info=True)
+        console.print(f"[red]✗ Error: {e}[/red]")
+        sys.exit(1)
+
+
 def main():
     """Main entry point for the CLI"""
+    # Pre-flight check: verify core dependencies are importable
+    try:
+        import idp_sdk  # noqa: F401
+    except ImportError:
+        print(_SETUP_HELP, file=sys.stderr)
+        sys.exit(1)
+
     # Parse --profile from anywhere in sys.argv before Click processes arguments
     args = sys.argv[1:]  # Skip script name
     profile = None

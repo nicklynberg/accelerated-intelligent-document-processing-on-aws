@@ -15,11 +15,13 @@ import {
   Button,
   Header,
   Container,
+  ExpandableSection,
   Modal,
   Tabs,
 } from '@cloudscape-design/components';
 import type { BoxProps } from '@cloudscape-design/components';
 import SchemaBuilder from '../json-schema-builder/SchemaBuilder';
+import PromptPreview from './PromptPreview';
 
 // Type for schema property definitions used throughout the config builder
 interface SchemaProperty {
@@ -453,6 +455,9 @@ const ConfigBuilder = ({
 }: ConfigBuilderProps): React.JSX.Element => {
   // Track expanded state for all list items across the form - default to collapsed
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
+
+  // Track expanded state for collapsible top-level sections
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
 
   // State for add item modals
   const [activeAddModal, setActiveAddModal] = useState<string | null>(null); // Path of the list currently showing add modal
@@ -1620,6 +1625,27 @@ const ConfigBuilder = ({
       const sectionTitle = property.sectionLabel as string;
       console.log(`Creating section container for ${key} with title: ${sectionTitle}`); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring - Debug logging with controlled internal data
 
+      // Support collapsible top-level sections via schema property `collapsible: true`
+      // defaultExpanded controls whether section starts expanded (defaults to true for backward compat)
+      if (property.collapsible === true || property.collapsible === 'true') {
+        const defaultExpanded = property.defaultExpanded === true || property.defaultExpanded === 'true'; // default to collapsed
+        const isExpanded = expandedSections[key] !== undefined ? expandedSections[key] : defaultExpanded;
+
+        return (
+          <ExpandableSection
+            key={key}
+            variant="container"
+            headerText={sectionTitle}
+            expanded={isExpanded}
+            onChange={({ detail }) => {
+              setExpandedSections((prev) => ({ ...prev, [key]: detail.expanded }));
+            }}
+          >
+            <ExtBox padding="s">{renderField(key, property)}</ExtBox>
+          </ExpandableSection>
+        );
+      }
+
       return (
         <Container key={key} header={<Header variant="h3">{sectionTitle}</Header>}>
           <ExtBox padding="s">{renderField(key, property)}</ExtBox>
@@ -1701,6 +1727,15 @@ const ConfigBuilder = ({
                 },
               ]
             : []),
+          {
+            id: 'prompt-preview',
+            label: 'Prompt Preview',
+            content: (
+              <ExtBox style={{ height: 'calc(70vh - 60px)', overflow: 'auto' }} padding="s">
+                <PromptPreview formValues={formValues} />
+              </ExtBox>
+            ),
+          },
         ]}
       />
 

@@ -22,6 +22,7 @@ from .batch import (
     BatchResult,
     BatchStatus,
 )
+from .chat import ChatResponse
 from .config import (
     ConfigActivateResult,
     ConfigCreateResult,
@@ -36,8 +37,10 @@ from .config import (
 from .discovery import (
     AutoDetectResult,
     AutoDetectSection,
+    DiscoveredClassResult,
     DiscoveryBatchResult,
     DiscoveryResult,
+    MultiDocDiscoveryResult,
 )
 from .document import (
     DocumentDeletionResult,
@@ -60,6 +63,7 @@ from .evaluation import (
     FieldComparison,
 )
 from .manifest import ManifestDocument, ManifestResult, ManifestValidationResult
+from .publish import PublishResult, TemplateTransformResult
 from .search import SearchCitation, SearchDocumentReference, SearchResult
 from .stack import (
     BucketInfo,
@@ -79,6 +83,8 @@ from .testing import (
     ExecutionsStoppedResult,
     LoadTestResult,
     StopWorkflowsResult,
+    TestComparisonResult,
+    TestRunResult,
 )
 
 __all__ = [
@@ -106,6 +112,8 @@ __all__ = [
     "BatchInfo",
     "BatchListResult",
     "BatchRerunResult",
+    # Chat models
+    "ChatResponse",
     "BatchReprocessResult",
     "BatchDownloadResult",
     "BatchDeletionResult",
@@ -134,6 +142,8 @@ __all__ = [
     "DiscoveryBatchResult",
     "AutoDetectResult",
     "AutoDetectSection",
+    "DiscoveredClassResult",
+    "MultiDocDiscoveryResult",
     # Manifest models
     "ManifestDocument",
     "ManifestResult",
@@ -143,6 +153,8 @@ __all__ = [
     "ExecutionsStoppedResult",
     "DocumentsAbortedResult",
     "LoadTestResult",
+    "TestRunResult",
+    "TestComparisonResult",
     # Search models
     "SearchResult",
     "SearchCitation",
@@ -155,6 +167,9 @@ __all__ = [
     "FieldComparison",
     "EvaluationMetrics",
     "DeleteResult",
+    # Publish models
+    "PublishResult",
+    "TemplateTransformResult",
     # Assessment models
     "AssessmentConfidenceResult",
     "AssessmentFieldConfidence",

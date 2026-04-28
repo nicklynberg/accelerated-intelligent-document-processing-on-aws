@@ -29,6 +29,11 @@ Parameters:
     Type: String
     Default: ""
     Description: ARN of the TestExecutionAggregationFunction from pattern stack (optional)
+
+  MLflowLoggerFunctionArn:
+    Type: String
+    Default: ""
+    Description: ARN of the MLflowLoggerFunction from pattern stack (optional)
   
   # DynamoDB Tables
   TrackingTableName:
@@ -86,7 +91,10 @@ Parameters:
   
   DiscoveryBucketName:
     Type: String
-  
+
+  MultiDocDiscoveryStateMachineArn:
+    Type: String
+
   # SQS Queues
   DocumentQueueUrl:
     Type: String
@@ -192,10 +200,27 @@ Parameters:
   IDPCommonBaseLayerArn:
     Type: String
     Description: ARN of IDP Common Base Layer
-  
+
   IDPCommonAgentsLayerArn:
     Type: String
     Description: ARN of IDP Common Agents Layer
+
+  # Private AppSync VPC config (req #2) — passed from main template
+  UsePrivateAppSync:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Set to "true" when AppSyncVisibility=PRIVATE — puts resolver Lambdas in VPC
+
+  LambdaSubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Subnet IDs for Lambda VpcConfig (required when UsePrivateAppSync=true)
+
+  LambdaSecurityGroupId:
+    Type: String
+    Default: ""
+    Description: Security group ID for Lambda VpcConfig (required when UsePrivateAppSync=true)
 
 Metadata:
   cfn-lint:
@@ -210,6 +235,8 @@ Conditions:
   ShouldCreateEvaluationBaselineBucket: !Equals [!Ref ShouldCreateEvaluationBaselineBucket, "true"]
   ShouldCreateReportingBucket: !Equals [!Ref ShouldCreateReportingBucket, "true"]
   HasTestExecutionAggregationFunction: !Not [!Equals [!Ref TestExecutionAggregationFunctionArn, ""]]
+  IsPrivateAppSync: !Equals [!Ref UsePrivateAppSync, "true"]
+  HasMLflowLoggerFunction: !Not [!Equals [!Ref MLflowLoggerFunctionArn, ""]]
 
 Resources:
 
@@ -427,6 +454,12 @@ Resources:
       Description: Lambda function to abort document workflows via GraphQL API
       MemorySize: 512
       Timeout: 60
+      VpcConfig: !If
+        - IsPrivateAppSync
+        - SubnetIds: !Ref LambdaSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !Ref AWS::NoValue
 
       Layers:
         - !Ref IDPCommonBaseLayerArn
@@ -838,9 +871,11 @@ Resources:
             - Effect: Allow
               Action:
                 - "bedrock:InvokeModel"
+                - bedrock:GetInferenceProfile
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
             - Effect: Allow
               Action:
                 - aws-marketplace:Subscribe
@@ -856,6 +891,7 @@ Resources:
                 - "bedrock:GetInferenceProfile"
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
             - Effect: Allow
               Action:
                 - ssm:GetParameter
@@ -1182,6 +1218,12 @@ Resources:
       Description: Lambda function to copy files to baseline bucket via GraphQL API
       MemorySize: 512
       Timeout: 300
+      VpcConfig: !If
+        - IsPrivateAppSync
+        - SubnetIds: !Ref LambdaSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !Ref AWS::NoValue
 
       Layers:
         - !Ref IDPCommonBaseLayerArn
@@ -1689,6 +1731,7 @@ Resources:
           DISCOVERY_TRACKING_TABLE: !Ref DiscoveryTrackingTableName
           DISCOVERY_QUEUE_URL: !Ref DiscoveryQueueUrl
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
+          MULTI_DOC_DISCOVERY_STATE_MACHINE_ARN: !Ref MultiDocDiscoveryStateMachineArn
       LoggingConfig:
         LogGroup: !Ref DiscoveryUploadResolverFunctionLogGroup
       Policies:
@@ -1715,10 +1758,18 @@ Resources:
             - Effect: Allow
               Action:
                 - bedrock:InvokeModel
+                - bedrock:GetInferenceProfile
                 - bedrock:Converse
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
+            # Step Functions permission for multi-document discovery
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource:
+                - !Ref MultiDocDiscoveryStateMachineArn
 
 
   ##########################################################################
@@ -1759,6 +1810,30 @@ Resources:
       DataSourceName: !GetAtt DiscoveryUploadResolverDataSource.Name
       TypeName: Mutation
       FieldName: autoDetectSections
+
+  ##########################################################################
+  # StartMultiDocDiscoveryResolver
+  ##########################################################################
+  StartMultiDocDiscoveryResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt DiscoveryUploadResolverDataSource.Name
+      TypeName: Mutation
+      FieldName: startMultiDocDiscovery
+
+  ##########################################################################
+  # UploadMultiDocDiscoveryZipResolver
+  ##########################################################################
+  UploadMultiDocDiscoveryZipResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt DiscoveryUploadResolverDataSource.Name
+      TypeName: Mutation
+      FieldName: uploadMultiDocDiscoveryZip
 
   ##########################################################################
   # Discovery Jobs List Resolver
@@ -1806,9 +1881,9 @@ Resources:
       DataSourceName: !GetAtt DiscoveryTableDataSource.Name
       RequestMappingTemplate: |-
         ## Validate status is one of the allowed values
-        #set($validStatuses = ["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED"])
+        #set($validStatuses = ["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED", "OPTIMIZATION_IN_PROGRESS", "OPTIMIZATION_COMPLETED", "OPTIMIZATION_FAILED", "QUEUED", "PREPARING", "EMBEDDING", "CLUSTERING", "ANALYZING"])
         #if(!$validStatuses.contains($ctx.args.status))
-          $util.error("Invalid status value. Status must be one of: PENDING, IN_PROGRESS, COMPLETED, FAILED", "ValidationException")
+          $util.error("Invalid status value", "ValidationException")
         #end
 
         #set($expNames = {})
@@ -1840,13 +1915,50 @@ Resources:
           #set($updateExpression = "${updateExpression}, #statusMessage = :statusMessage")
         #end
 
+        ## Multi-document discovery fields (optional)
+        #if($ctx.args.jobType)
+          $util.qr($expNames.put("#jobType", "jobType"))
+          $util.qr($expValues.put(":jobType", $util.dynamodb.toDynamoDB($ctx.args.jobType)))
+          #set($updateExpression = "${updateExpression}, #jobType = :jobType")
+        #end
+
+        #if($ctx.args.currentStep)
+          $util.qr($expNames.put("#currentStep", "currentStep"))
+          $util.qr($expValues.put(":currentStep", $util.dynamodb.toDynamoDB($ctx.args.currentStep)))
+          #set($updateExpression = "${updateExpression}, #currentStep = :currentStep")
+        #end
+
+        #if($ctx.args.totalDocuments)
+          $util.qr($expNames.put("#totalDocuments", "totalDocuments"))
+          $util.qr($expValues.put(":totalDocuments", $util.dynamodb.toDynamoDB($ctx.args.totalDocuments)))
+          #set($updateExpression = "${updateExpression}, #totalDocuments = :totalDocuments")
+        #end
+
+        #if($ctx.args.clustersFound)
+          $util.qr($expNames.put("#clustersFound", "clustersFound"))
+          $util.qr($expValues.put(":clustersFound", $util.dynamodb.toDynamoDB($ctx.args.clustersFound)))
+          #set($updateExpression = "${updateExpression}, #clustersFound = :clustersFound")
+        #end
+
+        #if($ctx.args.discoveredClasses)
+          $util.qr($expNames.put("#discoveredClasses", "discoveredClasses"))
+          $util.qr($expValues.put(":discoveredClasses", $util.dynamodb.toDynamoDB($ctx.args.discoveredClasses)))
+          #set($updateExpression = "${updateExpression}, #discoveredClasses = :discoveredClasses")
+        #end
+
+        #if($ctx.args.reflectionReport)
+          $util.qr($expNames.put("#reflectionReport", "reflectionReport"))
+          $util.qr($expValues.put(":reflectionReport", $util.dynamodb.toDynamoDB($ctx.args.reflectionReport)))
+          #set($updateExpression = "${updateExpression}, #reflectionReport = :reflectionReport")
+        #end
+
         ## Set updatedAt to current timestamp
         $util.qr($expNames.put("#updatedAt", "updatedAt"))
         $util.qr($expValues.put(":updatedAt", $util.dynamodb.toDynamoDB($util.time.nowISO8601())))
         #set($updateExpression = "${updateExpression}, #updatedAt = :updatedAt")
 
-        ## Set completedAt when status is COMPLETED or FAILED
-        #if($ctx.args.status == "COMPLETED" || $ctx.args.status == "FAILED")
+        ## Set completedAt when status is COMPLETED, FAILED, or optimization terminal states
+        #if($ctx.args.status == "COMPLETED" || $ctx.args.status == "FAILED" || $ctx.args.status == "OPTIMIZATION_COMPLETED" || $ctx.args.status == "OPTIMIZATION_FAILED")
           $util.qr($expNames.put("#completedAt", "completedAt"))
           $util.qr($expValues.put(":completedAt", $util.dynamodb.toDynamoDB($util.time.nowISO8601())))
           #set($updateExpression = "${updateExpression}, #completedAt = :completedAt")
@@ -2398,6 +2510,12 @@ Resources:
       Description: Lambda function to process section changes via GraphQL API
       MemorySize: 512
       Timeout: 60
+      VpcConfig: !If
+        - IsPrivateAppSync
+        - SubnetIds: !Ref LambdaSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !Ref AWS::NoValue
 
       Layers:
         - !Ref IDPCommonBaseLayerArn
@@ -2537,14 +2655,17 @@ Resources:
             - Effect: Allow
               Action:
                 - "bedrock:InvokeModel"
+                - bedrock:GetInferenceProfile
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
             - Effect: Allow
               Action:
                 - "bedrock:GetInferenceProfile"
               Resource:
                 - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+                - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:application-inference-profile/*"
             - Effect: Allow
               Action:
                 - aws-marketplace:Subscribe
@@ -2647,6 +2768,12 @@ Resources:
       Description: Lambda function to reprocess documents via GraphQL API
       MemorySize: 512
       Timeout: 60
+      VpcConfig: !If
+        - IsPrivateAppSync
+        - SubnetIds: !Ref LambdaSubnetIds
+          SecurityGroupIds:
+            - !Ref LambdaSecurityGroupId
+        - !Ref AWS::NoValue
 
       Layers:
         - !Ref IDPCommonBaseLayerArn
@@ -2667,6 +2794,8 @@ Resources:
             QueueName: !Ref DocumentQueueName
         - S3ReadPolicy:
             BucketName: !Ref InputBucketName
+        - S3CrudPolicy:
+            BucketName: !Ref OutputBucketName
         - Statement:
             - Effect: Allow
               Action:
@@ -2868,7 +2997,7 @@ Resources:
       CodeUri: ./src/lambda/test_results_resolver
       Description: GraphQL resolver for test results queries
       MemorySize: 512
-      Timeout: 300
+      Timeout: 900
       Environment:
         Variables:
           LOG_LEVEL: !Ref LogLevel
@@ -2884,6 +3013,7 @@ Resources:
                 - !Ref ReportingBucketName
                 - !Ref ReportingBucketName
           TEST_EXECUTION_AGGREGATION_FUNCTION_ARN: !Ref TestExecutionAggregationFunctionArn
+          MLFLOW_LOGGER_FUNCTION_ARN: !If [HasMLflowLoggerFunction, !Ref MLflowLoggerFunctionArn, ""]
       Events:
         SQSEvent:
           Type: SQS
@@ -2949,6 +3079,14 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: !Ref TestExecutionAggregationFunctionArn
+          - !Ref AWS::NoValue
+        - !If
+          - HasMLflowLoggerFunction
+          - Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Ref MLflowLoggerFunctionArn
           - !Ref AWS::NoValue
 
 
@@ -3242,6 +3380,32 @@ Resources:
       DataSourceName: !GetAtt TestSetDataSource.Name
       TypeName: Mutation
       FieldName: addTestSetFromUpload
+
+
+  ##########################################################################
+  # AddDocumentsToTestSetResolver
+  ##########################################################################
+  AddDocumentsToTestSetResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt TestSetDataSource.Name
+      TypeName: Mutation
+      FieldName: addDocumentsToTestSet
+
+
+  ##########################################################################
+  # AddDocumentsToTestSetFromUploadResolver
+  ##########################################################################
+  AddDocumentsToTestSetFromUploadResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: GraphQLSchema
+    Properties:
+      ApiId: !Ref GraphQLApiId
+      DataSourceName: !GetAtt TestSetDataSource.Name
+      TypeName: Mutation
+      FieldName: addDocumentsToTestSetFromUpload
 
 
   ##########################################################################
@@ -3972,6 +4136,13 @@ Resources:
           #set($updateExpression = "${updateExpression}, #result = :result")
         #end
 
+        ## Set error (optional)
+        #if($ctx.args.error)
+          $util.qr($expNames.put("#error", "error"))
+          $util.qr($expValues.put(":error", $util.dynamodb.toDynamoDB($ctx.args.error)))
+          #set($updateExpression = "${updateExpression}, #error = :error")
+        #end
+
         ## Set completedAt to current timestamp when status is COMPLETED or FAILED
         #if($ctx.args.status == "COMPLETED" || $ctx.args.status == "FAILED")
           $util.qr($expNames.put("#completedAt", "completedAt"))
@@ -4045,3 +4216,7 @@ Outputs:
   AppSyncServiceRoleArn:
     Description: ARN of the AppSync service role
     Value: !GetAtt AppSyncServiceRole.Arn
+
+  TestResultsResolverFunctionArn:
+    Description: ARN of the Test Results Resolver Lambda function
+    Value: !GetAtt TestResultsResolverFunction.Arn

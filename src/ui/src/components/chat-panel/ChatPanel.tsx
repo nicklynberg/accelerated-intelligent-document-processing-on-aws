@@ -31,9 +31,10 @@ const logger = new ConsoleLogger('chatWithDocument');
 const getChatResponse = async (s3Uri: string, prompt: string, history: ChatHistoryItem[]) => {
   logger.debug('s3URI:', s3Uri);
   logger.debug('history:', history);
-  // commenting this out until model selection for chat is available again on this screen
-  // logger.debug('modelId:', modelId);
-  const modelId = 'us.amazon.nova-pro-v1:0';
+  // Model ID is determined server-side based on deployment region and configuration.
+  // The frontend-provided modelId is currently ignored by the backend resolver,
+  // which reads the model from the configuration table with region-aware fallback.
+  const modelId = 'amazon.nova-pro-v1:0';
   const strHistory = JSON.stringify(history);
   const response = await client.graphql({
     query: chatWithDocument,

@@ -9,9 +9,13 @@ SPDX-License-Identifier: MIT-0
 
 The Discovery module is an intelligent document analysis system that automatically identifies document structures, field types, and organizational patterns to generate document processing configurations. Discovery works identically in both processing modes of the [unified pattern](architecture.md) — **BDA mode** (`use_bda: true`) and **Pipeline mode** (`use_bda: false`). When BDA mode is active, discovery also automates BDA blueprint creation and management.
 
-Demo video (4m)
+Demo video (Single Doc Discovery) (4m)
 
 https://github.com/user-attachments/assets/9c3923fb-f4ff-43cd-a563-44c7c6132921
+
+Demo video (Multiple Doc Discovery) (4m)
+
+https://github.com/user-attachments/assets/b0bc5df0-cd8f-472c-98c6-299ac3a9bd43
 
 
 ## Table of Contents
@@ -28,6 +32,7 @@ https://github.com/user-attachments/assets/9c3923fb-f4ff-43cd-a563-44c7c6132921
   - [Discovery Without Ground Truth](#discovery-without-ground-truth)
   - [Discovery With Ground Truth](#discovery-with-ground-truth)
   - [Multi-Section Package Discovery](#multi-section-package-discovery)
+  - [Multi-Document Collection Discovery](#multi-document-collection-discovery)
   - [Choosing the Right Method](#choosing-the-right-method)
 - [Configuration](#configuration)
   - [Model Configuration](#model-configuration)
@@ -84,6 +89,7 @@ This analysis produces structured configuration templates that can be used to co
 - **⚡ Real-Time Processing**: Provides immediate feedback through the web interface
 - **📊 PDF Page Thumbnails**: Visual page preview with color-coded range highlighting in the browser
 - **🔗 BDA Blueprint Automation**: Automatic BDA blueprint creation when running in BDA mode
+- **📦 Multi-Document Collection Discovery**: Discover document classes from a collection of documents using embedding-based clustering (local or S3)
 
 ### Use Cases
 
@@ -378,16 +384,154 @@ When a `page_range` is specified for a PDF, the system uses `pypdfium2` to extra
 - Each page range job is independent and can run in parallel
 - The original document is never modified
 
+### Multi-Document Collection Discovery
+
+While the other discovery methods analyze a single document at a time, **Multi-Document Collection Discovery** discovers document classes from a *collection* of documents using embedding-based clustering. Given a folder of mixed documents (e.g., invoices, W-2s, bank statements), it automatically groups similar documents together and generates a JSON Schema and classification for each group.
+
+> **Requires extra dependencies:** `pip install "idp_common[multi_document_discovery]"` or `make setup` from the project root. This installs scikit-learn, scipy, numpy, strands-agents, and pypdfium2.
+
+> **Minimum 2 documents per class:** Clusters with fewer than 2 documents are filtered as noise. Ensure you provide at least 2 documents for each expected document type.
+
+#### How It Works
+
+```mermaid
+graph LR
+    A[Document Collection] --> B[Embed]
+    B --> C[Cluster]
+    C --> D[Analyze]
+    D --> E[Reflect]
+    E --> F[Discovered Classes + Schemas]
+```
+
+1. **Embed** — Each document's first page is rendered to an image and embedded as a vector using Amazon Bedrock (`us.cohere.embed-v4:0` by default)
+2. **Cluster** — Embeddings are clustered using KMeans with automatic K selection via silhouette analysis (scikit-learn). Clusters with fewer than `min_cluster_size` (default: 2) documents are filtered as noise.
+3. **Analyze** — For each cluster, a Strands agent with Claude (`us.anthropic.claude-sonnet-4-6`) examines sample document images and generates a classification name + JSON Schema definition
+4. **Reflect** — The agent produces a Markdown reflection report reviewing all discovered classes, their relationships, and potential overlaps
+
+#### Supported File Types
+
+`.pdf`, `.png`, `.jpg`, `.jpeg`, `.tiff`, `.tif`, `.webp`
+
+#### Two Execution Modes
+
+| Mode | Documents Source | Use Case | Entry Point |
+|------|-----------------|----------|-------------|
+| **Local** | Local filesystem | CLI/SDK development, no AWS infra needed | `run_local_pipeline()` |
+| **S3** | Amazon S3 bucket | Lambda/Step Functions, production workloads | `run_full_pipeline()` |
+
+Both modes produce identical `MultiDocDiscoveryResult` output and support the same pipeline steps.
+
+#### Usage — IDP CLI
+
+The simplest way to run multi-document discovery:
+
+```bash
+# Discover classes from a directory of documents
+idp-cli discover-multidoc --dir /path/to/documents/
+
+# With explicit files
+idp-cli discover-multidoc -d invoice1.pdf -d invoice2.pdf -d w2_form.pdf -d w2_form2.pdf
+
+# Save results to a configuration version
+idp-cli discover-multidoc --dir /path/to/documents/ --save-to-config --config-version v1
+```
+
+See [IDP CLI Reference — `discover-multidoc`](idp-cli.md) for all options.
+
+#### Usage — IDP SDK
+
+```python
+from idp_sdk import IDPClient
+
+client = IDPClient()
+result = client.discovery.run_multi_doc(
+    document_dir="/path/to/documents/",
+    progress_callback=lambda step, data: print(f"{step}: {data}"),
+)
+
+print(f"Status: {result.status}")
+print(f"Found {result.total_clusters} clusters from {result.total_documents} documents")
+
+for cls in result.discovered_classes:
+    print(f"  {cls.classification} — {cls.document_count} docs")
+    if cls.json_schema:
+        print(f"    Fields: {list(cls.json_schema.get('properties', {}).keys())}")
+
+print(result.reflection_report)
+```
+
+See [IDP SDK Reference — `discovery.run_multi_doc()`](idp-sdk.md) for all parameters.
+
+#### Usage — idp_common Directly
+
+```python
+from idp_common.discovery.multi_document_discovery import MultiDocumentDiscovery
+
+discovery = MultiDocumentDiscovery(
+    region="us-east-1",
+    config={
+        "embedding_model_id": "us.cohere.embed-v4:0",
+        "analysis_model_id": "us.anthropic.claude-sonnet-4-6",
+        "min_cluster_size": 2,
+    },
+)
+
+# Local pipeline
+result = discovery.run_local_pipeline(
+    document_dir="/path/to/documents/",
+    config_version="v1",  # Optional: save to DynamoDB config
+)
+
+# Or S3 pipeline
+result = discovery.run_full_pipeline(
+    bucket="my-bucket",
+    prefix="documents/batch-001/",
+)
+```
+
+See [idp_common API Reference — MultiDocumentDiscovery](idpcommon-api-reference.md#multidocumentdiscovery--multi-document-collection-discovery) for full method-level documentation.
+
+#### Output
+
+The pipeline returns a `MultiDocDiscoveryResult` containing:
+
+| Field | Description |
+|-------|-------------|
+| `discovered_classes` | List of discovered classes, each with `classification`, `json_schema`, `document_count`, `sample_doc_ids` |
+| `reflection_report` | Markdown report analyzing all discovered classes |
+| `total_documents` | Total documents processed |
+| `num_clusters` | Number of clusters found |
+| `num_failed_embeddings` | Documents that failed embedding |
+| `num_successful_schemas` / `num_failed_schemas` | Schema generation success/failure counts |
+
+#### Web UI
+
+The Web UI includes a **Multi-Doc Discovery** tab in the Discovery panel. This tab allows you to:
+- Select a directory of documents or upload multiple files
+- Monitor pipeline progress with step-by-step status updates
+- View discovered classes and their generated schemas
+
+> **Note:** The Web UI multi-doc discovery feature requires the IDP stack to be deployed with the multi-document discovery nested stack enabled.
+
+#### Best For
+
+- **Bulk onboarding**: You have a folder of hundreds of mixed documents and want to automatically discover all document types
+- **No prior knowledge**: You don't know what types of documents are in the collection
+- **Classification + Schema in one step**: Generates both the document class names and extraction schemas simultaneously
+- **Local development**: Run from your workstation with just Bedrock model access — no AWS deployment needed
+
 ### Choosing the Right Method
 
-| Factor | Without Ground Truth | With Ground Truth |
-|--------|---------------------|-------------------|
-| **Use Case** | New document exploration | Configuration optimization |
-| **Accuracy** | Good for structure discovery | Higher accuracy for known patterns |
-| **Speed** | Fast, single-pass analysis | Optimized based on reference data |
-| **Consistency** | May vary between runs | Consistent with reference patterns |
-| **Setup Effort** | Minimal - just upload document | Requires ground truth preparation |
-| **Best For** | Unknown document types | Improving existing workflows |
+| Factor | Without Ground Truth | With Ground Truth | Multi-Section Package | Multi-Document Collection |
+|--------|---------------------|-------------------|-----------------------|--------------------------|
+| **Input** | Single document | Single document + ground truth | Single multi-page PDF | Collection of documents |
+| **Use Case** | New document exploration | Configuration optimization | Mixed document packages | Bulk class discovery |
+| **Accuracy** | Good for structure discovery | Higher for known patterns | Good per-section | Good for clustering |
+| **Speed** | Fast, single-pass | Optimized with reference | Parallel per range | Minutes for 100+ docs |
+| **Setup Effort** | Minimal | Requires ground truth | Define page ranges | Just point at a folder |
+| **Output** | 1 class + schema | 1 class + schema | N classes + schemas | N classes + schemas |
+| **Best For** | Unknown document types | Improving existing workflows | Known multi-doc packages | Unknown mixed collections |
+| **Extra Deps** | None | None | None | `multi_document_discovery` pip extra |
 
 ## Configuration
 
@@ -844,12 +988,110 @@ BDABlueprintPermissions:
   - bedrock:ListBlueprints
   - bedrock:GetBlueprint
   - bedrock:DeleteBlueprint
+  - bedrock:InvokeBlueprintOptimizationAsync
+  - bedrock:GetBlueprintOptimizationStatus
 ```
 
 **Monitoring:**
 - Blueprint creation/update activities are logged to CloudWatch
 - Schema conversion details are captured
 - Error conditions are clearly documented
+
+### Blueprint Optimization
+
+The Blueprint Optimization feature uses the BDA `InvokeBlueprintOptimizationAsync` API to automatically improve extraction accuracy for discovered document classes. When a discovery job includes a ground truth file, the system can optimize the BDA blueprint by comparing extraction results against the ground truth and refining the blueprint schema.
+
+#### How It Works
+
+1. **Blueprint Lookup**: The optimizer checks if a blueprint already exists for the discovered class in the BDA project. If found, it reuses the existing blueprint; otherwise, it creates a new one following the standard naming convention (`{StackName}-{ClassName}-{hash}`).
+2. **S3 Asset Preparation**: The sample document (PDF) and ground truth (JSON) S3 URIs are constructed from the discovery bucket.
+3. **Optimization Invocation**: The `InvokeBlueprintOptimizationAsync` API is called with the blueprint ARN, sample document, ground truth, and an output S3 prefix.
+4. **Status Polling**: The system polls `GetBlueprintOptimizationStatus` with exponential backoff (5s initial, 30s max, 15-minute timeout) until a terminal state is reached.
+5. **Results Evaluation**: The optimization results (stored at `{outputPrefix}/optimization_results.json`) contain before/after metrics. The system compares `exactMatch` and `f1` scores.
+6. **Schema Application**: If the optimized schema shows improvement, the blueprint is updated with the new schema, a new version is created, and the IDP class configuration is updated.
+
+#### Optimization Flow
+
+```mermaid
+graph TD
+    A[Discovery Completes with Ground Truth] --> B[Blueprint Optimization Lambda]
+    B --> C{Existing Blueprint?}
+    C -->|Yes| D[Reuse Existing Blueprint]
+    C -->|No| E[Create New Blueprint]
+    D --> F[Invoke Optimization API]
+    E --> F
+    F --> G[Poll for Completion]
+    G --> H{Result?}
+    H -->|Success| I[Fetch Results from S3]
+    H -->|ServiceError/ClientError| J[Report Failure]
+    H -->|Timeout| J
+    I --> K{Improved?}
+    K -->|Yes| L[Update Blueprint Schema]
+    K -->|No| M[Keep Original Schema]
+    L --> N[Create Blueprint Version]
+    N --> O[Update IDP Config]
+    O --> P[Report OPTIMIZATION_COMPLETED]
+    M --> P
+    J --> Q[Report OPTIMIZATION_FAILED]
+```
+
+#### UI Status Display
+
+The Discovery Panel shows optimization progress with dedicated status indicators:
+
+| Status | UI Label | Description |
+|--------|----------|-------------|
+| `OPTIMIZATION_IN_PROGRESS` | Optimizing | Optimization is running (blueprint creation, API invocation, polling) |
+| `OPTIMIZATION_COMPLETED` | Optimized | Optimization finished (improved or no improvement) |
+| `OPTIMIZATION_FAILED` | Optimization Failed | Optimization encountered an error |
+
+The Result column shows additional context:
+- **Improved**: Class name badge + accuracy improvement message (e.g., "exactMatch: 0.78 → 0.91")
+- **No improvement**: Message indicating original schema was kept
+- **Failed**: Expandable error details
+
+#### Components
+
+- **`BlueprintOptimizer`** (`lib/idp_common_pkg/idp_common/bda/blueprint_optimizer.py`): Core orchestrator — manages the full optimization lifecycle including blueprint lookup/creation, API invocation, polling, evaluation, and schema application.
+- **`blueprint_optimization` Lambda** (`src/lambda/blueprint_optimization/index.py`): Async Lambda handler invoked by the discovery processor. Manages AppSync status updates and error reporting.
+- **`OptimizationResult`**: Dataclass returned by the optimizer with status, metrics, blueprint ARN, and optionally the optimized schema.
+
+#### Configuration
+
+Blueprint optimization is disabled by default. To enable it, set both `use_bda: true` and `enable_blueprint_optimization: true` in your configuration version via the View/Edit Configuration UI or directly in the config YAML:
+
+```yaml
+use_bda: true
+enable_blueprint_optimization: true
+```
+
+When enabled, the optimizer uses:
+- The same BDA project as the main blueprint service (per configuration version)
+- The same blueprint naming convention (`{StackName}-{ClassName}-{hash}`)
+- The discovery bucket for S3 input/output URIs
+- The `bedrock-data-automation` client with `boto3>=1.42.0` (bundled in the Lambda function's `requirements.txt`)
+
+#### IAM Permissions
+
+The Blueprint Optimization Lambda requires these additional Bedrock permissions (configured in `template.yaml`):
+
+```yaml
+- bedrock:InvokeBlueprintOptimizationAsync
+- bedrock:GetBlueprintOptimizationStatus
+```
+
+Resource ARN patterns:
+```yaml
+- arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint/*
+- arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:blueprint-optimization-invocation/*
+```
+
+#### Retry and Error Handling
+
+- **S3 Eventual Consistency**: The optimization results file may not be immediately available after the API reports success. The system retries up to 5 times with 2-second delays.
+- **Polling Timeout**: If optimization doesn't complete within 15 minutes, the result is `TIMED_OUT`.
+- **API Errors**: `ServiceError` and `ClientError` from the BDA API are captured and reported as `OPTIMIZATION_FAILED`.
+- **Blueprint Not Found**: If the blueprint stage doesn't match (must be `LIVE`), the API returns `ResourceNotFoundException`.
 
 ### BdaIDP Sync Feature
 

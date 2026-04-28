@@ -67,6 +67,12 @@ TEST STUDIO
   View/run test sets              ✅      ✅       ❌        ❌
   Create/delete test sets         ✅      ✅       ❌        ❌
 
+CUSTOM MODEL FINE-TUNING
+  List/view fine-tuning jobs      ✅      ✅       ❌        ❌
+  Create fine-tuning jobs         ✅      ✅       ❌        ❌
+  Delete fine-tuning jobs         ✅      ✅       ❌        ❌
+  List available models           ✅      ✅       ❌        ❌
+
 CAPACITY PLANNING
   Calculate capacity              ✅      ✅       ❌        ✅
 
@@ -178,6 +184,7 @@ Every GraphQL **mutation** and many **queries** have `@aws_auth(cognito_groups: 
 | `startTestRun`, `addTestSet`, `addTestSetFromUpload`, `deleteTests`, `deleteTestSets` | Admin, Author |
 | `syncBdaIdp`, `uploadDiscoveryDocument`, `deleteDiscoveryJob`, `autoDetectSections` | Admin, Author |
 | `copyToBaseline` | Admin, Author |
+| `createFinetuningJob`, `deleteFinetuningJob` | Admin, Author |
 | `processChanges`, `completeSectionReview`, `claimReview`, `releaseReview`, `skipAllSectionsReview` | Admin, Reviewer |
 | `sendAgentChatMessage`, `deleteChatSession`, `updateChatSessionTitle`, `deleteAgentJob` | All authenticated users (see note below) |
 | `updateAgentChatMessage` | All authenticated users (also IAM for backend) |
@@ -196,6 +203,7 @@ Every GraphQL **mutation** and many **queries** have `@aws_auth(cognito_groups: 
 | `listConfigurationLibrary`, `getConfigurationLibraryFile` | Admin, Author, Viewer |
 | `listDiscoveryJobs` | Admin, Author |
 | `getTestRun`, `getTestRuns`, `getTestRunStatus`, `compareTestRuns`, `getTestSets`, `listBucketFiles`, `validateTestFileName` | Admin, Author |
+| `listFinetuningJobs`, `getFinetuningJob`, `validateTestSetForFinetuning`, `listAvailableModels` | All authenticated (UI limited to Admin, Author) |
 | `queryKnowledgeBase`, `chatWithDocument` | All authenticated |
 | `listUsers` | All authenticated (non-admin sees only self in resolver) |
 | `getMyProfile` | All authenticated |
@@ -295,4 +303,5 @@ To add a new role:
 - **Knowledge Base queries** do not currently enforce config-version scope. KB results may include documents from out-of-scope config versions.
 - **Agent Companion Chat** analytics queries (Athena) do not filter by config-version scope.
 - **GetDocument API** (direct document access by URL) does not enforce config-version scope at the resolver level. UI navigation hides out-of-scope documents, but direct API access is not blocked.
+- **Custom Model Fine-tuning** jobs are global — not scoped by `allowedConfigVersions`. A scoped Author can see all fine-tuning jobs and create jobs from any test set. However, when applying a custom model to a configuration version (via the "Create Config Version" modal), the config-version scope IS enforced — the Author can only target versions within their scope.
 - These limitations are tracked for Phase 3 implementation.

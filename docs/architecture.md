@@ -208,6 +208,7 @@ The solution supports optional Amazon Bedrock Guardrails integration:
 
 - Define content boundaries for Bedrock model outputs
 - Apply guardrails to all Bedrock model interactions across all patterns
+- Support for all Guardrail policy types, including content filters, topic restrictions, PII detection, and [Automated Reasoning Checks](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-automated-reasoning.html) for formal verification of model outputs
 - Support for both DRAFT and versioned guardrails
 - Configuration parameters:
   - `BedrockGuardrailId` - ID of an existing Bedrock Guardrail

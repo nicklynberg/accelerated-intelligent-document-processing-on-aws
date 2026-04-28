@@ -35,6 +35,7 @@ import useAppContext from '../../contexts/app';
 import { formatConfigVersionLink } from './utils/configVersionUtils';
 import {
   parseCostBreakdown,
+  calculateAvgCostPerPage,
   parseAccuracyBreakdown,
   parseSplitClassificationMetrics,
   parseFieldMetrics,
@@ -751,6 +752,9 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const costBreakdown: any = results.costBreakdown ? parseCostBreakdown(results.costBreakdown as string) : null;
+
+  // Calculate avg cost per page from costBreakdown page counts
+  const avgCostPerPage = calculateAvgCostPerPage(results.totalCost as number, costBreakdown);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const accuracyBreakdown: any = results.accuracyBreakdown ? parseAccuracyBreakdown(results.accuracyBreakdown as string) : null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1011,6 +1015,10 @@ const TestResults = ({ testRunId, setSelectedTestRunId }: TestResultsProps): Rea
             <Box fontSize="heading-l">
               {results.totalCost !== null && results.totalCost !== undefined ? `$${(results.totalCost as number).toFixed(4)}` : 'N/A'}
             </Box>
+          </Box>
+          <Box>
+            <Box variant="awsui-key-label">Avg Cost/Page</Box>
+            <Box fontSize="heading-l">{avgCostPerPage !== null ? `$${avgCostPerPage.toFixed(4)}` : 'N/A'}</Box>
           </Box>
           <Box>
             <Box variant="awsui-key-label">Avg Confidence</Box>

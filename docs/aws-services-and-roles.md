@@ -32,7 +32,7 @@ This document outlines the AWS services used by the GenAI Intelligent Document P
 | Service | Usage | Deployment | Runtime |
 |---------|-------|------------|---------|
 | **Amazon Bedrock** | Provides foundation models for document understanding | ✓ | ✓ |
-| **Amazon Bedrock Guardrails** | Enforces content safety, information security, and model usage policies | ✓ | ✓ |
+| **Amazon Bedrock Guardrails** | Enforces content safety, information security, model usage policies, and [Automated Reasoning Checks](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-automated-reasoning.html) | ✓ | ✓ |
 | **Amazon Textract** | Extracts text and data from documents (OCR) | | ✓ |
 | **Amazon SageMaker** | Hosts custom ML models for document classification (UDOP) | ✓ | ✓ |
 | **Amazon Bedrock Knowledge Base** | Enables semantic document querying (optional) | ✓ | ✓ |

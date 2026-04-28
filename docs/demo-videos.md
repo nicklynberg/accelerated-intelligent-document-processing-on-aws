@@ -184,7 +184,15 @@ https://github.com/user-attachments/assets/a1e9ce1a-1b2e-4e98-a387-d2e48d7e557d
 ### Discovery Module
 Intelligent document analysis that automatically identifies structures and creates processing blueprints, including pattern-neutral discovery and pattern-specific implementations.
 
+#### Multi-Document Collection Discovery
+**Duration**: ~4 minutes
+
 https://github.com/user-attachments/assets/9c3923fb-f4ff-43cd-a563-44c7c6132921
+
+#### Single Document Discovery
+**Duration**: ~4 minutes
+
+https://github.com/user-attachments/assets/b0bc5df0-cd8f-472c-98c6-299ac3a9bd43
 
 **Related Documentation**: [Discovery Module Documentation](./discovery.md)
 
@@ -220,6 +228,15 @@ Migration from legacy custom format to industry-standard JSON Schema with automa
 https://github.com/user-attachments/assets/ee817858-8285-4087-9b25-2c7c5bea65df
 
 **Related Documentation**: [JSON Schema Migration Guide](./json-schema-migration.md)
+
+---
+
+### Custom Model Fine-Tuning
+Fine-tune Amazon Nova models for document classification using your own labeled Test Sets — validate data, generate training data, train via Bedrock, and deploy a custom model endpoint.
+
+https://github.com/user-attachments/assets/e82c7be0-ee73-4ad7-8537-87ecf6a1a4c8
+
+**Related Documentation**: [Custom Model Fine-Tuning Documentation](./custom-model-finetuning.md)
 
 ---
 
@@ -266,6 +283,24 @@ Using the pre-deployed RealKIE-FCC-Verified benchmark dataset with 75 invoice do
 https://github.com/user-attachments/assets/d952fd37-1bd0-437f-8f67-5a634e9422e0
 
 **Related Documentation**: [Test Studio - Pre-Deployed Test Sets](./test-studio.md#pre-deployed-test-sets)
+
+---
+
+### Creating Custom Test Sets with Ground Truth
+End-to-end workflow for creating your own test set from scratch — configure for high accuracy, discover the schema, process and review documents, save ground truth, and compare model accuracy vs. cost.
+
+https://github.com/user-attachments/assets/d5e0d590-ce8b-4e14-b2b7-8bde31e57ec2
+
+**Related Documentation**: [Creating Custom Test Sets](./creating-custom-test-sets.md)
+
+---
+
+### Adding Documents to Existing Test Sets
+Incrementally grow test sets over time by adding newly reviewed documents with ground truth — with automatic baseline filtering, time-based file selection, and prepopulated file patterns.
+
+https://github.com/user-attachments/assets/bcd18e62-4795-44ea-9554-637062fd21d7
+
+**Related Documentation**: [Creating Custom Test Sets - Incrementally Growing Your Test Set](./creating-custom-test-sets.md#incrementally-growing-your-test-set)
 
 ---
 

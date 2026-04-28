@@ -20,7 +20,13 @@ import TestStudioHeader from './TestStudioHeader';
 import useLocalStorage from '../common/local-storage';
 import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { formatConfigVersionLink, formatConfigVersionText, type ConfigVersion as UtilsConfigVersion } from './utils/configVersionUtils';
-import { parseComparisonMetrics, parseWeightedOverallScores, parseConfigSettingValues } from '../../graphql/awsjson-parsers';
+import {
+  parseComparisonMetrics,
+  parseWeightedOverallScores,
+  parseConfigSettingValues,
+  calculateAvgCostPerPage,
+} from '../../graphql/awsjson-parsers';
+import type { CostBreakdown } from '../../graphql/awsjson-types';
 
 const client = generateClient();
 
@@ -303,6 +309,13 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
         ),
       ],
       [
+        'Avg Cost/Page',
+        ...Object.values(completeTestRuns).map((run) => {
+          const avg = calculateAvgCostPerPage(run.totalCost as number, run.costBreakdown as CostBreakdown);
+          return avg !== null ? `$${avg.toFixed(4)}` : 'N/A';
+        }),
+      ],
+      [
         'Average Accuracy',
         ...Object.values(completeTestRuns).map((run) =>
           run.overallAccuracy !== null && run.overallAccuracy !== undefined ? Number(run.overallAccuracy).toFixed(3) : 'N/A',
@@ -580,7 +593,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
       ...usageRows,
     ];
 
-    const csvContent = csvData.map((row) => row.map((field: unknown) => `"${String(field).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const csvContent = csvData.map((row) => row.map((field: unknown) => `"${String(field).replace(/"/g, '""')}"`).join(',')).join('\n'); // nosemgrep: javascript.lang.security.audit.incomplete-sanitization.incomplete-sanitization - Standard RFC 4180 CSV double-quote escaping
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -624,6 +637,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
             completedFiles: testRun.completedFiles,
             failedFiles: testRun.failedFiles,
             totalCost: testRun.totalCost,
+            avgCostPerPage: calculateAvgCostPerPage(testRun.totalCost as number, testRun.costBreakdown as CostBreakdown),
             averageAccuracy: testRun.overallAccuracy,
             averageConfidence: testRun.averageConfidence,
             averageWeightedOverallScore: (() => {
@@ -816,6 +830,15 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                       testRunId,
                       testRun.totalCost !== null && testRun.totalCost !== undefined ? `$${Number(testRun.totalCost).toFixed(4)}` : 'N/A',
                     ]),
+                  ),
+                },
+                {
+                  metric: 'Avg Cost/Page',
+                  ...Object.fromEntries(
+                    Object.entries(completeTestRuns).map(([testRunId, testRun]) => {
+                      const avg = calculateAvgCostPerPage(testRun.totalCost as number, testRun.costBreakdown as CostBreakdown);
+                      return [testRunId, avg !== null ? `$${avg.toFixed(4)}` : 'N/A'];
+                    }),
                   ),
                 },
                 {
@@ -1035,7 +1058,7 @@ const TestComparison = ({ preSelectedTestRunIds = [] }: TestComparisonProps): Re
                         <Button
                           variant="link"
                           onClick={() => {
-                            const urlPath = doc.docId.replace(/\//g, '%252F');
+                            const urlPath = doc.docId.replace(/\//g, '%252F'); // nosemgrep: javascript.lang.security.audit.incomplete-sanitization.incomplete-sanitization - Intentional double-encoding for hash routing; decoded by DocumentDetails
                             window.open(`#/documents/${urlPath}`, '_blank');
                           }}
                         >

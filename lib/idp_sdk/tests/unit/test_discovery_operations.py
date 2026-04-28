@@ -15,8 +15,10 @@ from idp_sdk.models import (
     AutoDetectResult,
     AutoDetectSection,
     ConfigSyncBdaResult,
+    DiscoveredClassResult,
     DiscoveryBatchResult,
     DiscoveryResult,
+    MultiDocDiscoveryResult,
 )
 
 SAMPLE_SCHEMA = {
@@ -703,3 +705,202 @@ class TestConfigSyncBdaModel:
         assert result.classes_failed == 0
         assert result.processed_classes == []
         assert result.error is None
+
+
+# ---- Multi-Document Discovery Tests ----
+
+
+@pytest.mark.unit
+class TestMultiDocDiscoveryModels:
+    """Test multi-document discovery result models."""
+
+    def test_discovered_class_result(self):
+        """Test creating a DiscoveredClassResult."""
+        result = DiscoveredClassResult(
+            cluster_id=0,
+            classification="BankStatement",
+            json_schema=SAMPLE_SCHEMA,
+            document_count=15,
+            sample_doc_ids=["doc1.pdf", "doc2.pdf"],
+        )
+        assert result.cluster_id == 0
+        assert result.classification == "BankStatement"
+        assert result.document_count == 15
+        assert result.error is None
+        assert len(result.sample_doc_ids) == 2
+
+    def test_discovered_class_result_with_error(self):
+        """Test DiscoveredClassResult for a failed cluster."""
+        result = DiscoveredClassResult(
+            cluster_id=3,
+            document_count=5,
+            error="Agent analysis failed",
+        )
+        assert result.cluster_id == 3
+        assert result.error == "Agent analysis failed"
+        assert result.json_schema is None
+        assert result.classification is None
+
+    def test_multi_doc_discovery_result_success(self):
+        """Test creating a successful MultiDocDiscoveryResult."""
+        classes = [
+            DiscoveredClassResult(
+                cluster_id=0,
+                classification="Invoice",
+                json_schema=SAMPLE_SCHEMA,
+                document_count=20,
+            ),
+            DiscoveredClassResult(
+                cluster_id=1,
+                classification="Receipt",
+                json_schema=SAMPLE_SCHEMA,
+                document_count=10,
+            ),
+        ]
+        result = MultiDocDiscoveryResult(
+            status="SUCCESS",
+            discovered_classes=classes,
+            reflection_report="# Reflection\n\nFound 2 classes.",
+            total_documents=30,
+            total_clusters=2,
+            noise_documents=0,
+        )
+        assert result.status == "SUCCESS"
+        assert len(result.discovered_classes) == 2
+        assert result.total_documents == 30
+        assert result.total_clusters == 2
+        assert result.reflection_report is not None
+        assert result.error is None
+
+    def test_multi_doc_discovery_result_partial(self):
+        """Test MultiDocDiscoveryResult with partial failures."""
+        classes = [
+            DiscoveredClassResult(
+                cluster_id=0,
+                classification="Invoice",
+                json_schema=SAMPLE_SCHEMA,
+                document_count=20,
+            ),
+            DiscoveredClassResult(
+                cluster_id=1,
+                document_count=5,
+                error="Analysis failed",
+            ),
+        ]
+        result = MultiDocDiscoveryResult(
+            status="PARTIAL",
+            discovered_classes=classes,
+            total_documents=25,
+            total_clusters=2,
+        )
+        assert result.status == "PARTIAL"
+        assert len(result.discovered_classes) == 2
+        assert result.discovered_classes[0].error is None
+        assert result.discovered_classes[1].error is not None
+
+    def test_multi_doc_discovery_result_failure(self):
+        """Test MultiDocDiscoveryResult for complete failure."""
+        result = MultiDocDiscoveryResult(
+            status="FAILED",
+            error="No supported documents found",
+        )
+        assert result.status == "FAILED"
+        assert result.error is not None
+        assert len(result.discovered_classes) == 0
+        assert result.total_documents == 0
+
+    def test_multi_doc_discovery_result_defaults(self):
+        """Test MultiDocDiscoveryResult default values."""
+        result = MultiDocDiscoveryResult(status="SUCCESS")
+        assert result.discovered_classes == []
+        assert result.reflection_report is None
+        assert result.total_documents == 0
+        assert result.total_clusters == 0
+        assert result.noise_documents == 0
+        assert result.config_version is None
+        assert result.error is None
+
+
+@pytest.mark.unit
+class TestMultiDocDiscoveryOperation:
+    """Test run_multi_doc SDK operation."""
+
+    def test_multi_doc_requires_dir_or_paths(self):
+        """Test that run_multi_doc raises without dir or paths."""
+        client = IDPClient()
+        with pytest.raises(ValueError, match="Either document_dir or document_paths"):
+            client.discovery.run_multi_doc()
+
+    def test_multi_doc_save_requires_stack(self):
+        """Test save_to_config=True requires stack_name."""
+        client = IDPClient()
+        with pytest.raises(IDPConfigurationError, match="stack_name is required"):
+            client.discovery.run_multi_doc(
+                document_dir="./samples",
+                save_to_config=True,
+                config_version="v1",
+            )
+
+    def test_multi_doc_save_requires_config_version(self):
+        """Test save_to_config=True requires config_version."""
+        client = IDPClient(stack_name="test-stack")
+        with pytest.raises(IDPConfigurationError, match="config_version is required"):
+            client.discovery.run_multi_doc(
+                document_dir="./samples",
+                save_to_config=True,
+            )
+
+    def test_multi_doc_writes_schemas_to_output_dir(self, tmp_path):
+        """Test that output_dir triggers schema writing."""
+        import sys
+        from types import ModuleType
+        from unittest.mock import MagicMock
+
+        # Create a fake module so the lazy import succeeds without scikit-learn
+        fake_mod = ModuleType("idp_common.discovery.multi_document_discovery")
+        mock_cls = MagicMock()
+        mock_result = MagicMock()
+        mock_result.discovered_classes = [
+            {
+                "cluster_id": 0,
+                "classification": "Invoice",
+                "json_schema": SAMPLE_SCHEMA,
+                "document_count": 10,
+                "sample_doc_ids": [],
+                "error": None,
+            }
+        ]
+        mock_result.reflection_report = "# Report"
+        mock_result.total_documents = 10
+        mock_result.num_clusters = 1
+        mock_result.num_failed_embeddings = 0
+        mock_result.num_successful_schemas = 1
+        mock_result.num_failed_schemas = 0
+        mock_cls.return_value.run_local_pipeline.return_value = mock_result
+        fake_mod.MultiDocumentDiscovery = mock_cls  # type: ignore[attr-defined]
+
+        with patch.dict(
+            sys.modules, {"idp_common.discovery.multi_document_discovery": fake_mod}
+        ):
+            client = IDPClient()
+            output_dir = str(tmp_path / "schemas")
+            result = client.discovery.run_multi_doc(
+                document_dir="./samples",
+                output_dir=output_dir,
+            )
+
+            assert result.status == "SUCCESS"
+            assert len(result.discovered_classes) == 1
+            assert result.discovered_classes[0].classification == "Invoice"
+
+    def test_multi_doc_import_error_message(self):
+        """Test graceful error when multi_document_discovery deps are missing."""
+        import sys
+
+        client = IDPClient()
+        with patch.dict(
+            sys.modules, {"idp_common.discovery.multi_document_discovery": None}
+        ):
+            result = client.discovery.run_multi_doc(document_dir="./samples")
+            assert result.status == "FAILED"
+            assert result.error is not None

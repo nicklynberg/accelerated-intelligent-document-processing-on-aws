@@ -348,9 +348,9 @@ To extend or modify the notebooks:
 
 ## 📚 Additional Resources
 
-- [IDP Common Library Documentation](../docs/using-notebooks-with-idp-common.md)
-- [Configuration Guide](../docs/configuration.md)
-- [Evaluation Methods](../docs/evaluation.md)
+- [idp_common API Reference](./idpcommon-api-reference.md)
+- [Configuration Guide](./configuration.md)
+- [Evaluation Methods](./evaluation.md)
 - [AWS Textract Documentation](https://docs.aws.amazon.com/textract/)
 - [Amazon Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
 

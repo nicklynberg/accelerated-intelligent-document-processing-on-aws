@@ -172,7 +172,7 @@ The boundary detection is automatically included in the classification results. 
 - Identifies distinct document segments within multi-page documents
 - Determines document type for each segment
 - Better suited for multi-document packets where context spans multiple pages
-- Deployed when you select the default pattern-2 configuration during stack deployment or update
+- Deployed when you select the default pipeline mode configuration during stack deployment or update
 
 The default configuration in `config_library/unified/default/config.yaml` implements this approach with a task prompt that instructs the model to:
 

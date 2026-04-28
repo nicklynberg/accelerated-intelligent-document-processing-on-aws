@@ -659,17 +659,21 @@ class BatchOperation:
 
     def delete_documents(
         self,
-        batch_id: str,
+        batch_id: Optional[str] = None,
+        pattern: Optional[str] = None,
         status_filter: Optional[str] = None,
         stack_name: Optional[str] = None,
         dry_run: bool = False,
         continue_on_error: bool = True,
         **kwargs,
     ) -> BatchDeletionResult:
-        """Permanently delete all documents in a batch and their associated data.
+        """Permanently delete documents and their associated data.
+
+        Specify either ``batch_id`` or ``pattern`` to select documents.
 
         Args:
-            batch_id: Batch identifier
+            batch_id: Batch identifier (selects all docs containing this string)
+            pattern: Wildcard pattern to match document keys (e.g. ``"batch-123/*.pdf"``)
             status_filter: Optional status filter (e.g., 'FAILED', 'COMPLETED')
             stack_name: Optional stack name override
             dry_run: If True, only simulate deletion without actually deleting
@@ -680,7 +684,16 @@ class BatchOperation:
             BatchDeletionResult with deletion statistics
         """
         import boto3
-        from idp_common.delete_documents import delete_documents, get_documents_by_batch
+        from idp_common.delete_documents import (
+            delete_documents,
+            get_documents_by_batch,
+            get_documents_by_pattern,
+        )
+
+        if not batch_id and not pattern:
+            raise IDPConfigurationError("Must specify either batch_id or pattern")
+        if batch_id and pattern:
+            raise IDPConfigurationError("Cannot specify both batch_id and pattern")
 
         name = self._client._require_stack(stack_name)
         resources = self._client._get_stack_resources(name)
@@ -699,11 +712,18 @@ class BatchOperation:
         s3_client = boto3.client("s3", region_name=self._client._region)
 
         try:
-            document_ids = get_documents_by_batch(
-                tracking_table=tracking_table,
-                batch_id=batch_id,
-                status_filter=status_filter,
-            )
+            if pattern:
+                document_ids = get_documents_by_pattern(
+                    tracking_table=tracking_table,
+                    pattern=pattern,
+                    status_filter=status_filter,
+                )
+            else:
+                document_ids = get_documents_by_batch(
+                    tracking_table=tracking_table,
+                    batch_id=batch_id,
+                    status_filter=status_filter,
+                )
 
             if not document_ids:
                 return BatchDeletionResult(

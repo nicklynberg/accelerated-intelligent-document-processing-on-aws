@@ -127,7 +127,8 @@ The project uses `make` to simplify common development tasks. Run `make` or `mak
 
 | Command | Description |
 |---------|-------------|
-| `make setup` | Create virtual environment and install all packages in development mode |
+| `make setup` | Install all packages into your current Python environment (no venv) |
+| `make setup-venv` | Create `.venv` virtual environment and install all packages into it |
 
 ### Code Quality
 

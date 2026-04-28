@@ -6,25 +6,40 @@
 # Use this for demo/testing with the ALB hosting option.
 #
 # Usage:
-#   ./scripts/generate_self_signed_cert.sh [--region REGION] [--domain DOMAIN] [--days DAYS]
+#   ./scripts/generate_self_signed_cert.sh [--region REGION] [--domain DOMAIN] [--days DAYS] [--cert-arn ARN]
 #
 # Options:
-#   --region  AWS region for ACM import (default: from AWS_DEFAULT_REGION or aws configure)
-#   --domain  Domain name for the certificate CN/SAN (default: self-signed.internal)
-#   --days    Certificate validity in days (default: 365)
+#   --region    AWS region for ACM import (default: from AWS_DEFAULT_REGION or aws configure)
+#   --domain    Domain name for the certificate CN/SAN (default: self-signed.internal)
+#   --days      Certificate validity in days (default: 365)
+#   --cert-arn  Existing ACM certificate ARN to reimport (updates in-place, no stack change needed)
 #
 # Output:
 #   Prints the ACM certificate ARN to stdout (last line).
 #
-# Example:
-#   CERT_ARN=$(./scripts/generate_self_signed_cert.sh --region us-gov-west-1 --domain myapp.internal)
-#   echo "Use this ARN for ALBCertificateArn parameter: $CERT_ARN"
+# --- 2-step process for ALB testing (self-signed cert) ---
+#
+# Step 1 — Before deploying the IDP stack, create a placeholder cert:
+#   CERT_ARN=$(./scripts/generate_self_signed_cert.sh --region us-east-1 --domain idp-alb.internal)
+#   # Use $CERT_ARN as the ALBCertificateArn parameter when deploying the stack
+#
+# Step 2 — After the IDP stack is deployed, reimport with the actual ALB hostname as SAN:
+#   ALB_DNS=$(aws cloudformation describe-stacks --stack-name IDP-PRIVATE \
+#     --query 'Stacks[0].Outputs[?OutputKey==`ApplicationWebURL`].OutputValue' \
+#     --output text | sed 's|https://||')
+#   ./scripts/generate_self_signed_cert.sh --region us-east-1 --domain "$ALB_DNS" --cert-arn "$CERT_ARN"
+#   # The ALB will serve the new cert within ~30 seconds. No stack update needed.
+#
+# Why 2 steps? The ELB hostname is only known after the stack is deployed.
+# The cert domain must match the hostname in the browser's address bar —
+# browsers silently block background JS requests to cert-mismatched domains.
 
 set -euo pipefail
 
 REGION=""
 DOMAIN="self-signed.internal"
 DAYS=365
+EXISTING_CERT_ARN=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -40,8 +55,12 @@ while [[ $# -gt 0 ]]; do
             DAYS="$2"
             shift 2
             ;;
+        --cert-arn)
+            EXISTING_CERT_ARN="$2"
+            shift 2
+            ;;
         -h|--help)
-            head -20 "$0" | grep '^#' | sed 's/^# \?//'
+            grep '^#' "$0" | head -40 | sed 's/^# \?//'
             exit 0
             ;;
         *)
@@ -84,25 +103,39 @@ openssl req -x509 -nodes \
     -addext "subjectAltName=DNS:$DOMAIN" \
     2>/dev/null
 
-echo "Importing certificate to ACM..." >&2
+if [[ -n "$EXISTING_CERT_ARN" ]]; then
+    echo "Reimporting certificate into existing ACM ARN..." >&2
+    # shellcheck disable=SC2086
+    CERT_ARN=$(aws acm import-certificate \
+        --certificate-arn "$EXISTING_CERT_ARN" \
+        --certificate fileb://"$CERT_FILE" \
+        --private-key fileb://"$KEY_FILE" \
+        --query 'CertificateArn' \
+        --output text \
+        $REGION_FLAG)
+    echo "" >&2
+    echo "Certificate reimported successfully." >&2
+    echo "Same ARN — no CloudFormation stack update needed." >&2
+    echo "The ALB will serve the updated cert within ~30 seconds." >&2
+else
+    echo "Importing certificate to ACM..." >&2
+    # shellcheck disable=SC2086
+    CERT_ARN=$(aws acm import-certificate \
+        --certificate fileb://"$CERT_FILE" \
+        --private-key fileb://"$KEY_FILE" \
+        --query 'CertificateArn' \
+        --output text \
+        $REGION_FLAG)
+    echo "" >&2
+    echo "Certificate imported successfully." >&2
+    echo "Use this value for the ALBCertificateArn CloudFormation parameter." >&2
+fi
 
-# Import certificate to ACM
-# shellcheck disable=SC2086
-CERT_ARN=$(aws acm import-certificate \
-    --certificate fileb://"$CERT_FILE" \
-    --private-key fileb://"$KEY_FILE" \
-    --query 'CertificateArn' \
-    --output text \
-    $REGION_FLAG)
-
-echo "" >&2
-echo "Certificate imported successfully." >&2
 echo "ACM Certificate ARN: $CERT_ARN" >&2
 echo "" >&2
-echo "Use this value for the ALBCertificateArn CloudFormation parameter." >&2
-echo "" >&2
-echo "NOTE: This is a self-signed certificate. Browsers will show a security warning." >&2
-echo "For production use, use a certificate issued by a trusted CA or AWS ACM." >&2
+echo "NOTE: This is a self-signed certificate for testing only." >&2
+echo "Browsers will show a security warning — click through to proceed." >&2
+echo "For production, use a certificate from a trusted CA that covers your internal DNS hostname." >&2
 
 # Print just the ARN to stdout for scripting
 echo "$CERT_ARN"

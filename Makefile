@@ -43,7 +43,33 @@ help: ## Show this help message
 all: lint test ## Run lint + test (default)
 
 ##@ Setup
-setup: ## Create venv and install all packages in development mode
+setup: ## Install all packages into current Python environment (no venv)
+	@# Always use the current shell's pip, ignoring .venv even if it exists
+	@SETUP_PIP=$$(python3 -m pip --version >/dev/null 2>&1 && echo "python3 -m pip" || echo "pip3"); \
+	SETUP_PYTHON=$$(command -v python3 2>/dev/null || echo python); \
+	echo "Installing packages into current Python environment..."; \
+	echo "Python: $$($$SETUP_PYTHON --version) at $$(which $$SETUP_PYTHON)"; \
+	echo "Pip: $$SETUP_PIP"; \
+	echo ""; \
+	echo "Upgrading pip..."; \
+	$$SETUP_PIP install --upgrade pip && \
+	echo "Installing idp_common package with all dependencies (including test)..." && \
+	$$SETUP_PIP install -e "lib/idp_common_pkg[all,dev,test]" && \
+	echo "Installing idp-cli package..." && \
+	$$SETUP_PIP install -e lib/idp_cli_pkg && \
+	echo "Installing idp_sdk package..." && \
+	$$SETUP_PIP install -e lib/idp_sdk && \
+	echo "Installing idp_mcp_connector package..." && \
+	$$SETUP_PIP install -e lib/idp_mcp_connector_pkg && \
+	echo "Installing capacity planning test dependencies..." && \
+	$$SETUP_PIP install -r src/lambda/calculate_capacity/requirements-test.txt && \
+	echo "Installing cfn-lint for CloudFormation template validation..." && \
+	$$SETUP_PIP install cfn-lint && \
+	echo "" && \
+	echo -e "$(GREEN)✅ Setup complete! idp_common, idp-cli, idp_sdk, idp_mcp_connector, and test dependencies are now installed.$(NC)" && \
+	echo -e "$(YELLOW)   Tip: Use 'make setup-venv' instead to install into an isolated virtual environment.$(NC)"
+
+setup-venv: ## Create .venv and install all packages into it
 	@echo "Creating virtual environment in $(VENV_DIR)..."
 	@PYENV_PYTHON=$$(pyenv which python 2>/dev/null); \
 	SYS_PYTHON=$$(command -v python3 2>/dev/null); \
@@ -66,6 +92,8 @@ setup: ## Create venv and install all packages in development mode
 	$(VENV_DIR)/bin/pip install -e lib/idp_mcp_connector_pkg
 	@echo "Installing capacity planning test dependencies..."
 	$(VENV_DIR)/bin/pip install -r src/lambda/calculate_capacity/requirements-test.txt
+	@echo "Installing cfn-lint for CloudFormation template validation..."
+	$(VENV_DIR)/bin/pip install cfn-lint
 	@echo ""
 	@echo -e "$(GREEN)✅ Setup complete! Virtual environment created at $(VENV_DIR)$(NC)"
 	@echo -e "$(GREEN)   idp_common, idp-cli, idp_sdk, idp_mcp_connector, and test dependencies are now installed.$(NC)"
@@ -330,6 +358,8 @@ docs-setup: ## One-time docs site setup (symlinks + npm install)
 	@echo -e "$(GREEN)✅ Docs site setup complete!$(NC)"
 
 docs-build: docs-setup ## Build documentation site (no serve)
+	@echo "Syncing sidebar with new docs..."
+	cd docs-site && node sync-sidebar.mjs
 	@echo "Building documentation site..."
 	cd docs-site && npm run build
 	@echo -e "$(GREEN)✅ Docs site built! $(NC)"
@@ -343,10 +373,7 @@ docs-deploy: docs-build ## Deploy docs to GitHub Pages (from local build)
 
 ##@ Security (DSR)
 dsr: ## Run full DSR workflow (setup → scan → optional fix)
-	@if [ ! -f .dsr/dsr ]; then \
-		echo "DSR not found, running setup..."; \
-		$(MAKE) dsr-setup; \
-	fi
+	@$(MAKE) dsr-setup
 	@$(MAKE) dsr-scan
 	@echo ""
 	@echo "Do you want to run DSR fix? (y/N):"

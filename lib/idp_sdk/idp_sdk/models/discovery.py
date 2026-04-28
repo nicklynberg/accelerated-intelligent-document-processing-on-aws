@@ -67,3 +67,58 @@ class AutoDetectResult(BaseModel):
     error: Optional[str] = Field(
         default=None, description="Error message if detection failed"
     )
+
+
+# ---- Multi-document discovery models ----
+
+
+class DiscoveredClassResult(BaseModel):
+    """A single document class discovered from a cluster of similar documents."""
+
+    cluster_id: int = Field(description="Cluster ID this class was discovered from")
+    classification: Optional[str] = Field(
+        default=None, description="Discovered document class name"
+    )
+    json_schema: Optional[Dict[str, Any]] = Field(
+        default=None, description="Generated JSON Schema for this document class"
+    )
+    document_count: int = Field(
+        default=0, description="Number of documents in this cluster"
+    )
+    sample_doc_ids: List[str] = Field(
+        default_factory=list,
+        description="Representative document identifiers from this cluster",
+    )
+    error: Optional[str] = Field(
+        default=None, description="Error message if analysis failed for this cluster"
+    )
+
+
+class MultiDocDiscoveryResult(BaseModel):
+    """Result of multi-document discovery across a collection of documents."""
+
+    status: str = Field(
+        description="Overall status ('SUCCESS', 'PARTIAL', or 'FAILED')"
+    )
+    discovered_classes: List[DiscoveredClassResult] = Field(
+        default_factory=list, description="Discovered document classes"
+    )
+    reflection_report: Optional[str] = Field(
+        default=None,
+        description="Markdown reflection report analyzing the discovered classes",
+    )
+    total_documents: int = Field(
+        default=0, description="Total number of documents processed"
+    )
+    total_clusters: int = Field(default=0, description="Number of clusters found")
+    noise_documents: int = Field(
+        default=0,
+        description="Number of documents that couldn't be clustered (noise/outliers)",
+    )
+    config_version: Optional[str] = Field(
+        default=None,
+        description="Configuration version schemas were saved to, if any",
+    )
+    error: Optional[str] = Field(
+        default=None, description="Error message if discovery failed"
+    )
