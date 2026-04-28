@@ -16,15 +16,31 @@ from .batch import (
     BatchDownloadResult,
     BatchInfo,
     BatchListResult,
+    BatchProcessResult,
+    BatchReprocessResult,
     BatchRerunResult,
     BatchResult,
     BatchStatus,
 )
+from .chat import ChatResponse
 from .config import (
+    ConfigActivateResult,
     ConfigCreateResult,
+    ConfigDeleteResult,
     ConfigDownloadResult,
+    ConfigListResult,
+    ConfigSyncBdaResult,
     ConfigUploadResult,
     ConfigValidationResult,
+    ConfigVersionInfo,
+)
+from .discovery import (
+    AutoDetectResult,
+    AutoDetectSection,
+    DiscoveredClassResult,
+    DiscoveryBatchResult,
+    DiscoveryResult,
+    MultiDocDiscoveryResult,
 )
 from .document import (
     DocumentDeletionResult,
@@ -32,6 +48,7 @@ from .document import (
     DocumentInfo,
     DocumentListResult,
     DocumentMetadata,
+    DocumentReprocessResult,
     DocumentRerunResult,
     DocumentStatus,
     DocumentUploadResult,
@@ -46,9 +63,29 @@ from .evaluation import (
     FieldComparison,
 )
 from .manifest import ManifestDocument, ManifestResult, ManifestValidationResult
+from .publish import PublishResult, TemplateTransformResult
 from .search import SearchCitation, SearchDocumentReference, SearchResult
-from .stack import StackDeletionResult, StackDeploymentResult, StackResources
-from .testing import LoadTestResult, StopWorkflowsResult
+from .stack import (
+    BucketInfo,
+    CancelUpdateResult,
+    FailureAnalysis,
+    FailureCause,
+    OrphanedResourceCleanupResult,
+    StackDeletionResult,
+    StackDeploymentResult,
+    StackMonitorResult,
+    StackOperationInProgress,
+    StackResources,
+    StackStableStateResult,
+)
+from .testing import (
+    DocumentsAbortedResult,
+    ExecutionsStoppedResult,
+    LoadTestResult,
+    StopWorkflowsResult,
+    TestComparisonResult,
+    TestRunResult,
+)
 
 __all__ = [
     # Enums
@@ -60,12 +97,24 @@ __all__ = [
     "StackDeploymentResult",
     "StackDeletionResult",
     "StackResources",
+    "StackOperationInProgress",
+    "StackMonitorResult",
+    "StackStableStateResult",
+    "FailureCause",
+    "FailureAnalysis",
+    "BucketInfo",
+    "CancelUpdateResult",
+    "OrphanedResourceCleanupResult",
     # Batch models
     "BatchResult",
+    "BatchProcessResult",
     "BatchStatus",
     "BatchInfo",
     "BatchListResult",
     "BatchRerunResult",
+    # Chat models
+    "ChatResponse",
+    "BatchReprocessResult",
     "BatchDownloadResult",
     "BatchDeletionResult",
     # Document models
@@ -73,6 +122,7 @@ __all__ = [
     "DocumentUploadResult",
     "DocumentDownloadResult",
     "DocumentRerunResult",
+    "DocumentReprocessResult",
     "DocumentDeletionResult",
     "DocumentMetadata",
     "DocumentInfo",
@@ -82,13 +132,29 @@ __all__ = [
     "ConfigValidationResult",
     "ConfigDownloadResult",
     "ConfigUploadResult",
+    "ConfigActivateResult",
+    "ConfigVersionInfo",
+    "ConfigListResult",
+    "ConfigDeleteResult",
+    "ConfigSyncBdaResult",
+    # Discovery models
+    "DiscoveryResult",
+    "DiscoveryBatchResult",
+    "AutoDetectResult",
+    "AutoDetectSection",
+    "DiscoveredClassResult",
+    "MultiDocDiscoveryResult",
     # Manifest models
     "ManifestDocument",
     "ManifestResult",
     "ManifestValidationResult",
     # Testing models
     "StopWorkflowsResult",
+    "ExecutionsStoppedResult",
+    "DocumentsAbortedResult",
     "LoadTestResult",
+    "TestRunResult",
+    "TestComparisonResult",
     # Search models
     "SearchResult",
     "SearchCitation",
@@ -101,6 +167,9 @@ __all__ = [
     "FieldComparison",
     "EvaluationMetrics",
     "DeleteResult",
+    # Publish models
+    "PublishResult",
+    "TemplateTransformResult",
     # Assessment models
     "AssessmentConfidenceResult",
     "AssessmentFieldConfidence",

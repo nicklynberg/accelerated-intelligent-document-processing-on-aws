@@ -19,6 +19,14 @@ from idp_common.utils.settings_helper import get_setting
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
+
+def get_default_model_for_region():
+    """Return a region-appropriate default model ID based on AWS_REGION."""
+    region = os.environ.get('AWS_REGION', 'us-east-1')
+    if region.startswith('eu-'):
+        return 'eu.amazon.nova-pro-v1:0'
+    return 'us.amazon.nova-pro-v1:0'
+
 def remove_text_between_brackets(text):
     # Find position of first opening bracket
     start = text.find('{')
@@ -86,6 +94,7 @@ def get_full_text(bucket, key):
 def get_summarization_model():
     """Get the summarization model from configuration table"""
     try:
+        from idp_common.config.configuration_manager import ConfigurationManager
         dynamodb = boto3.resource('dynamodb')
         config_table = dynamodb.Table(os.environ['CONFIGURATION_TABLE_NAME'])
         
@@ -95,17 +104,18 @@ def get_summarization_model():
         )
         
         if 'Item' in response:
-            config_data = response['Item']
+            # Decompress if stored in compressed format
+            config_data = ConfigurationManager._decompress_item(response['Item'])
             # Extract summarization model from the configuration
             if 'summarization' in config_data and 'model' in config_data['summarization']:
                 return config_data['summarization']['model']
         
-        # Fallback to a default model if not found in config
-        return 'us.amazon.nova-pro-v1:0'
+        # Fallback to a region-appropriate default model if not found in config
+        return get_default_model_for_region()
         
     except Exception as e:
         logger.error(f"Error getting summarization model from config: {str(e)}")
-        return 'us.amazon.nova-pro-v1:0'  # Fallback default
+        return get_default_model_for_region()  # Fallback default
 
 def handler(event, context):
     response_data = {}

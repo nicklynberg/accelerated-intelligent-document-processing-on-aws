@@ -1,3 +1,7 @@
+---
+title: "Configuration Versions"
+---
+
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 SPDX-License-Identifier: MIT-0
 
@@ -38,6 +42,27 @@ flowchart LR
 - **What you save is what you get**: No hidden merge transforms. The configuration stored in DynamoDB is the configuration used at runtime.
 - **Stack upgrades update only `default`**: When you upgrade the solution, only the `default` version receives new settings. Your other versions remain untouched as locked snapshots that you explicitly manage.
 
+### Managed vs Custom Versions
+
+Configuration versions fall into two categories, indicated by a **Type** badge in the versions table:
+
+| Type | Badge | Description |
+|------|-------|-------------|
+| **Managed** | 🔵 Blue | Stack-deployed versions that ship with the solution (e.g., `fake-w2`, `docsplit`, `ocr-benchmark`, `realkie-fcc-verified`). Each corresponds to a pre-deployed test set. |
+| **Custom** | ⚪ Grey | User-created versions — fully editable and under your control. |
+
+**Managed versions** have special protections:
+
+- **Overwritten on stack updates** — always reflect the latest defaults shipped with the solution
+- **Save disabled** — the "Save changes" button is disabled and an info banner explains the config is stack-managed
+- **Delete disabled** — managed versions cannot be deleted in the UI or via the API
+- **Editable copies** — use "Save as Version" to create a custom, editable copy from any managed version
+- **Test Studio integration** — when a test set is selected in Test Studio, the matching managed config version is auto-selected
+
+> **Tip:** To customize a managed configuration, open it, then click **Save as Version** to create an editable copy. The original managed version remains untouched and will continue to be updated with solution upgrades.
+
+For full details on managed configuration deployment and the config library, see [Configuration — Managed Configuration Versions](configuration.md#managed-configuration-versions).
+
 ### Use Cases
 
 - **A/B testing**: Compare extraction accuracy across different model or prompt configurations
@@ -53,11 +78,13 @@ The **View/Edit Configuration** page includes a Configuration Versions table tha
 
 | Column | Description |
 |--------|-------------|
-| **Version Name** | Unique identifier (e.g., `default`, `Production`, `v1`) |
+| **Version Name** | Unique identifier (e.g., `default`, `Production`, `v1`) — click to open in editor |
+| **Type** | Badges showing **Managed** (blue) or **Custom** (grey), plus **Active** (green) if applicable. Sortable. |
 | **Description** | Optional description (max 200 characters) |
 | **Created** | Timestamp when the version was first created |
 | **Updated** | Timestamp of the last modification |
-| **Active** | Indicates which version is currently active for processing |
+
+The table includes a **type filter** (All / Managed / Custom) and a **preferences gear** to configure page size and visible columns.
 
 #### Available Actions
 
@@ -220,7 +247,7 @@ Configuration versions are stored in the `ConfigurationTable` DynamoDB table:
 
 ### Item Structure
 
-Each version item contains:
+Each version item contains metadata as top-level DynamoDB attributes, plus the configuration data stored as a gzip-compressed Binary attribute:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -229,8 +256,16 @@ Each version item contains:
 | `Description` | String | Optional version description |
 | `CreatedAt` | String | ISO 8601 creation timestamp |
 | `UpdatedAt` | String | ISO 8601 last-modified timestamp |
-| `_config_format` | String | Set to `"full"` for new-format configs |
-| *(config fields)* | Various | The complete configuration data (ocr, classification, extraction, classes, etc.) |
+| `_compressed_config` | Binary | Gzip-compressed JSON containing all configuration data |
+| `_config_storage` | String | Set to `"compressed"` for compressed format |
+
+### Compressed Storage
+
+Configuration data (ocr, classification, extraction, classes, assessment, summarization, etc.) is gzip-compressed into a single DynamoDB Binary attribute. This overcomes DynamoDB's 400KB item size limit, supporting configurations with **3,000+ document classes**.
+
+- **Write path**: Config data is serialized to JSON and gzip-compressed (achieving 37-95x compression ratios for typical JSON Schema configurations)
+- **Read path**: Compressed items are auto-detected via the `_config_storage: "compressed"` marker and transparently decompressed
+- **Backward compatibility**: Legacy uncompressed items (from older versions) are read as-is — no migration steps needed. On the next write, the config is automatically stored in compressed format.
 
 ### Full Config Format
 
