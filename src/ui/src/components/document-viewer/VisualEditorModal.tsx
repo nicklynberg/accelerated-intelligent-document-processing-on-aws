@@ -30,6 +30,7 @@ import { getFileContents, uploadDocument } from '../../graphql/generated';
 import JSONEditorTab from './JSONEditorTab';
 import type { BoxProps } from '@cloudscape-design/components';
 import EditHistoryTab from './EditHistoryTab';
+import ProcessingReportTab from './ProcessingReportTab';
 
 // Extended Box props to allow native HTML attributes that Cloudscape passes through at runtime
 type ExtendedBoxProps = BoxProps & React.HTMLAttributes<HTMLDivElement>;
@@ -3520,6 +3521,16 @@ const VisualEditorModal = ({
             id: 'history',
             label: 'Revision History',
             content: <EditHistoryTab predictionData={localJsonData} baselineData={localBaselineData} />,
+          },
+          {
+            id: 'processing',
+            label: 'Processing Report',
+            content: (
+              <ProcessingReportTab
+                metadata={localJsonData?.metadata as Record<string, unknown> | undefined}
+                processingReport={localJsonData?.processing_report as string | undefined}
+              />
+            ),
           },
         ]}
       />

@@ -156,6 +156,7 @@ class StackOperation:
                 stack_id=result.get("stack_id"),
                 outputs=result.get("outputs", {}),
                 error=result.get("error"),
+                deploy_start_time=result.get("deploy_start_time"),
             )
 
         except Exception as e:
@@ -541,6 +542,7 @@ class StackOperation:
     def get_failure_analysis(
         self,
         stack_name: Optional[str] = None,
+        deploy_start_time=None,
         **kwargs,
     ) -> FailureAnalysis:
         """
@@ -551,6 +553,9 @@ class StackOperation:
 
         Args:
             stack_name: Stack name (uses default if not provided)
+            deploy_start_time: UTC datetime when deployment was initiated.
+                When provided, only events after this time are analyzed,
+                preventing stale errors from previous deployments.
 
         Returns:
             FailureAnalysis with root_causes and all_failures lists
@@ -559,7 +564,9 @@ class StackOperation:
 
         name = self._client._require_stack(stack_name)
         deployer = StackDeployer(region=self._client._region)
-        raw = deployer.get_deployment_failure_analysis(name)
+        raw = deployer.get_deployment_failure_analysis(
+            name, deploy_start_time=deploy_start_time
+        )
 
         def _to_cause(d: dict) -> FailureCause:
             return FailureCause(

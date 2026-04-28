@@ -35,7 +35,7 @@ The GenAI Intelligent Document Processing (GenAIIDP) Accelerator demonstrates st
 
 - **Defense in Depth**: Multiple security layers including IAM roles with least privilege, encryption at rest, and secure API access.
 - **Enterprise IAM Governance**: Comprehensive support for IAM permissions boundaries to comply with organizational Service Control Policies (SCPs) that mandate permissions boundaries on all IAM roles.
-- **Content Safety**: Integration with Amazon Bedrock Guardrails to enforce content policies, block sensitive information, and prevent model misuse.
+- **Content Safety**: Integration with Amazon Bedrock Guardrails to enforce content policies, block sensitive information, prevent model misuse, and enable [Automated Reasoning Checks](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-automated-reasoning.html) for formal verification of model outputs.
 - **Authentication**: Cognito user pools with configurable password policies and MFA support.
 - **Authorization**: Fine-grained access controls for different components and resources.
 - **Data Protection**: S3 bucket encryption, DynamoDB encryption, and secure transmission of data.
@@ -66,6 +66,7 @@ The GenAI Intelligent Document Processing (GenAIIDP) Accelerator demonstrates st
   - Associate this WAF with the CloudFront distribution or ALB to protect the UI
   - Enable core rule sets (AWS Managed Rules) including protections against XSS and SQL injection
   - Create custom rules for specific application threats
+- **Sensitive Data Discovery**: Consider enabling [Amazon Macie](https://docs.aws.amazon.com/macie/latest/user/what-is-macie.html) on document S3 buckets to automatically discover and classify sensitive data (PII, financial data, credentials) in processed documents. Macie operates as a decoupled service requiring no changes to the accelerator.
 - Consider implementing VPC endpoints for enhanced network isolation of sensitive services.
 - Add automated security scanning in the CI/CD pipeline.
 - Implement more granular data access controls based on document classification.
@@ -117,7 +118,7 @@ The GenAI Intelligent Document Processing (GenAIIDP) Accelerator demonstrates st
 
 ### Recommendations
 
-- Implement more granular cost allocation tags to track expenses by document type, workflow, or customer.
+- Implement more granular cost allocation tags to track expenses by document type, workflow, or customer. Bedrock [Application Inference Profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-create.html) can be used to tag model invocations for cost attribution — see [Cost Attribution with Application Inference Profiles](./cost-calculator.md#cost-attribution-with-bedrock-application-inference-profiles).
 - Add cost anomaly detection to identify unexpected usage patterns.
 - Consider implementing tiered storage strategies for processed documents based on access patterns.
 - Evaluate model selection based on cost-performance tradeoffs for different document types.

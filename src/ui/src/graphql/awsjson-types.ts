@@ -30,6 +30,7 @@ export interface CostBreakdownServiceDetail {
   estimated_cost?: number;
   value?: number;
   unit_cost?: number;
+  unit?: string;
   [key: string]: unknown;
 }
 

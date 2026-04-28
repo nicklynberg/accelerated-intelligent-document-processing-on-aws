@@ -46,9 +46,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.info(f"Aggregating test run: {test_run_id}")
         
         result = aggregate_test_run_with_stickler(test_run_id, tracking_table_name)
-        
-        logger.info(f"Aggregation completed for test run: {test_run_id}")
-        
+
+        logger.info(f"Aggregation completed for test run: {test_run_id}, document_count={result.get('document_count', 0)}, overall_accuracy={result.get('overall_accuracy')}")
+
         return {
             'statusCode': 200,
             'body': json.dumps(result)
@@ -82,16 +82,23 @@ def aggregate_test_run_with_stickler(test_run_id: str, tracking_table_name: str)
     if not comparison_results:
         logger.warning(f"No comparison results found for test run: {test_run_id}")
         return _empty_metrics()
-    
+
     # Use Stickler's bulk aggregator
-    from stickler.structured_object_evaluator.bulk_structured_model_evaluator import (
-        aggregate_from_comparisons
-    )
-    
-    process_eval = aggregate_from_comparisons(comparison_results)
-    
-    # Transform to IDP format (split metrics will be added by caller from Athena)
-    return _transform_stickler_metrics(process_eval, doc_weighted_scores)
+    try:
+        from stickler.structured_object_evaluator.bulk_structured_model_evaluator import (
+            aggregate_from_comparisons
+        )
+
+        process_eval = aggregate_from_comparisons(comparison_results)
+
+        logger.info(f"Stickler aggregation complete: document_count={process_eval.document_count}, comparison_results={len(comparison_results)}, weighted_scores={len(doc_weighted_scores)}")
+
+        # Transform to IDP format (split metrics will be added by caller from Athena)
+        return _transform_stickler_metrics(process_eval, doc_weighted_scores)
+
+    except Exception as e:
+        logger.error(f"Stickler aggregation failed for {test_run_id}: {e}", exc_info=True)
+        return _empty_metrics()
 
 
 def _load_comparison_results(

@@ -22,6 +22,7 @@ import {
   Select,
   ExpandableSection,
   Badge,
+  Link,
   TextFilter,
   Tiles,
   Pagination,
@@ -36,6 +37,9 @@ import useConfigurationVersions from '../../hooks/use-configuration-versions';
 import { getJsonValidationError } from '../common/utilities';
 import { formatConfigVersionLink } from '../test-studio/utils/configVersionUtils';
 import type { ConfigVersion } from '../test-studio/utils/configVersionUtils';
+import { useNavigate } from 'react-router-dom';
+import { DISCOVERY_JOB_PATH } from '../../routes/constants';
+import { SUPPORTED_DISCOVERY_EXTENSIONS } from '../common/constants';
 import PdfPageSelector from './PdfPageSelector';
 import type { PageRange } from './PdfPageSelector';
 
@@ -87,6 +91,7 @@ const formatElapsed = (startIso: string | undefined): string => {
 };
 
 const DiscoveryPanel = (): React.JSX.Element => {
+  const navigate = useNavigate();
   const { settings } = useSettingsContext();
   const { versions, loading: versionsLoading, getVersionOptions } = useConfigurationVersions();
   const [documentFile, setDocumentFile] = useState<File | null>(null);
@@ -112,6 +117,8 @@ const DiscoveryPanel = (): React.JSX.Element => {
     { value: 'all', label: 'All time' },
   ];
   const [selectedTimeRange, setSelectedTimeRange] = useState<SelectProps.Option>(TIME_RANGE_OPTIONS[2]); // Default: 2 days
+  const [sortingColumn, setSortingColumn] = useState<{ sortingField: string }>({ sortingField: 'createdAt' });
+  const [sortingDescending, setSortingDescending] = useState(true);
   const [selectedJobs, setSelectedJobs] = useState<DiscoveryJob[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [pageRanges, setPageRanges] = useState<PageRange[]>([]);
@@ -156,8 +163,10 @@ const DiscoveryPanel = (): React.JSX.Element => {
     try {
       const response = await client.graphql({ query: listDiscoveryJobs });
       type ListJobsResp = Record<string, Record<string, Record<string, DiscoveryJob[]>>>;
-      const jobs = (response as unknown as ListJobsResp).data.listDiscoveryJobs?.DiscoveryJobs || [];
-      setDiscoveryJobs(jobs);
+      const allJobs = (response as unknown as ListJobsResp).data.listDiscoveryJobs?.DiscoveryJobs || [];
+      // Filter out multi-document jobs — those belong to the MultiDocDiscoveryPanel
+      const singleDocJobs = allJobs.filter((j: any) => j.jobType !== 'multi-document');
+      setDiscoveryJobs(singleDocJobs);
     } catch (err) {
       console.error('Error loading discovery jobs:', err);
       setError(`Failed to load discovery jobs: ${(err as Error).message}`);
@@ -208,18 +217,12 @@ const DiscoveryPanel = (): React.JSX.Element => {
     loadDiscoveryJobs();
   }, []);
 
-  // Timer for elapsed time display + fallback poll every 10s when there are active jobs
-  // The poll catches subscription updates missed during rapid subscription teardown/recreation
+  // Timer for elapsed time display on active jobs (subscriptions handle status updates)
   useEffect(() => {
-    const hasActiveJobs = discoveryJobs.some((j) => j.status === 'PENDING' || j.status === 'IN_PROGRESS');
+    const hasActiveJobs = discoveryJobs.some((j) => j.status === 'PENDING' || j.status === 'IN_PROGRESS' || j.status === 'OPTIMIZATION_IN_PROGRESS');
     if (hasActiveJobs && !tickRef.current) {
       tickRef.current = setInterval(() => {
         setTick((t) => t + 1);
-        // Fallback poll every other tick (10s) to catch missed subscription updates
-        setTick((t) => {
-          if (t % 2 === 0) loadDiscoveryJobs();
-          return t + 1;
-        });
       }, 5000);
     } else if (!hasActiveJobs && tickRef.current) {
       clearInterval(tickRef.current);
@@ -245,11 +248,12 @@ const DiscoveryPanel = (): React.JSX.Element => {
         // Set updatedAt to now when terminal status arrives via subscription
         // (subscription doesn't include updatedAt, so we capture it client-side)
         const merged = { ...oldJob, ...updatedJob };
-        if (updatedJob.status === 'COMPLETED' || updatedJob.status === 'FAILED') {
+        if (updatedJob.status === 'COMPLETED' || updatedJob.status === 'FAILED' || updatedJob.status === 'OPTIMIZATION_COMPLETED' || updatedJob.status === 'OPTIMIZATION_FAILED') {
           merged.updatedAt = new Date().toISOString();
         }
         newJobs[jobIndex] = merged;
         console.log(`Updated job ${updatedJob.jobId}: ${oldJob.status} -> ${updatedJob.status}`);
+
         return newJobs;
       }
       console.warn(`Job ${updatedJob.jobId} not found in current jobs list, adding it`);
@@ -258,44 +262,65 @@ const DiscoveryPanel = (): React.JSX.Element => {
   }, []);
 
   // Set up subscriptions for active discovery jobs
+  // Use a ref to track active subscriptions and avoid teardown/recreation on status changes
+  const subscriptionsRef = useRef(new Map<string, { unsubscribe: () => void }>());
+
   useEffect(() => {
-    const subscriptions = new Map();
+    const terminalStatuses = new Set(['COMPLETED', 'FAILED', 'OPTIMIZATION_COMPLETED', 'OPTIMIZATION_FAILED']);
+    const activeJobIds = new Set<string>();
 
     discoveryJobs.forEach((job) => {
-      if (job.status === 'PENDING' || job.status === 'IN_PROGRESS') {
-        type GqlSubscription = {
-          subscribe: (callbacks: Record<string, unknown>) => { unsubscribe: () => void };
-        };
-        const observable = client.graphql({
-          query: onDiscoveryJobStatusChange,
-          variables: { jobId: job.jobId },
-        }) as unknown as GqlSubscription;
-        const subscription = observable.subscribe({
-            next: (data: { data?: { onDiscoveryJobStatusChange?: DiscoveryJob } }) => {
-              console.log('Discovery job status changed:', data);
-              const changedJob = data?.data?.onDiscoveryJobStatusChange;
-              if (changedJob) {
-                updateDiscoveryJob(changedJob);
-                return;
-              }
-              console.warn('Received subscription update but no job data, falling back to refresh');
-              loadDiscoveryJobs();
-            },
-            error: (subscriptionError: unknown) => {
-              console.error('Discovery job subscription error:', subscriptionError);
-            },
-          });
+      if (!terminalStatuses.has(job.status)) {
+        activeJobIds.add(job.jobId);
 
-        subscriptions.set(job.jobId, subscription);
+        // Only create a subscription if we don't already have one for this jobId
+        if (!subscriptionsRef.current.has(job.jobId)) {
+          type GqlSubscription = {
+            subscribe: (callbacks: Record<string, unknown>) => { unsubscribe: () => void };
+          };
+          const observable = client.graphql({
+            query: onDiscoveryJobStatusChange,
+            variables: { jobId: job.jobId },
+          }) as unknown as GqlSubscription;
+          const subscription = observable.subscribe({
+              next: (data: { data?: { onDiscoveryJobStatusChange?: DiscoveryJob } }) => {
+                console.log('Discovery job status changed:', data);
+                const changedJob = data?.data?.onDiscoveryJobStatusChange;
+                if (changedJob) {
+                  updateDiscoveryJob(changedJob);
+                  return;
+                }
+                console.warn('Received subscription update but no job data, falling back to refresh');
+                loadDiscoveryJobs();
+              },
+              error: (subscriptionError: unknown) => {
+                console.error('Discovery job subscription error:', subscriptionError);
+              },
+            });
+
+          subscriptionsRef.current.set(job.jobId, subscription);
+        }
       }
     });
 
+    // Clean up subscriptions for jobs that reached terminal state
+    subscriptionsRef.current.forEach((subscription, jobId) => {
+      if (!activeJobIds.has(jobId)) {
+        subscription.unsubscribe();
+        subscriptionsRef.current.delete(jobId);
+      }
+    });
+  }, [JSON.stringify(discoveryJobs.map((job) => ({ jobId: job.jobId, status: job.status }))), updateDiscoveryJob]);
+
+  // Clean up all subscriptions on unmount
+  useEffect(() => {
     return () => {
-      subscriptions.forEach((subscription) => {
+      subscriptionsRef.current.forEach((subscription) => {
         subscription.unsubscribe();
       });
+      subscriptionsRef.current.clear();
     };
-  }, [JSON.stringify(discoveryJobs.map((job) => ({ jobId: job.jobId, status: job.status }))), updateDiscoveryJob]);
+  }, []);
 
   if (!settings.DiscoveryBucket) {
     return (
@@ -534,6 +559,12 @@ const DiscoveryPanel = (): React.JSX.Element => {
         return <StatusIndicator type="in-progress">In Progress</StatusIndicator>;
       case 'PENDING':
         return <StatusIndicator type="pending">Pending</StatusIndicator>;
+      case 'OPTIMIZATION_IN_PROGRESS':
+        return <StatusIndicator type="in-progress">Optimizing</StatusIndicator>;
+      case 'OPTIMIZATION_COMPLETED':
+        return <StatusIndicator type="success">Optimized</StatusIndicator>;
+      case 'OPTIMIZATION_FAILED':
+        return <StatusIndicator type="error">Optimization Failed</StatusIndicator>;
       default:
         return <StatusIndicator type="info">{status}</StatusIndicator>;
     }
@@ -550,6 +581,27 @@ const DiscoveryPanel = (): React.JSX.Element => {
       );
     }
 
+    // Optimization completed: show class name + optimization result
+    if (item.status === 'OPTIMIZATION_COMPLETED' && item.discoveredClassName) {
+      return (
+        <Box>
+          <Badge color="green">{item.discoveredClassName}</Badge>
+          <Box fontSize="body-s" color="text-body-secondary" margin={{ top: 'xxs' }}>
+            {item.statusMessage || 'Blueprint optimization completed'}
+          </Box>
+        </Box>
+      );
+    }
+
+    // Optimization completed without class name
+    if (item.status === 'OPTIMIZATION_COMPLETED') {
+      return (
+        <Box fontSize="body-s" color="text-body-secondary">
+          {item.statusMessage || 'Blueprint optimization completed'}
+        </Box>
+      );
+    }
+
     // COMPLETED but no class name (backward compatibility with old jobs)
     if (item.status === 'COMPLETED') {
       return (
@@ -560,7 +612,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
     }
 
     // FAILED: show error message prominently
-    if (item.status === 'FAILED') {
+    if (item.status === 'FAILED' || item.status === 'OPTIMIZATION_FAILED') {
       const errorMsg = item.errorMessage || item.statusMessage || 'Unknown error';
       return (
         <ExpandableSection
@@ -572,6 +624,15 @@ const DiscoveryPanel = (): React.JSX.Element => {
             {errorMsg}
           </Box>
         </ExpandableSection>
+      );
+    }
+
+    // Optimization in progress: show status message
+    if (item.status === 'OPTIMIZATION_IN_PROGRESS') {
+      return (
+        <Box fontSize="body-s" color="text-body-secondary">
+          <StatusIndicator type="in-progress">{item.statusMessage || 'Optimizing blueprint...'}</StatusIndicator>
+        </Box>
       );
     }
 
@@ -606,11 +667,24 @@ const DiscoveryPanel = (): React.JSX.Element => {
     return stripped || fileName;
   };
 
-  // Sort jobs by createdAt descending (newest first), then filter by search text
+  // Sort jobs by the selected column
   const sortedJobs = [...discoveryJobs].sort((a, b) => {
-    const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-    const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-    return dateB - dateA;
+    const field = sortingColumn.sortingField as keyof DiscoveryJob;
+    const valA = a[field];
+    const valB = b[field];
+
+    // Handle date fields
+    if (field === 'createdAt' || field === 'updatedAt') {
+      const dateA = valA ? new Date(valA as string).getTime() : 0;
+      const dateB = valB ? new Date(valB as string).getTime() : 0;
+      return sortingDescending ? dateB - dateA : dateA - dateB;
+    }
+
+    // Handle string fields
+    const strA = (valA as string) || '';
+    const strB = (valB as string) || '';
+    const cmp = strA.localeCompare(strB);
+    return sortingDescending ? -cmp : cmp;
   });
 
   // Compute time range cutoff
@@ -650,14 +724,18 @@ const DiscoveryPanel = (): React.JSX.Element => {
       header: 'Document',
       cell: (item: DiscoveryJob) => {
         const name = getOriginalFileName(item.documentKey);
-        if (item.pageRange) {
-          return (
-            <Box>
-              {name} <Badge color="blue">pp {item.pageRange}</Badge>
-            </Box>
-          );
-        }
-        return name;
+        const content = item.pageRange ? (
+          <span>
+            {name} <Badge color="blue">pp {item.pageRange}</Badge>
+          </span>
+        ) : (
+          name
+        );
+        return (
+          <Link onFollow={() => navigate(`${DISCOVERY_JOB_PATH}/${item.jobId}`)}>
+            {content}
+          </Link>
+        );
       },
       sortingField: 'documentKey',
     },
@@ -694,7 +772,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
       id: 'elapsed',
       header: 'Duration',
       cell: (item: DiscoveryJob) => {
-        if (item.status === 'COMPLETED' || item.status === 'FAILED') {
+        if (item.status === 'COMPLETED' || item.status === 'FAILED' || item.status === 'OPTIMIZATION_COMPLETED' || item.status === 'OPTIMIZATION_FAILED') {
           // Show total duration: from createdAt to updatedAt
           if (item.createdAt && item.updatedAt) {
             const start = parseUtcTimestamp(item.createdAt);
@@ -719,14 +797,23 @@ const DiscoveryPanel = (): React.JSX.Element => {
       cell: (item: DiscoveryJob) => renderResultCell(item),
       minWidth: 250,
     },
+    {
+      id: 'jobId',
+      header: 'Job ID',
+      cell: (item: DiscoveryJob) => (
+        <Box fontSize="body-s" color="text-body-secondary">{item.jobId.substring(0, 12)}...</Box>
+      ),
+      width: 140,
+    },
   ];
 
   return (
     <SpaceBetween size="l">
       <Container header={<Header variant="h2">Discovery</Header>}>
         <Alert type="warning" header="Important Notice">
-          Use this feature in non-production environments to discover documents and images. Fine-tune and test the
-          generated custom class configuration before exporting it to production.
+          Use the Discocery feature in non-production environments to discover class models from documents and images. 
+          Discovery creates a starting point, not a final class model config. Be sure to inspect, test and 
+          refine the generated custom class configuration before exporting it to production.
         </Alert>
 
         {error && (
@@ -763,7 +850,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
                 type="file"
                 onChange={handleDocumentFileChange}
                 disabled={isUploading}
-                accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif"
+                accept={SUPPORTED_DISCOVERY_EXTENSIONS}
               />
               {documentFile && (
                 <Box margin={{ top: 'xs' }}>
@@ -852,7 +939,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
                         bucket: settings.DiscoveryBucket as string,
                         groundTruthFileName: '',
                         version: selectedVersion?.value,
-                        // No pageRanges — just upload, don't create jobs
+                        skipJobCreation: true, // Only need presigned URL — don't create discovery jobs
                       },
                     });
                     const uploadResult = uploadResp.data.uploadDiscoveryDocument;
@@ -946,8 +1033,14 @@ const DiscoveryPanel = (): React.JSX.Element => {
         items={paginatedJobs}
         loading={isLoadingJobs}
         loadingText="Loading discovery jobs..."
-        sortingDisabled
         resizableColumns
+        sortingColumn={sortingColumn}
+        sortingDescending={sortingDescending}
+        onSortingChange={({ detail }) => {
+          setSortingColumn(detail.sortingColumn as { sortingField: string });
+          setSortingDescending(detail.isDescending ?? false);
+          setCurrentPage(1);
+        }}
         selectionType="multi"
         selectedItems={selectedJobs}
         onSelectionChange={({ detail }) => setSelectedJobs(detail.selectedItems as DiscoveryJob[])}
@@ -1041,6 +1134,7 @@ const DiscoveryPanel = (): React.JSX.Element => {
                     { id: 'createdAt', label: 'Created' },
                     { id: 'elapsed', label: 'Duration' },
                     { id: 'result', label: 'Result' },
+                    { id: 'jobId', label: 'Job ID' },
                   ],
                 },
               ],

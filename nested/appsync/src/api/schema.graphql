@@ -255,6 +255,13 @@ type DiscoveryJobListItem @aws_cognito_user_pools @aws_iam {
   discoveredClassName: String
   statusMessage: String
   pageRange: String
+  # Multi-document discovery fields
+  jobType: String
+  currentStep: String
+  totalDocuments: Int
+  clustersFound: Int
+  discoveredClasses: String
+  reflectionReport: String
 }
 
 input CreateDocumentInput {
@@ -426,6 +433,34 @@ type DiscoveryJob @aws_cognito_user_pools @aws_iam {
   errorMessage: String
   discoveredClassName: String
   statusMessage: String
+  # Multi-document discovery fields
+  jobType: String
+  currentStep: String
+  totalDocuments: Int
+  clustersFound: Int
+  discoveredClasses: String
+  reflectionReport: String
+}
+
+type MultiDocDiscoveryJob @aws_cognito_user_pools @aws_iam {
+  jobId: ID!
+  status: String!
+  configVersion: String
+  currentStep: String
+  totalDocuments: Int
+  clustersFound: Int
+  discoveredClasses: String
+  reflectionReport: String
+  errorMessage: String
+  createdAt: String
+  updatedAt: String
+}
+
+type DiscoveredClassSummary @aws_cognito_user_pools @aws_iam {
+  clusterId: Int
+  classification: String
+  documentCount: Int
+  error: String
 }
 
 type Agent @aws_cognito_user_pools @aws_iam {
@@ -510,12 +545,19 @@ type TestSet @aws_cognito_user_pools @aws_iam {
   status: String
   createdAt: AWSDateTime!
   error: String
+  lastAddResult: String
 }
 
 input TestSetUploadInput {
   fileName: String!
   fileSize: Int!
   description: String
+}
+
+input TestSetDocumentsUploadInput {
+  testSetId: String!
+  fileName: String!
+  fileSize: Int!
 }
 
 input FileUploadInfo {
@@ -586,18 +628,16 @@ type MessageContent {
 # RBAC: Role-Based Access Control via @aws_auth(cognito_groups: [...])
 #
 # Roles (Cognito Groups):
-#   Admin    - Full access to all operations
-#   Author   - Read + write (documents, configuration, tests, discovery)
-#   Reviewer - HITL review operations + limited document list
-#   Viewer   - Read-only access to documents, config, agent chat
+#   - Admin: Full access to all operations
+#   - Author: Can create/modify configurations, upload documents, run tests
+#   - Reviewer: Can review documents and perform HITL operations
+#   - Viewer: Read-only access (default for authenticated users)
 #
-# Backend (IAM) operations: createDocument, updateDocument, updateDocumentStatus,
-#   updateDocumentSection, updateAgentJobStatus, updateDiscoveryJobStatus
-#   These are only callable by backend Lambda functions via IAM auth.
+# Note: @aws_cognito_user_pools allows any authenticated user
+#       @aws_auth(cognito_groups: [...]) restricts to specific groups
 # =============================================================================
-
 type Mutation {
-  # Backend-only operations (IAM auth - called by Step Functions / Lambda)
+  # Internal/IAM operations (Step Functions, Lambda)
   createDocument(input: CreateDocumentInput!): CreateDocumentOutput @aws_iam
   updateDocument(input: UpdateDocumentInput!): Document @aws_iam
   updateDocumentStatus(input: UpdateDocumentStatusInput!): Document @aws_iam
@@ -607,6 +647,7 @@ type Mutation {
     status: String!
     userId: String!
     result: String
+    error: String
   ): Boolean @aws_iam
   updateDiscoveryJobStatus(
     jobId: ID!
@@ -614,7 +655,14 @@ type Mutation {
     errorMessage: String
     discoveredClassName: String
     statusMessage: String
+    jobType: String
+    currentStep: String
+    totalDocuments: Int
+    clustersFound: Int
+    discoveredClasses: String
+    reflectionReport: String
   ): DiscoveryJob @aws_iam
+  updateFinetuningJobStatus(jobId: ID!, status: FinetuningJobStatus!, errorMessage: String): FinetuningJob @aws_iam
 
   # Admin-only operations
   deleteConfigVersion(versionName: String!): UpdateConfigurationResponse
@@ -624,6 +672,10 @@ type Mutation {
   updateUser(userId: ID!, allowedConfigVersions: [String]): User
     @aws_auth(cognito_groups: ["Admin"])
   deleteUser(userId: ID!): Boolean
+    @aws_auth(cognito_groups: ["Admin"])
+  updatePricing(pricingConfig: AWSJSON!): UpdatePricingResponse
+    @aws_auth(cognito_groups: ["Admin"])
+  restoreDefaultPricing: UpdatePricingResponse
     @aws_auth(cognito_groups: ["Admin"])
 
   # Admin + Author operations
@@ -635,10 +687,6 @@ type Mutation {
     @aws_auth(cognito_groups: ["Admin", "Author"])
   syncBdaIdp(direction: String, versionName: String, bdaProjectArn: String, saveArn: Boolean, syncMode: String): SyncBdaIdpResponse
     @aws_auth(cognito_groups: ["Admin", "Author"])
-  updatePricing(pricingConfig: AWSJSON!): UpdatePricingResponse
-    @aws_auth(cognito_groups: ["Admin"])
-  restoreDefaultPricing: UpdatePricingResponse
-    @aws_auth(cognito_groups: ["Admin"])
   uploadDocument(
     fileName: String!
     contentType: String
@@ -646,8 +694,6 @@ type Mutation {
     bucket: String
     version: String
   ): PresignedUrlResponse!
-    @aws_auth(cognito_groups: ["Admin", "Author"])
-  deleteDiscoveryJob(jobId: ID!): Boolean!
     @aws_auth(cognito_groups: ["Admin", "Author"])
   uploadDiscoveryDocument(
     fileName: String!
@@ -658,6 +704,7 @@ type Mutation {
     version: String
     pageRanges: [String]
     pageLabels: [String]
+    skipJobCreation: Boolean
   ): DisPresignedUrlResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])
   autoDetectSections(
@@ -666,21 +713,46 @@ type Mutation {
     version: String
   ): String
     @aws_auth(cognito_groups: ["Admin", "Author"])
+  startMultiDocDiscovery(
+    s3Bucket: String
+    s3Prefix: String
+    configVersion: String!
+    zipFileName: String
+    zipFileSize: Int
+  ): MultiDocDiscoveryJob
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  uploadMultiDocDiscoveryZip(
+    fileName: String!
+    fileSize: Int!
+    configVersion: String!
+  ): TestSetUploadResponse
+    @aws_auth(cognito_groups: ["Admin", "Author"])
   copyToBaseline(objectKey: String!): CopyToBaselineResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])
   reprocessDocument(objectKeys: [String!]!, version: String): Boolean!
     @aws_auth(cognito_groups: ["Admin", "Author"])
   abortWorkflow(objectKeys: [String!]!): AbortWorkflowResponse!
     @aws_auth(cognito_groups: ["Admin", "Author"])
+  deleteDiscoveryJob(jobId: ID!): Boolean!
+    @aws_auth(cognito_groups: ["Admin", "Author"])
   startTestRun(input: TestRunInput!): TestRun
     @aws_auth(cognito_groups: ["Admin", "Author"])
   deleteTests(testRunIds: [String!]!): Boolean!
     @aws_auth(cognito_groups: ["Admin", "Author"])
-  addTestSet(name: String!, description: String, filePattern: String!, bucketType: String!, fileCount: Int!): TestSet
+  addTestSet(name: String!, description: String, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String): TestSet
     @aws_auth(cognito_groups: ["Admin", "Author"])
   addTestSetFromUpload(input: TestSetUploadInput!): TestSetUploadResponse
     @aws_auth(cognito_groups: ["Admin", "Author"])
+  addDocumentsToTestSet(testSetId: String!, filePattern: String!, bucketType: String!, fileCount: Int!, modifiedAfter: String): TestSet
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  addDocumentsToTestSetFromUpload(input: TestSetDocumentsUploadInput!): TestSetUploadResponse
+    @aws_auth(cognito_groups: ["Admin", "Author"])
   deleteTestSets(testSetIds: [String!]!): Boolean!
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  # Fine-Tuning (Admin + Author)
+  createFinetuningJob(input: CreateFinetuningJobInput!): FinetuningJob
+    @aws_auth(cognito_groups: ["Admin", "Author"])
+  deleteFinetuningJob(jobId: ID!): Boolean
     @aws_auth(cognito_groups: ["Admin", "Author"])
 
   # Admin + Reviewer operations (HITL review workflow)
@@ -699,6 +771,8 @@ type Mutation {
   releaseReview(objectKey: String!): Document
     @aws_auth(cognito_groups: ["Admin", "Reviewer"])
 
+  # All authenticated users (creates state but read-like operations)
+  deleteAgentJob(jobId: ID!): Boolean @aws_cognito_user_pools
   # Agent Chat operations (all authenticated Cognito users + IAM for backend)
   # Note: Reviewer exclusion from Agent Chat is enforced at the QUERY level —
   # all supporting queries (listChatSessions, getChatMessages, listAvailableAgents)
@@ -710,20 +784,14 @@ type Mutation {
     method: String
     enableCodeIntelligence: Boolean
     toolMetadata: ToolMetadataInput
-  ): AgentChatMessage
-    @aws_cognito_user_pools
-    @aws_iam
+  ): AgentChatMessage @aws_cognito_user_pools @aws_iam
   updateAgentChatMessage(sessionId: ID!, content: String!): AgentChatMessage
     @aws_cognito_user_pools
     @aws_iam
-  deleteChatSession(sessionId: ID!): Boolean
-    @aws_cognito_user_pools
-    @aws_iam
+  deleteChatSession(sessionId: ID!): Boolean @aws_cognito_user_pools @aws_iam
   updateChatSessionTitle(sessionId: ID!, title: String!): ChatSession
     @aws_cognito_user_pools
     @aws_iam
-  deleteAgentJob(jobId: ID!): Boolean
-    @aws_cognito_user_pools
 }
 
 type DocumentPage @aws_cognito_user_pools @aws_iam {
@@ -816,7 +884,7 @@ type Query @aws_cognito_user_pools @aws_iam {
     @aws_auth(cognito_groups: ["Admin", "Author"])
   getTestSets: [TestSet]
     @aws_auth(cognito_groups: ["Admin", "Author"])
-  listBucketFiles(bucketType: String!, filePattern: String!): [String]
+  listBucketFiles(bucketType: String!, filePattern: String!, modifiedAfter: String): [String]
     @aws_auth(cognito_groups: ["Admin", "Author"])
   validateTestFileName(fileName: String!): TestSetValidationResponse
     @aws_auth(cognito_groups: ["Admin", "Author"])
@@ -834,6 +902,12 @@ type Query @aws_cognito_user_pools @aws_iam {
   # User Management queries
   listUsers: UserList @aws_cognito_user_pools
   getMyProfile: User @aws_cognito_user_pools
+
+  # Fine-Tuning queries
+  listFinetuningJobs(limit: Int, nextToken: String): FinetuningJobConnection @aws_cognito_user_pools
+  getFinetuningJob(jobId: ID!): FinetuningJob @aws_cognito_user_pools
+  validateTestSetForFinetuning(testSetId: ID!): TestSetValidationResult @aws_cognito_user_pools
+  listAvailableModels: AvailableModelsResult @aws_cognito_user_pools
 }
 
 type Subscription @aws_cognito_user_pools @aws_iam {
@@ -846,6 +920,95 @@ type Subscription @aws_cognito_user_pools @aws_iam {
     @aws_subscribe(mutations: ["updateDiscoveryJobStatus"])
   onAgentChatMessageUpdate(sessionId: String!): AgentChatMessage
     @aws_subscribe(mutations: ["sendAgentChatMessage"])
+}
+
+# =========================================================================
+# Fine-Tuning Types
+# =========================================================================
+
+type FinetuningJob @aws_cognito_user_pools @aws_iam {
+  jobId: ID!
+  jobName: String!
+  testSetId: String!
+  testSetName: String
+  baseModelId: String!
+  customModelName: String
+  customModelArn: String
+  customModelDeploymentArn: String
+  status: FinetuningJobStatus!
+  createdAt: AWSDateTime!
+  updatedAt: AWSDateTime
+  completedAt: AWSDateTime
+  errorMessage: String
+  trainingMetrics: AWSJSON
+  hyperparameters: AWSJSON
+  trainingDataConfig: AWSJSON
+  validationDataConfig: AWSJSON
+  outputDataConfig: AWSJSON
+  deploymentId: String
+  deploymentStatus: String
+  deploymentEndpoint: String
+  provisionedModelArn: String
+}
+
+enum FinetuningJobStatus {
+  PENDING
+  VALIDATING
+  GENERATING_DATA
+  TRAINING
+  DEPLOYING
+  COMPLETED
+  FAILED
+  CANCELLED
+  STOPPING
+  STOPPED
+}
+
+type TrainingMetrics @aws_cognito_user_pools @aws_iam {
+  trainingLoss: Float
+  validationLoss: Float
+}
+
+type TestSetValidationResult @aws_cognito_user_pools @aws_iam {
+  isValid: Boolean!
+  documentCount: Int!
+  classCount: Int!
+  classDistribution: AWSJSON
+  trainCount: Int!
+  validationCount: Int!
+  warnings: [String!]
+  errors: [String!]
+}
+
+type FinetuningJobConnection @aws_cognito_user_pools @aws_iam {
+  items: [FinetuningJob]
+  nextToken: String
+}
+
+input CreateFinetuningJobInput {
+  testSetId: ID!
+  baseModel: String!
+  jobName: String!
+  trainSplit: Float
+}
+
+# Available Models Types
+type BaseModelInfo @aws_cognito_user_pools @aws_iam {
+  id: String!
+  name: String!
+  provider: String!
+}
+
+type CustomModelInfo @aws_cognito_user_pools @aws_iam {
+  id: String!
+  name: String!
+  baseModel: String!
+  status: String!
+}
+
+type AvailableModelsResult @aws_cognito_user_pools @aws_iam {
+  baseModels: [BaseModelInfo!]!
+  customModels: [CustomModelInfo!]!
 }
 
 schema {

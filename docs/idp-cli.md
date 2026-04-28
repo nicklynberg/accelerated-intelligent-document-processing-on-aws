@@ -14,7 +14,8 @@ A command-line tool for batch document processing with the GenAI IDP Accelerator
 📁 **Flexible Input** - Support for local files and S3 references  
 🔍 **Comprehensive Status** - Track queued, running, completed, and failed documents  
 📈 **Batch Analytics** - Success rates, durations, and detailed error reporting  
-🎯 **Evaluation Framework** - Validate accuracy against baselines with detailed metrics
+🎯 **Evaluation Framework** - Validate accuracy against baselines with detailed metrics  
+💬 **Agent Chat** - Interactive Agent Companion Chat from the terminal with Analytics, Error Analyzer, and more
 
 Demo:
 
@@ -40,6 +41,7 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
   - [stop-workflows](#stop-workflows)
   - [load-test](#load-test)
   - [discover](#discover)
+  - [discover-multidoc](#discover-multidoc)
   - [remove-deleted-stack-resources](#remove-deleted-stack-resources)
   - [config-create](#config-create)
   - [config-validate](#config-validate)
@@ -48,6 +50,9 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
   - [config-list](#config-list)
   - [config-activate](#config-activate)
   - [config-delete](#config-delete)
+  - [test-result](#test-result)
+  - [test-compare](#test-compare)
+  - [chat](#chat)
 - [Complete Evaluation Workflow](#complete-evaluation-workflow)
   - [Step 1: Deploy Your Stack](#step-1-deploy-your-stack)
   - [Step 2: Initial Processing from Local Directory](#step-2-initial-processing-from-local-directory)
@@ -74,8 +79,8 @@ https://github.com/user-attachments/assets/3d448a74-ba5b-4a4a-96ad-ec03ac0b4d7d
 ### Install from source
 
 ```bash
-cd lib/idp_cli_pkg
-pip install -e .
+make setup-venv
+source .venv/bin/activate
 ```
 
 ### Install with test dependencies
@@ -156,7 +161,7 @@ idp-cli deploy [OPTIONS]
 - `--admin-email`: Admin user email
 
 **Optional Parameters:**
-- `--from-code`: Deploy from local code by building with publish.py (path to project root)
+- `--from-code`: Deploy from local code by building and publishing artifacts (path to project root)
 - `--template-url`: URL to CloudFormation template in S3 (optional, auto-selected based on region)
 - `--custom-config`: Path to local config file or S3 URI
 - `--max-concurrent`: Maximum concurrent workflows (default: 100)
@@ -932,10 +937,11 @@ idp-cli delete-documents [OPTIONS]
 **Document Selection (choose ONE):**
 - `--document-ids`: Comma-separated list of document IDs (S3 object keys) to delete
 - `--batch-id`: Delete all documents in this batch
+- `--pattern`: Wildcard pattern to match document keys (e.g. `"batch-123/*.pdf"`, `"*invoice*"`)
 
 **Options:**
 - `--stack-name` (required): CloudFormation stack name
-- `--status-filter`: Only delete documents with this status (use with --batch-id)
+- `--status-filter`: Only delete documents with this status (use with --batch-id or --pattern)
   - Options: `FAILED`, `COMPLETED`, `PROCESSING`, `QUEUED`
 - `--dry-run`: Show what would be deleted without actually deleting
 - `--force`, `-y`: Skip confirmation prompt
@@ -970,6 +976,23 @@ idp-cli delete-documents \
 idp-cli delete-documents \
     --stack-name my-stack \
     --batch-id cli-batch-20250123 \
+    --dry-run
+
+# Delete documents matching a wildcard pattern
+idp-cli delete-documents \
+    --stack-name my-stack \
+    --pattern "batch-123/*.pdf"
+
+# Delete all failed invoice documents across batches
+idp-cli delete-documents \
+    --stack-name my-stack \
+    --pattern "*invoice*" \
+    --status-filter FAILED
+
+# Dry run with pattern to preview matches
+idp-cli delete-documents \
+    --stack-name my-stack \
+    --pattern "*2024*" \
     --dry-run
 
 # Force delete without confirmation
@@ -2034,6 +2057,102 @@ This uses the same mechanism as the Web UI configuration management system.
 
 ---
 
+### `test-result`
+
+Get test results for a specific Test Studio test run with automatic evaluation triggering.
+
+**Usage:**
+```bash
+idp-cli test-result [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--test-run-id` (required): Test run ID to retrieve results for
+- `--wait`: Wait for evaluation to complete (polls until metrics are calculated)
+- `--timeout`: Timeout in seconds when using `--wait` (default: 600)
+- `--output-dir`: Directory to save results as JSON file
+- `--region`: AWS region (optional)
+
+**Examples:**
+```bash
+# Get results immediately (may show "EVALUATING" status if metrics not ready)
+idp-cli test-result \
+  --stack-name my-stack \
+  --test-run-id fake-w2-20260409-123456
+
+# Wait for evaluation to complete (recommended for CI/CD)
+idp-cli test-result \
+  --stack-name my-stack \
+  --test-run-id fake-w2-20260409-123456 \
+  --wait --timeout 900
+
+# Save results to JSON file
+idp-cli test-result \
+  --stack-name my-stack \
+  --test-run-id fake-w2-20260409-123456 \
+  --wait --output-dir ./results
+```
+
+**Output:**
+- Overall accuracy, precision, recall, F1 score
+- Total cost
+- Files completed/failed
+- Created/completed timestamps
+- JSON file: `<test-run-id>-result.json` (when `--output-dir` specified)
+
+**Behavior:**
+- Triggers lazy evaluation if metrics not yet calculated (first call after test run completes)
+- Polls Lambda every 10 seconds when `--wait` is used
+- Returns complete test run data including field-level metrics and cost breakdown
+
+---
+
+### `test-compare`
+
+Compare metrics and configurations from multiple Test Studio test runs.
+
+**Usage:**
+```bash
+idp-cli test-compare [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--test-run-ids` (required): Comma-separated list of test run IDs to compare (minimum 2)
+- `--output-dir`: Directory to save comparison as JSON and CSV files
+- `--region`: AWS region (optional)
+
+**Examples:**
+```bash
+# Compare two test runs
+idp-cli test-compare \
+  --stack-name my-stack \
+  --test-run-ids "fake-w2-20260409-123456,fake-w2-20260409-234567"
+
+# Compare multiple runs and export to files
+idp-cli test-compare \
+  --stack-name my-stack \
+  --test-run-ids "run1,run2,run3" \
+  --output-dir ./comparisons
+```
+
+**Output:**
+- **Console**: Side-by-side table with accuracy, precision, recall, F1 score, and cost for each test run
+- **JSON file**: `comparison-<timestamp>.json` - Complete comparison data with full test results and config differences
+- **CSV file**: `comparison-<timestamp>.csv` - Metrics table suitable for spreadsheets
+
+**Configuration Differences:**
+- Automatically detects and displays configuration differences between test runs
+- Shows nested config paths (e.g., `classification.model`, `extraction.temperature`)
+- Highlights values that differ across test runs
+
+**Requirements:**
+- All test runs must be in `COMPLETE` or `PARTIAL_COMPLETE` status
+- Minimum 2 test runs required for comparison
+
+---
+
 ### `discover`
 
 Discover document class schemas from sample documents using Amazon Bedrock.
@@ -2107,6 +2226,68 @@ idp-cli discover --stack-name my-stack -d ./invoice.pdf --config-version v2
 
 ---
 
+### `discover-multidoc`
+
+Discover document classes from a collection of documents using embedding-based clustering and agentic analysis.
+
+Unlike `discover` (which analyzes one document at a time), `discover-multidoc` analyzes a directory of mixed documents to automatically identify document types, cluster similar documents, and generate JSON Schemas for each discovered class.
+
+**Requires:** `pip install idp-common[multi_document_discovery]` (scikit-learn, scipy, numpy, strands-agents)
+
+**Note:** Requires at least **2 documents per expected class**. Clusters with fewer than 2 documents are filtered as noise. For discovering schemas from individual documents, use [`discover`](#discover) instead.
+
+**Usage:**
+```bash
+idp-cli discover-multidoc [OPTIONS]
+```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--dir` | Directory containing documents to analyze (recursive scan) |
+| `-d, --document` | Individual document files (repeatable: `-d doc1.pdf -d doc2.png`) |
+| `--embedding-model` | Bedrock embedding model ID (default: `us.cohere.embed-v4:0`) |
+| `--analysis-model` | Bedrock LLM for cluster analysis (default: `us.anthropic.claude-sonnet-4-6`) |
+| `-o, --output` | Output directory for discovered JSON schemas |
+| `--stack-name` | CloudFormation stack name (required for `--save-to-config`) |
+| `--config-version` | Configuration version to save schemas to |
+| `--save-to-config` | Save discovered schemas to the stack's configuration |
+| `--region` | AWS region |
+
+**Examples:**
+
+```bash
+# Discover from a directory of documents
+idp-cli discover-multidoc --dir ./samples/
+
+# Discover with explicit files
+idp-cli discover-multidoc -d doc1.pdf -d doc2.png -d doc3.jpg
+
+# Save schemas to output directory
+idp-cli discover-multidoc --dir ./samples/ -o ./schemas/
+
+# Save to stack configuration
+idp-cli discover-multidoc --dir ./samples/ --save-to-config \
+    --stack-name IDP --config-version v2
+
+# Use custom models
+idp-cli discover-multidoc --dir ./samples/ \
+    --embedding-model us.amazon.titan-embed-image-v1 \
+    --analysis-model us.anthropic.claude-sonnet-4-6
+```
+
+**Pipeline stages** (shown in Rich progress output):
+1. **Document scan** — Finds PDF, PNG, JPG, TIFF files in the directory
+2. **Embedding** — Generates image embeddings via Bedrock (Cohere Embed v4)
+3. **Clustering** — KMeans + silhouette analysis to find optimal number of clusters
+4. **Analysis** — Strands agent analyzes each cluster to identify the document class and generate a JSON Schema
+5. **Reflection** — Agent generates a summary report of all discovered classes
+
+**Output:** Results table showing cluster ID, classification, document count, field count, and status. Optionally writes individual JSON schema files and a reflection report.
+
+---
+
 ### `config-sync-bda`
 
 Synchronize IDP document class schemas with BDA (Bedrock Data Automation) blueprints.
@@ -2141,6 +2322,81 @@ idp-cli config-sync-bda --stack-name my-stack --direction bda-to-idp --mode merg
 # Sync specific config version
 idp-cli config-sync-bda --stack-name my-stack --config-version v2
 ```
+
+---
+
+### `chat`
+
+Interactive Agent Companion Chat from the terminal. Provides access to the full multi-agent orchestrator including Analytics, Error Analyzer, Code Intelligence, and any configured External MCP Agents.
+
+The chat command runs the same orchestrator as the Web UI's Agent Companion Chat, but locally in your terminal — with real-time streaming and multi-turn conversation support.
+
+**Usage:**
+```bash
+idp-cli chat [OPTIONS]
+```
+
+**Options:**
+- `--stack-name` (required): CloudFormation stack name
+- `--region`: AWS region (optional)
+- `--prompt`: Single-shot prompt — sends one message, prints the response, and exits. Useful for scripts and CI/CD.
+- `--enable-code-intelligence`: Enable the Code Intelligence Agent (disabled by default because it uses external third-party services)
+
+**Examples:**
+
+```bash
+# Interactive mode — multi-turn conversation
+idp-cli chat --stack-name my-stack
+
+# Single-shot mode — for scripts and automation
+idp-cli chat --stack-name my-stack --prompt "What is the avg accuracy for the last test run?"
+
+# With Code Intelligence enabled
+idp-cli chat --stack-name my-stack --enable-code-intelligence
+
+# Pipe output in scripts
+idp-cli chat --stack-name my-stack --prompt "How many documents failed today?" 2>/dev/null
+```
+
+**Interactive session example:**
+```
+IDP Agent Chat
+Stack: my-stack
+
+✓ Ready  Agents: Analytics Agent · Error Analyzer Agent · Code Intelligence Agent
+Type /quit to exit
+
+You: What is the avg accuracy for test run Fake-W2-Tax-Forms-20260320?
+⟶ Analytics Agent
+The average accuracy for test run Fake-W2-Tax-Forms-20260320 is 0.867 (86.7%) across 95 documents.
+
+You: Break that down by document type
+⟶ Analytics Agent
+...
+
+You: /quit
+Goodbye.
+```
+
+**SDK usage:**
+```python
+from idp_sdk import IDPClient
+
+client = IDPClient(stack_name="my-stack")
+
+# Single message
+resp = client.chat.send_message("How many documents were processed today?")
+print(resp.response)
+
+# Multi-turn conversation
+resp2 = client.chat.send_message("Break down by type", session_id=resp.session_id)
+print(resp2.response)
+```
+
+**Prerequisites:**
+- Requires `idp_common[agents]` to be installed: `pip install -e 'lib/idp_common_pkg[agents]'`
+- Requires Amazon Bedrock model access (Claude or Nova models)
+- Stack must be deployed with Agent Companion Chat resources (DynamoDB tables, Athena database)
 
 ---
 

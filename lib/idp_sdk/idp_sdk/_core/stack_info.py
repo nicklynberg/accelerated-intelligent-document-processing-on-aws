@@ -179,6 +179,63 @@ class StackInfo:
             logger.error(f"Error validating stack: {e}")
             return False
 
+    def get_nested_stack_output(
+        self, nested_stack_pattern: str, output_key: str
+    ) -> Optional[str]:
+        """
+        Get an output value from a nested CloudFormation stack.
+
+        Args:
+            nested_stack_pattern: Pattern to match nested stack LogicalResourceId
+                                (case-insensitive, e.g., "appsync" matches "AppSyncStack")
+            output_key: Output key to retrieve from the nested stack
+
+        Returns:
+            Output value if found, None otherwise
+
+        Raises:
+            ValueError: If nested stack or output not found
+        """
+        try:
+            # Find nested stack by pattern
+            resources = self.cfn.describe_stack_resources(StackName=self.stack_name)
+            nested_stack_id = None
+
+            for resource in resources["StackResources"]:
+                if (
+                    resource["ResourceType"] == "AWS::CloudFormation::Stack"
+                    and nested_stack_pattern.lower()
+                    in resource["LogicalResourceId"].lower()
+                ):
+                    nested_stack_id = resource["PhysicalResourceId"]
+                    nested_stack_name = nested_stack_id.split("/")[1]
+                    break
+
+            if not nested_stack_id:
+                raise ValueError(
+                    f"Nested stack matching '{nested_stack_pattern}' not found in {self.stack_name}"
+                )
+
+            # Get output from nested stack
+            nested_response = self.cfn.describe_stacks(StackName=nested_stack_name)
+            nested_outputs = nested_response["Stacks"][0].get("Outputs", [])
+
+            for output in nested_outputs:
+                if output["OutputKey"] == output_key:
+                    output_value = output["OutputValue"]
+                    logger.debug(
+                        f"Found {output_key} in nested stack {nested_stack_name}: {output_value}"
+                    )
+                    return output_value
+
+            raise ValueError(
+                f"Output '{output_key}' not found in nested stack matching '{nested_stack_pattern}'"
+            )
+
+        except Exception as e:
+            logger.error(f"Error getting nested stack output: {e}")
+            raise
+
 
 def get_stack_resources(
     stack_name: str, region: Optional[str] = None

@@ -61,6 +61,11 @@ class ProgressMonitor:
             "total": len(document_ids),
         }
 
+        # If no document IDs provided, return empty status (not complete)
+        if not document_ids:
+            logger.warning("No document IDs provided for batch status check")
+            return status_summary
+
         # Separate finished (cached) from active (need to query) documents
         docs_to_query = []
         for doc_id in document_ids:
@@ -90,7 +95,7 @@ class ProgressMonitor:
                 self._categorize_document(status, status_summary)
 
                 # Cache finished documents (terminal states)
-                if status["status"] in ["COMPLETED", "FAILED", "ABORTED"]:
+                if status["status"] in ["COMPLETED", "FAILED", "ABORTED", "NOT_FOUND"]:
                     self.finished_docs[status["document_id"]] = status
 
         except Exception as e:
@@ -101,7 +106,12 @@ class ProgressMonitor:
                     status = self.get_document_status(doc_id)
                     self._categorize_document(status, status_summary)
 
-                    if status["status"] in ["COMPLETED", "FAILED", "ABORTED"]:
+                    if status["status"] in [
+                        "COMPLETED",
+                        "FAILED",
+                        "ABORTED",
+                        "NOT_FOUND",
+                    ]:
                         self.finished_docs[status["document_id"]] = status
                 except Exception as e:
                     logger.error(f"Error getting status for {doc_id}: {e}")
@@ -192,7 +202,11 @@ class ProgressMonitor:
 
         if status_value == "COMPLETED":
             status_summary["completed"].append(status)
-        elif status_value in ["FAILED", "ABORTED"]:
+        elif status_value in ["FAILED", "ABORTED", "NOT_FOUND"]:
+            # NOT_FOUND is treated as failed - document was never tracked in DynamoDB
+            if status_value == "NOT_FOUND":
+                status["error"] = "Document not found in tracking table"
+                status["failed_step"] = "QueueSender"
             status_summary["failed"].append(status)
         elif status_value in [
             "RUNNING",

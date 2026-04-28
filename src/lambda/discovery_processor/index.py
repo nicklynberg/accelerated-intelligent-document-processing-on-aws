@@ -233,12 +233,74 @@ def process_discovery_job(job_id, document_key, ground_truth_key, bucket, versio
 
         # Update job status to COMPLETED with discovered class name
         success_message = f"Discovery complete. Added document class '{discovered_class_name}'"
-        update_job_status(
-            job_id, 
-            'COMPLETED', 
-            discovered_class_name=discovered_class_name,
-            status_message=success_message
+        optimization_triggered = False
+
+        # Trigger async blueprint optimization if conditions are met:
+        # 1. use_bda is enabled in config
+        # 2. enable_blueprint_optimization is true in config
+        # 3. Ground truth file was provided
+        # 4. Document is a PDF
+        use_bda = getattr(classes_discovery.config, "use_bda", False)
+        optimization_enabled = getattr(
+            classes_discovery.config, "enable_blueprint_optimization", False
         )
+        if use_bda and optimization_enabled and ground_truth_key and document_key.lower().endswith(".pdf"):
+            try:
+                optimization_function = os.environ.get(
+                    "BLUEPRINT_OPTIMIZATION_FUNCTION_NAME"
+                )
+                if optimization_function:
+                    lambda_client = boto3.client("lambda")
+                    lambda_client.invoke(
+                        FunctionName=optimization_function,
+                        InvocationType="Event",
+                        Payload=json.dumps(
+                            {
+                                "jobId": job_id,
+                                "classSchema": result["schema"],
+                                "documentKey": document_key,
+                                "groundTruthKey": ground_truth_key,
+                                "bucket": bucket,
+                                "version": version,
+                                "discoveredClassName": discovered_class_name,
+                            }
+                        ),
+                    )
+                    optimization_triggered = True
+                    success_message = (
+                        f"Discovery complete. Added document class"
+                        f" '{discovered_class_name}'."
+                        f" Blueprint optimization in progress..."
+                    )
+                    logger.info(
+                        f"Invoked blueprint optimization Lambda"
+                        f" for job {job_id}"
+                    )
+                else:
+                    logger.warning(
+                        "BLUEPRINT_OPTIMIZATION_FUNCTION_NAME"
+                        " not configured, skipping optimization"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to invoke blueprint optimization"
+                    f" for job {job_id}: {e}"
+                )
+
+        if optimization_triggered:
+            update_job_status(
+                job_id,
+                'OPTIMIZATION_IN_PROGRESS',
+                discovered_class_name=discovered_class_name,
+                status_message=success_message
+            )
+        else:
+            update_job_status(
+                job_id,
+                'COMPLETED',
+                discovered_class_name=discovered_class_name,
+                status_message=success_message
+            )
 
         logger.info(f"Successfully processed discovery job: {job_id}, discovered class: {discovered_class_name}")
 

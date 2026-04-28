@@ -46,6 +46,8 @@ DEFAULT_RETRYABLE_ERRORS = {
     "TooManyRequestsException",
     "ServiceUnavailableException",
     "serviceUnavailableException",  # lowercase variant from EventStreamError
+    "InternalServerException",  # Transient Bedrock server-side errors
+    "InternalServerError",  # Variant of InternalServerException
     "RequestTimeout",
     "RequestTimeoutException",
 }

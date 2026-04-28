@@ -14,8 +14,10 @@ from idp_sdk.exceptions import IDPConfigurationError, IDPResourceNotFoundError
 from idp_sdk.models.discovery import (
     AutoDetectResult,
     AutoDetectSection,
+    DiscoveredClassResult,
     DiscoveryBatchResult,
     DiscoveryResult,
+    MultiDocDiscoveryResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -620,6 +622,204 @@ class DiscoveryOperation:
                 document_path=str(doc_path),
                 error=str(e),
             )
+
+    def run_multi_doc(
+        self,
+        document_dir: Optional[str] = None,
+        document_paths: Optional[List[str]] = None,
+        embedding_model_id: Optional[str] = None,
+        analysis_model_id: Optional[str] = None,
+        save_to_config: bool = False,
+        config_version: Optional[str] = None,
+        output_dir: Optional[str] = None,
+        progress_callback=None,
+        stack_name: Optional[str] = None,
+        region: Optional[str] = None,
+    ) -> "MultiDocDiscoveryResult":
+        """Run multi-document discovery on a collection of documents.
+
+        Analyzes a directory of documents to automatically discover document
+        classes using embedding → clustering → agentic analysis. Requires the
+        ``multi_document_discovery`` extra for ``idp-common``::
+
+            make setup    (or: pip install idp-common[multi_document_discovery])
+
+        Args:
+            document_dir: Directory containing documents to analyze (recursive).
+            document_paths: Explicit list of document file paths. Provide either
+                ``document_dir`` or ``document_paths``, not both.
+            embedding_model_id: Bedrock embedding model for document similarity.
+                Default: ``us.cohere.embed-v4:0``.
+            analysis_model_id: Bedrock LLM for cluster analysis and schema
+                generation. Default: ``us.anthropic.claude-sonnet-4-6``.
+            save_to_config: If True, save discovered schemas to the stack's
+                config. Requires ``stack_name`` and ``config_version``.
+            config_version: Configuration version to save schemas to.
+            output_dir: Directory to write discovered JSON schemas to.
+            progress_callback: Optional callable(step_name, step_data) for
+                pipeline status updates.
+            stack_name: Optional stack name override.
+            region: Optional AWS region override.
+
+        Returns:
+            MultiDocDiscoveryResult with discovered classes, reflection report,
+            and pipeline statistics.
+
+        Raises:
+            ImportError: If multi_document_discovery dependencies are not installed.
+            ValueError: If neither document_dir nor document_paths is provided.
+
+        Example:
+            Local mode (no stack needed)::
+
+                >>> client = IDPClient()
+                >>> result = client.discovery.run_multi_doc(
+                ...     document_dir="./samples/",
+                ...     output_dir="./discovered-schemas/",
+                ... )
+                >>> for cls in result.discovered_classes:
+                ...     print(f"{cls.classification}: {cls.document_count} docs")
+
+            Save to stack config::
+
+                >>> client = IDPClient(stack_name="IDP")
+                >>> result = client.discovery.run_multi_doc(
+                ...     document_dir="./samples/",
+                ...     save_to_config=True,
+                ...     config_version="v2",
+                ... )
+        """
+        # Validate parameters before attempting heavy import
+        if not document_dir and not document_paths:
+            raise ValueError("Either document_dir or document_paths must be provided.")
+
+        # Determine config_version for save
+        save_version = None
+        resolved_stack = None
+        if save_to_config:
+            resolved_stack = stack_name or self._client._stack_name
+            if not resolved_stack:
+                raise IDPConfigurationError(
+                    "stack_name is required when save_to_config=True"
+                )
+            if not config_version:
+                raise IDPConfigurationError(
+                    "config_version is required when save_to_config=True"
+                )
+            save_version = config_version
+
+        try:
+            from idp_common.discovery.multi_document_discovery import (
+                MultiDocumentDiscovery,
+            )
+        except ImportError:
+            return MultiDocDiscoveryResult(
+                status="FAILED",
+                error="Multi-document discovery requires additional dependencies. "
+                "Install them with: make setup (or: pip install idp-common[multi_document_discovery])",
+            )
+
+        resolved_region = (
+            region or self._client._region or os.environ.get("AWS_REGION", "us-west-2")
+        )
+
+        # Build config overrides
+        config: Dict[str, Any] = {}
+        if embedding_model_id:
+            config["embedding_model_id"] = embedding_model_id
+        if analysis_model_id:
+            config["analysis_model_id"] = analysis_model_id
+
+        if save_to_config and resolved_stack:
+            # Set CONFIGURATION_TABLE_NAME for ClassesDiscovery
+            config_table = self._get_config_table(resolved_stack)
+            os.environ["CONFIGURATION_TABLE_NAME"] = config_table
+            save_version = config_version
+
+        try:
+            discovery = MultiDocumentDiscovery(
+                region=resolved_region,
+                config=config,
+            )
+
+            raw_result = discovery.run_local_pipeline(
+                document_dir=document_dir,
+                document_paths=document_paths,
+                config_version=save_version,
+                progress_callback=progress_callback,
+            )
+
+            # Convert raw dataclass result to SDK Pydantic model
+            discovered_classes = []
+            for dc_dict in raw_result.discovered_classes:
+                raw_ids = dc_dict.get("sample_doc_ids", [])
+                discovered_classes.append(
+                    DiscoveredClassResult(
+                        cluster_id=dc_dict.get("cluster_id", -1),
+                        classification=dc_dict.get("classification"),
+                        json_schema=dc_dict.get("json_schema"),
+                        document_count=dc_dict.get("document_count", 0),
+                        sample_doc_ids=[str(x) for x in raw_ids] if raw_ids else [],
+                        error=dc_dict.get("error"),
+                    )
+                )
+
+            # Determine overall status
+            num_successful = raw_result.num_successful_schemas
+            num_failed = raw_result.num_failed_schemas
+            if num_successful == 0 and num_failed > 0:
+                status = "FAILED"
+            elif num_failed > 0:
+                status = "PARTIAL"
+            else:
+                status = "SUCCESS"
+
+            result = MultiDocDiscoveryResult(
+                status=status,
+                discovered_classes=discovered_classes,
+                reflection_report=raw_result.reflection_report,
+                total_documents=raw_result.total_documents,
+                total_clusters=raw_result.num_clusters,
+                noise_documents=raw_result.num_failed_embeddings,
+                config_version=save_version,
+            )
+
+            # Write schemas to output directory if requested
+            if output_dir:
+                self._write_schemas_to_dir(output_dir, discovered_classes)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Multi-document discovery failed: {e}")
+            return MultiDocDiscoveryResult(
+                status="FAILED",
+                error=str(e),
+            )
+
+    def _write_schemas_to_dir(
+        self,
+        output_dir: str,
+        discovered_classes: List["DiscoveredClassResult"],
+    ) -> None:
+        """Write discovered JSON schemas to an output directory."""
+        out_path = Path(output_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+
+        for dc in discovered_classes:
+            if dc.error or not dc.json_schema:
+                continue
+            class_name = dc.classification or dc.json_schema.get(
+                "$id", f"cluster-{dc.cluster_id}"
+            )
+            # Sanitize filename
+            safe_name = re.sub(r"[^\w\-.]", "_", class_name)
+            schema_path = out_path / f"{safe_name}.json"
+            schema_path.write_text(
+                json.dumps(dc.json_schema, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            logger.info(f"Wrote schema to {schema_path}")
 
     def run_batch(
         self,

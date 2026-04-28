@@ -235,7 +235,9 @@
                                     "ThrottlingException",
                                     "ProvisionedThroughputExceededException",
                                     "RequestLimitExceeded",
-                                    "ServiceUnavailableException"
+                                    "ServiceUnavailableException",
+                                    "InternalServerException",
+                                    "InternalServerError"
                                 ],
                                 "IntervalSeconds": 10,
                                 "MaxAttempts": 8,
