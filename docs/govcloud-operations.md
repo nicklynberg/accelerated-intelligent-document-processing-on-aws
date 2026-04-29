@@ -1,3 +1,7 @@
+---
+title: "GovCloud Operations"
+---
+
 # GovCloud Operations
 
 Monitoring, troubleshooting, and operational best practices for the GenAI IDP solution in GovCloud.

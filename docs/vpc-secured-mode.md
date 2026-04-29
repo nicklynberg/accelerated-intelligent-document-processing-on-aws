@@ -1,3 +1,7 @@
+---
+title: "VPC Secured Mode Guide"
+---
+
 # VPC Secured Mode Guide
 
 This guide covers whats required for supporting the GenAI IDP solution in a VPC-secured environment for enhanced network isolation and security.

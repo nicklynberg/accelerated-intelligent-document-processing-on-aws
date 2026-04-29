@@ -1,3 +1,7 @@
+---
+title: "GovCloud Batch Jobs REST API"
+---
+
 # GovCloud Batch Jobs REST API
 
 This document covers the Batch Jobs REST API available in GovCloud deployments that include the [Headless API](./govcloud-deployment.md#deployment-packages) deployment package.

@@ -1,3 +1,7 @@
+---
+title: "GovCloud Architecture"
+---
+
 # GovCloud Architecture
 
 This document describes the architectural differences between the standard (commercial AWS) and GovCloud deployments of the GenAI IDP Accelerator.
