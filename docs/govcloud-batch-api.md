@@ -21,6 +21,21 @@ Generate a bearer token using the provided script:
 
 The token is a Cognito client credentials grant with `idp-api/jobs.read` and `idp-api/jobs.write` scopes.
 
+## Authorization model
+
+The API uses **per-client job ownership**: each job is visible only to the API client (Cognito app client) that created it.
+
+- On `POST /jobs`, the caller's Cognito principal (`sub` / `client_id` claim from the bearer token) is persisted on the job record as `CreatedBy`.
+- On `GET /jobs/{job_id}`, the caller's principal is compared to the job's `CreatedBy`. Mismatches return **HTTP 404** (not 403) to avoid leaking the existence of jobs owned by other clients.
+
+**Implications:**
+
+- **Single-client deployments** — the default from the bundled CloudFormation template, which creates exactly one `AWS::Cognito::UserPoolClient` (`ApiAppClient`) — see no behavioral change from this model. The one client is always the creator and always the reader.
+- **Multi-client deployments** — if you create additional app clients against `ApiUserPool` (for credential rotation, per-service credentials, per-team isolation, etc.), each client sees only its own jobs. Cross-client job visibility is not supported through this API.
+- **Credential rotation** — if you rotate an app client's secret (same client, new secret), the client's `sub` stays constant so previously-created jobs remain visible. If you replace the client entirely (delete + recreate), the new client will not be able to read jobs created by the old one.
+- **Jobs predating this model** — job records without a `CreatedBy` field (written by builds from before this feature existed) remain readable by any authenticated caller. This is intentional so in-place upgrades don't orphan in-flight jobs.
+- **Operator-level access** — if you need cross-client visibility (audit, debugging, bulk export), read from the S3 `OutputBucket` directly with IAM credentials. The Jobs API is not the right surface for this.
+
 ## API Reference
 
 The `API_GATEWAY_ENDPOINT` is the `ApiGatewayEndpoint` value from your CloudFormation stack outputs, in the format `https://{restapi-id}.execute-api.{region}.amazonaws.com/{stage}`.

@@ -6,7 +6,6 @@ import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
 
 # Add idp_common to path and import real Status
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../lib/idp_common_pkg"))
@@ -264,6 +263,67 @@ class TestCreateJob:
         call_kwargs = job_svc.create_job_record.call_args[1]
         assert call_kwargs["metadata"] == {"source": "test-system"}
 
+    def test_create_job_records_created_by_from_authorizer_claims(
+        self, mock_s3, job_svc, lambda_context
+    ):
+        """POST /jobs persists the Cognito principal (sub) as CreatedBy."""
+        from index import handler
+
+        mock_s3.generate_presigned_post.return_value = {
+            "url": "https://test-bucket.s3.amazonaws.com",
+            "fields": {"key": "jobs/test-uuid/archive.zip"},
+        }
+
+        event = {
+            "httpMethod": "POST",
+            "path": "/jobs",
+            "body": json.dumps({"fileName": "archive.zip"}),
+            "requestContext": {
+                "authorizer": {
+                    "claims": {
+                        "sub": "client-abc-123",
+                        "client_id": "client-abc-123",
+                        "token_use": "access",
+                        "scope": "idp-api/jobs.write idp-api/jobs.read",
+                    }
+                }
+            },
+        }
+
+        with patch("index.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value = MagicMock(__str__=lambda s: "test-uuid")
+            response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 200
+        call_kwargs = job_svc.create_job_record.call_args[1]
+        assert call_kwargs["created_by"] == "client-abc-123"
+
+    def test_create_job_without_authorizer_passes_none_created_by(
+        self, mock_s3, job_svc, lambda_context
+    ):
+        """POST /jobs with no resolvable principal still succeeds but persists None for CreatedBy (logs a warning)."""
+        from index import handler
+
+        mock_s3.generate_presigned_post.return_value = {
+            "url": "https://test-bucket.s3.amazonaws.com",
+            "fields": {"key": "jobs/test-uuid/archive.zip"},
+        }
+
+        event = {
+            "httpMethod": "POST",
+            "path": "/jobs",
+            "body": json.dumps({"fileName": "archive.zip"}),
+            # No requestContext — e.g. a non-API-Gateway invocation path.
+        }
+
+        with patch("index.uuid.uuid4") as mock_uuid:
+            mock_uuid.return_value = MagicMock(__str__=lambda s: "test-uuid")
+            response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 200
+        call_kwargs = job_svc.create_job_record.call_args[1]
+        assert call_kwargs["created_by"] is None
+
 
 class TestGetJob:
     """Tests for GET /jobs/{job_id} endpoint."""
@@ -300,6 +360,9 @@ class TestGetJob:
             "Files": {"a.pdf": Status.COMPLETED, "b.pdf": Status.COMPLETED},
             "CreatedAt": "2026-01-23T10:00:00Z",
             "UpdatedAt": "2026-01-23T10:10:00Z",
+            # JobTracker sets ResultsReady=True once results.zip is uploaded;
+            # get_job only reports SUCCEEDED when this flag is true.
+            "ResultsReady": True,
         }
         mock_s3.generate_presigned_url.return_value = "https://test-bucket.s3.amazonaws.com/results.zip"
 
@@ -316,6 +379,32 @@ class TestGetJob:
         assert body["status"] == "SUCCEEDED"
         assert body["result"]["downloadUrl"] == "https://test-bucket.s3.amazonaws.com/results.zip"
 
+    def test_get_job_succeeded_but_results_not_ready_reports_in_progress(
+        self, mock_s3, job_svc, lambda_context
+    ):
+        """All files complete but JobTracker hasn't uploaded results.zip yet → IN_PROGRESS."""
+        from index import handler
+
+        job_svc.get_job_record.return_value = {
+            "Files": {"a.pdf": Status.COMPLETED},
+            "CreatedAt": "2026-01-23T10:00:00Z",
+            "UpdatedAt": "2026-01-23T10:10:00Z",
+            # ResultsReady not set (or False) → keep the caller in IN_PROGRESS
+            # so they do not race JobTracker into a 404 on the download URL.
+        }
+
+        event = {
+            "httpMethod": "GET",
+            "path": "/jobs/test-uuid",
+            "pathParameters": {"job_id": "test-uuid"},
+        }
+
+        response = handler(event, lambda_context)
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["status"] == "IN_PROGRESS"
+        assert body["result"] is None
+
     def test_get_job_not_found(self, mock_s3, job_svc, lambda_context):
         """Test GET /jobs/{jobId} when job doesn't exist."""
         from index import handler
@@ -330,9 +419,100 @@ class TestGetJob:
 
         response = handler(event, lambda_context)
 
-        assert response["statusCode"] == 400
+        assert response["statusCode"] == 404
         body = json.loads(response["body"])
         assert "not found" in body["message"].lower()
+
+    # -- Per-client job authorization (CreatedBy check) -----------------------
+
+    @staticmethod
+    def _get_event_with_principal(job_id: str, principal: str | None) -> dict:
+        """Build a GET event carrying a Cognito authorizer principal."""
+        event = {
+            "httpMethod": "GET",
+            "path": f"/jobs/{job_id}",
+            "pathParameters": {"job_id": job_id},
+        }
+        if principal is not None:
+            event["requestContext"] = {
+                "authorizer": {"claims": {"sub": principal, "client_id": principal}}
+            }
+        return event
+
+    def test_get_job_same_principal_visible(self, mock_s3, job_svc, lambda_context):
+        """Creator of a job can read it back."""
+        from index import handler
+
+        job_svc.get_job_record.return_value = {
+            "Files": {"a.pdf": Status.IN_PROGRESS},
+            "CreatedAt": "2026-01-23T10:00:00Z",
+            "UpdatedAt": "2026-01-23T10:05:00Z",
+            "CreatedBy": "client-abc-123",
+        }
+
+        event = self._get_event_with_principal("test-uuid", "client-abc-123")
+        response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["jobId"] == "test-uuid"
+        assert body["status"] == "IN_PROGRESS"
+
+    def test_get_job_different_principal_returns_404(
+        self, mock_s3, job_svc, lambda_context
+    ):
+        """A different authenticated client cannot read another client's job — returns 404 (not 403) to avoid existence-leak."""
+        from index import handler
+
+        job_svc.get_job_record.return_value = {
+            "Files": {"a.pdf": Status.IN_PROGRESS},
+            "CreatedAt": "2026-01-23T10:00:00Z",
+            "UpdatedAt": "2026-01-23T10:05:00Z",
+            "CreatedBy": "client-abc-123",
+        }
+
+        event = self._get_event_with_principal("test-uuid", "client-xyz-789")
+        response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 404
+        body = json.loads(response["body"])
+        assert "not found" in body["message"].lower()
+
+    def test_get_job_missing_principal_returns_404(
+        self, mock_s3, job_svc, lambda_context
+    ):
+        """An owned job is not readable by a caller whose principal cannot be resolved."""
+        from index import handler
+
+        job_svc.get_job_record.return_value = {
+            "Files": {"a.pdf": Status.IN_PROGRESS},
+            "CreatedAt": "2026-01-23T10:00:00Z",
+            "UpdatedAt": "2026-01-23T10:05:00Z",
+            "CreatedBy": "client-abc-123",
+        }
+
+        event = self._get_event_with_principal("test-uuid", principal=None)
+        response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 404
+
+    def test_get_job_legacy_record_without_created_by_is_readable(
+        self, mock_s3, job_svc, lambda_context
+    ):
+        """Jobs created before the CreatedBy field existed remain readable by any caller."""
+        from index import handler
+
+        job_svc.get_job_record.return_value = {
+            "Files": {"a.pdf": Status.IN_PROGRESS},
+            "CreatedAt": "2026-01-23T10:00:00Z",
+            "UpdatedAt": "2026-01-23T10:05:00Z",
+            # No CreatedBy field at all.
+        }
+
+        event = self._get_event_with_principal("legacy-job", "any-client")
+        response = handler(event, lambda_context)
+
+        assert response["statusCode"] == 200
 
 
 class TestInvalidRequests:

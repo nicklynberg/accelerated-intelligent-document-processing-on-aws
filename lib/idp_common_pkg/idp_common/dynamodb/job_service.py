@@ -29,6 +29,7 @@ class JobDynamoDBService:
         job_id: str,
         expires_after: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        created_by: Optional[str] = None,
     ) -> str:
         """
         Create a job metadata record.
@@ -38,6 +39,9 @@ class JobDynamoDBService:
             files: Map of filenames to status
             expires_after: Optional TTL timestamp
             metadata: Optional metadata dict
+            created_by: Optional principal identifier (Cognito client_id / sub
+                of the caller that created the job). Used by the API's GET
+                handler to scope reads to the creating principal.
 
         Returns:
             The job_id
@@ -56,6 +60,9 @@ class JobDynamoDBService:
 
         if metadata:
             item["Metadata"] = json.dumps(metadata)
+
+        if created_by:
+            item["CreatedBy"] = created_by
 
         self.client.put_item(item)
         logger.info(f"Created job record: {job_id}")

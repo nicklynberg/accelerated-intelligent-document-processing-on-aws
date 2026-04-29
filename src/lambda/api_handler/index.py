@@ -8,14 +8,13 @@ from aws_lambda_powertools.event_handler import APIGatewayRestResolver
 from aws_lambda_powertools.event_handler.exceptions import (
     BadRequestError,
     InternalServerError,
+    NotFoundError,
 )
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from botocore.exceptions import ClientError
-
 from idp_common.docs_service import create_document_service
 from idp_common.job_service import create_job_service
 from idp_common.models import Status
-
 from models import (
     GetJobResponse,
     PostJobRequest,
@@ -71,6 +70,38 @@ def compute_job_status(files: dict[str, Status]) -> str:
     return "FAILED"
 
 
+def _caller_principal() -> str:
+    """
+    Extract the calling principal from the API Gateway authorizer claims.
+
+    For Cognito client_credentials tokens (M2M), `sub` and `client_id` are
+    both set to the app client UUID; we prefer `sub` for consistency with
+    user-token flows but fall back to `client_id` if `sub` is absent.
+
+    Returns an empty string if the caller cannot be identified. An empty
+    string will never match any persisted CreatedBy value (we only persist
+    non-empty principals), so requests without a resolvable principal are
+    effectively denied by the same mismatch-as-404 path used for legitimate
+    cross-client reads.
+    """
+    # Pull directly from the raw event dict rather than going through
+    # Powertools' APIGatewayEventRequestContext wrapper, which raises KeyError
+    # when `requestContext` is absent (e.g. in unit-test synthetic events and
+    # when the function is invoked via a non-API-Gateway path). Access via
+    # .raw_event is the documented escape hatch for this case.
+    event = getattr(app.current_event, "raw_event", None) or {}
+    request_context = event.get("requestContext") if isinstance(event, dict) else None
+    if not isinstance(request_context, dict):
+        return ""
+    authorizer = request_context.get("authorizer") or {}
+    if not isinstance(authorizer, dict):
+        return ""
+    claims = authorizer.get("claims") or {}
+    if not isinstance(claims, dict):
+        return ""
+    return str(claims.get("sub") or claims.get("client_id") or "")
+
+
 @app.post("/jobs")
 def create_job(job: PostJobRequest) -> PostJobResponse:
     """Create a new job and generate presigned URL for file upload."""
@@ -89,10 +120,20 @@ def create_job(job: PostJobRequest) -> PostJobResponse:
 
         # Create job record
         metadata_dict = job.metadata.model_dump() if job.metadata else None
+        created_by = _caller_principal()
+        if not created_by:
+            # No resolvable principal on an authorized request is unexpected
+            # (API Gateway rejects unauthorized requests before Lambda is
+            # invoked) but we log it so operators can spot misconfigurations.
+            logger.warning(
+                "create_job: could not resolve caller principal from authorizer claims; "
+                "CreatedBy will be blank and this job will not be retrievable via GET /jobs"
+            )
         job_service.create_job_record(
             job_id=job_id,
             expires_after=expires_after,
             metadata=metadata_dict,
+            created_by=created_by or None,
         )
 
         # Generate presigned POST URL
@@ -136,7 +177,24 @@ def get_job(job_id: str) -> GetJobResponse:
         job_record = job_service.get_job_record(job_id)
 
         if not job_record:
-            raise ValueError(f"Job {job_id} not found")
+            raise NotFoundError(f"Job {job_id} not found")
+
+        # Per-client job scoping: a job is only visible to the principal that
+        # created it. Return 404 (not 403) on mismatch to avoid leaking the
+        # existence of jobs owned by other clients. Legacy jobs without a
+        # persisted CreatedBy (created before this check was added) are
+        # treated as visible to any caller — they predate the auth model.
+        created_by = job_record.get("CreatedBy")
+        if created_by:
+            caller = _caller_principal()
+            if caller != created_by:
+                logger.info(
+                    "get_job: principal mismatch on job %s (caller=%s owner=%s); returning 404",
+                    job_id,
+                    caller or "<unknown>",
+                    created_by,
+                )
+                raise NotFoundError(f"Job {job_id} not found")
 
         files = job_record.get("Files", {})
 
