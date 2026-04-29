@@ -7,6 +7,13 @@ SPDX-License-Identifier: MIT-0
 
 ### Added
 
+- **Document-level Download button on the Document Details page** — A new **Download** dropdown in the Document Details header lets users pull every output artifact for a document in a single click, packaged as a ZIP. Three scopes are offered:
+  - **Download All (ZIP)** — document attributes, metering, summary, evaluation & rule-validation reports, per-section predictions, baselines (when available), per-page text/confidence, and optionally per-page images and/or the source document (checkboxes).
+  - **Download Predictions (ZIP)** — all section result JSONs plus a self-describing `manifest.json`.
+  - **Download Baselines (ZIP)** — all baseline section result JSONs (shown only when an evaluation baseline is available).
+  - **Bucket-mirrored ZIP layout** — files are organised under top-level `output/`, `baseline/`, and `input/` folders that preserve the real S3 key structure, so the archive can be diffed with a direct `aws s3 sync` of the same buckets.
+
+
 - **Headless REST API mode with VPC-secured deployment for GovCloud** — a first-party Jobs REST API for programmatic document submission and status tracking, plus an optional VPC-secured deployment that keeps the API off the public internet. Makes end-to-end GovCloud deployment viable without the UI/AppSync stack, and gives Commercial customers a supported alternative to direct S3 uploads for machine-to-machine integrations.
   - **Jobs REST API** (new `src/lambda/api_handler/`, `src/lambda/job_tracker/`, `src/lambda/batch_pre_processor/`):
     - `POST /jobs` — creates a job record and returns a presigned POST URL for the input zip (1-hour expiry, content-type pinned to `application/zip`, 5 GB content-length cap).
@@ -41,6 +48,7 @@ SPDX-License-Identifier: MIT-0
     - New `docs/govcloud-architecture.md`, `docs/govcloud-operations.md`, `docs/vpc-secured-mode.md`.
     - Overhauled `docs/govcloud-deployment.md` with a deployment-variant matrix (Vanilla / Headless API / Headless + VPC / Headless + VPC + Bastion).
   - **End-to-end test script:** `scripts/e2e_test_headless.py <STACK_NAME> <PATH_TO_FILE>` exercises the full flow (OAuth → POST /jobs → presigned upload → status poll → download results).
+
 ### Security
 
 Hardening response to security review - Highlights:
@@ -96,7 +104,6 @@ Hardening response to security review - Highlights:
   - SQL injection in `test_results_resolver` Athena queries (every
     interpolation is gated by `_validate_sql_input()` with a strict
     allow-list regex).
-
 
 ## [0.5.8]
 
