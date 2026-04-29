@@ -40,26 +40,43 @@ from .models import (
     AssessmentFieldGeometry,
     AssessmentGeometryResult,
     AssessmentMetrics,
+    # Discovery models
+    AutoDetectResult,
+    AutoDetectSection,
     # Batch models
     BatchDeletionResult,
     BatchDownloadResult,
     BatchInfo,
     BatchListResult,
+    BatchProcessResult,
+    BatchReprocessResult,
     BatchRerunResult,
     BatchResult,
     BatchStatus,
+    # Chat models
+    ChatResponse,
     # Config models
+    ConfigActivateResult,
     ConfigCreateResult,
+    ConfigDeleteResult,
     ConfigDownloadResult,
+    ConfigListResult,
+    ConfigSyncBdaResult,
     ConfigUploadResult,
     ConfigValidationResult,
+    ConfigVersionInfo,
+    DiscoveryBatchResult,
+    DiscoveryResult,
     # Document models
     DocumentDeletionResult,
     DocumentDownloadResult,
     DocumentInfo,
     DocumentListResult,
     DocumentMetadata,
+    DocumentReprocessResult,
     DocumentRerunResult,
+    # Testing models
+    DocumentsAbortedResult,
     DocumentState,
     DocumentStatus,
     DocumentUploadResult,
@@ -67,28 +84,32 @@ from .models import (
     EvaluationBaselineListResult,
     EvaluationMetrics,
     EvaluationReport,
+    ExecutionsStoppedResult,
     # Manifest models
     LoadTestResult,
     ManifestDocument,
     ManifestResult,
     ManifestValidationResult,
+    # Stack models
+    OrphanedResourceCleanupResult,
     # Enums
     Pattern,
+    # Publish models
+    PublishResult,
     RerunStep,
     # Search models
     SearchCitation,
     SearchDocumentReference,
     SearchResult,
-    # Stack models
     StackDeletionResult,
     StackDeploymentResult,
     StackResources,
     StackState,
-    # Testing models
     StopWorkflowsResult,
+    TemplateTransformResult,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.5.8"
 
 __all__ = [
     # Client
@@ -106,23 +127,32 @@ __all__ = [
     "DocumentState",
     "Pattern",
     "RerunStep",
+    # Publish models
+    "PublishResult",
+    "TemplateTransformResult",
     # Stack models
     "StackDeploymentResult",
     "StackDeletionResult",
     "StackResources",
+    "OrphanedResourceCleanupResult",
     # Batch models
     "BatchResult",
+    "BatchProcessResult",
     "BatchStatus",
     "BatchInfo",
     "BatchListResult",
     "BatchRerunResult",
+    "BatchReprocessResult",
     "BatchDownloadResult",
     "BatchDeletionResult",
+    # Chat models
+    "ChatResponse",
     # Document models
     "DocumentStatus",
     "DocumentUploadResult",
     "DocumentDownloadResult",
     "DocumentRerunResult",
+    "DocumentReprocessResult",
     "DocumentDeletionResult",
     "DocumentMetadata",
     "DocumentInfo",
@@ -146,11 +176,23 @@ __all__ = [
     "ConfigValidationResult",
     "ConfigDownloadResult",
     "ConfigUploadResult",
+    "ConfigActivateResult",
+    "ConfigVersionInfo",
+    "ConfigListResult",
+    "ConfigDeleteResult",
+    "ConfigSyncBdaResult",
+    # Discovery models
+    "DiscoveryResult",
+    "DiscoveryBatchResult",
+    "AutoDetectResult",
+    "AutoDetectSection",
     # Manifest models
     "ManifestDocument",
     "ManifestResult",
     "ManifestValidationResult",
     # Testing models
     "StopWorkflowsResult",
+    "ExecutionsStoppedResult",
+    "DocumentsAbortedResult",
     "LoadTestResult",
 ]

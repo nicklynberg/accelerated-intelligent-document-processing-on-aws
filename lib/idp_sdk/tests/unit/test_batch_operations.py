@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from idp_sdk import IDPClient
-from idp_sdk.models import BatchListResult, BatchResult
+from idp_sdk.models import BatchListResult, BatchProcessResult
 
 
 @pytest.mark.unit
@@ -18,7 +18,7 @@ from idp_sdk.models import BatchListResult, BatchResult
 class TestBatchOperationsMocked:
     """Test batch operations with mocked AWS calls."""
 
-    @patch("idp_sdk.core.batch_processor.BatchProcessor")
+    @patch("idp_sdk._core.batch_processor.BatchProcessor")
     def test_list_batches(self, mock_processor):
         """Test listing batches."""
         # Setup mock
@@ -45,7 +45,7 @@ class TestBatchOperationsMocked:
         assert result.count == 1
         assert len(result.batches) == 1
 
-    @patch("idp_sdk.core.batch_processor.BatchProcessor")
+    @patch("idp_sdk._core.batch_processor.BatchProcessor")
     def test_run_batch(self, mock_processor):
         """Test running a batch."""
         # Setup mock
@@ -64,9 +64,9 @@ class TestBatchOperationsMocked:
 
         # Test
         client = IDPClient(stack_name="test-stack")
-        result = client.batch.run(manifest="test.csv")
+        result = client.batch.process(manifest="test.csv")
 
-        assert isinstance(result, BatchResult)
+        assert isinstance(result, BatchProcessResult)
         assert result.batch_id == "test-batch"
         assert len(result.document_ids) == 2
 

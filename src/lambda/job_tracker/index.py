@@ -66,6 +66,10 @@ def handler(event, context):
     logger.info(f"All files complete for job {job_id}, creating ZIP")
     try:
         create_results_zip(job_id)
+        # Mark the job's results as ready only after the zip is successfully
+        # uploaded. The API handler uses this flag to gate SUCCEEDED/
+        # PARTIALLY_SUCCEEDED so clients never race into a 404 on download.
+        job_service.mark_results_ready(job_id, True)
         return {"statusCode": 200, "body": f"ZIP created for job {job_id}"}
     except Exception as e:
         logger.error(f"Failed to create ZIP for job {job_id}: {e}")
@@ -85,7 +89,9 @@ def create_results_zip(job_id: str):
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for obj in objects:
-            file_data = s3.get_object(Bucket=OUTPUT_BUCKET, Key=obj["Key"])["Body"].read()
+            file_data = s3.get_object(Bucket=OUTPUT_BUCKET, Key=obj["Key"])[
+                "Body"
+            ].read()
             zip_file.writestr(obj["Key"], file_data)
 
     zip_key = f"jobs/{job_id}/results.zip"

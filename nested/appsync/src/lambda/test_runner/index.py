@@ -15,8 +15,33 @@ s3 = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
 sqs = boto3.client('sqs')
 
+# --- inline log sanitizer ---------------------------------------------------
+# Minimal inline redactor. Kept here rather than importing from idp_common to
+# avoid adding a Lambda Layer dependency to this resolver. If this file grows
+# to need idp_common anyway, promote to
+# `from idp_common.utils.log_sanitizer import sanitize_event_for_logging`.
+_LOG_SENSITIVE_KEYS = (
+    "password", "secret", "token", "authorization", "apikey", "api_key",
+    "cookie", "credential", "claims", "identity",
+)
+
+
+def _sanitize_for_log(obj):
+    """Deep-copy `obj` redacting values whose keys match the denylist."""
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            if isinstance(k, str) and any(s in k.lower() for s in _LOG_SENSITIVE_KEYS):
+                out[k] = "***REDACTED***" if v is not None else None
+            else:
+                out[k] = _sanitize_for_log(v)
+        return out
+    if isinstance(obj, list):
+        return [_sanitize_for_log(v) for v in obj]
+    return obj
+
 def handler(event, context):
-    logger.info(f"Test runner invoked with event: {json.dumps(event)}")
+    logger.info(f"Test runner invoked with event: {json.dumps(_sanitize_for_log(event))}")
     
     try:
         input_data = event['arguments']['input']
@@ -112,6 +137,35 @@ def _get_test_set(tracking_table, test_set_id):
         logger.error(f"Error getting test set {test_set_id}: {e}")
         return None
 
+def _decompress_config_item(item):
+    """
+    Decompress a DynamoDB config item if it uses compressed storage format.
+    Inlined here to avoid dependency on idp_common (not available in this Lambda).
+    """
+    import gzip as _gzip
+
+    if item.get('_config_storage') != 'compressed':
+        return item  # Legacy inline format — return as-is
+
+    compressed_data = item.get('_compressed_config')
+    if compressed_data is None:
+        return item
+
+    raw_bytes = bytes(compressed_data) if not isinstance(compressed_data, bytes) else compressed_data
+
+    try:
+        config_data = json.loads(_gzip.decompress(raw_bytes).decode('utf-8'))
+    except Exception as e:
+        logger.error(f"Failed to decompress config data: {e}")
+        return item
+
+    # Reconstruct: metadata fields + decompressed config data
+    metadata_fields = {'Configuration', 'CreatedAt', 'UpdatedAt', 'IsActive', 'Description'}
+    full_item = {k: v for k, v in item.items() if k in metadata_fields}
+    full_item.update(config_data)
+    return full_item
+
+
 def _capture_config(config_table, config_version=None):
     """Capture configuration - specific version or current active config"""
     table = dynamodb.Table(config_table)  # type: ignore[attr-defined]
@@ -125,7 +179,7 @@ def _capture_config(config_table, config_version=None):
             key = f"Config#{config_version}"
             response = table.get_item(Key={'Configuration': key})
             if 'Item' in response:
-                config['Config'] = response['Item']
+                config['Config'] = _decompress_config_item(response['Item'])
             else:
                 logger.warning(f"Config version {config_version} not found")
         else:
@@ -139,7 +193,7 @@ def _capture_config(config_table, config_version=None):
             )
             items = scan_response.get('Items', [])
             if items:
-                config['Config'] = items[0]
+                config['Config'] = _decompress_config_item(items[0])
             
     except Exception as e:
         logger.warning(f"Could not retrieve Config: {e}")
@@ -151,9 +205,12 @@ def _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set_
     table = dynamodb.Table(tracking_table)  # type: ignore[attr-defined]
     
     try:
+        created_at = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
         item = {
             'PK': f'testrun#{test_run_id}',
             'SK': 'metadata',
+            'ItemType': 'testrun',
+            'InitialEventTime': created_at,
             'TestSetId': test_set_id,
             'TestSetName': test_set_name,
             'TestRunId': test_run_id,
@@ -163,7 +220,7 @@ def _store_test_run_metadata(tracking_table, test_run_id, test_set_id, test_set_
             'FailedFiles': 0,
             'Files': files,
             'Config': config,
-            'CreatedAt': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+            'CreatedAt': created_at
         }
         
         if context:
