@@ -2454,9 +2454,14 @@ Resources:
               - "Authorization"
               - "x-amz-security-token"
               - "x-amz-meta-config-version"
+            # GET / HEAD are required so the Web UI can read objects via presigned
+            # URLs — e.g. the Document Details "Download" button, which fetches
+            # document assets directly from S3 into a client-side ZIP.
             AllowedMethods:
               - PUT
               - POST
+              - GET
+              - HEAD
             AllowedOrigins:
               - !If
                 - UseCloudFrontHosting
@@ -3165,9 +3170,15 @@ Resources:
               - "x-amz-date"
               - "Authorization"
               - "x-amz-security-token"
+            # GET / HEAD are required so the Web UI can read objects via presigned
+            # URLs — e.g. the Document Details "Download" button, which fetches
+            # document outputs (section results, page text, summaries, page images)
+            # directly from S3 into a client-side ZIP.
             AllowedMethods:
               - PUT
               - POST
+              - GET
+              - HEAD
             AllowedOrigins:
               - !If
                 - UseCloudFrontHosting
@@ -3696,9 +3707,15 @@ Resources:
               - "x-amz-date"
               - "Authorization"
               - "x-amz-security-token"
+            # GET / HEAD are required so the Web UI can read baseline objects
+            # via presigned URLs — e.g. the Document Details "Download Baselines"
+            # button, which fetches section baselines directly from S3 into a
+            # client-side ZIP.
             AllowedMethods:
               - PUT
               - POST
+              - GET
+              - HEAD
             AllowedOrigins:
               - !If
                 - UseCloudFrontHosting
